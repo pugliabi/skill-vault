@@ -11,6 +11,8 @@ It ships as two independent tools that share the same configuration and on-disk 
 
 Both read and write `~/.skill-vault/config.json` and the same vault layout, so you can use either one — or both interchangeably. The format is documented in [docs/vault-format.md](docs/vault-format.md).
 
+![Skill Vault dashboard](docs/images/dashboard.jpg)
+
 ```
 ┌──────────────┐     reads/writes    ┌─────────────────────────┐
 │  sv (CLI)    │──┬───────────────▶  │ ~/.skill-vault/         │
@@ -100,6 +102,16 @@ Everything lives in `~/.skill-vault/config.json`, shared by both tools:
 - `agent_locations` — map of provider slug → skills directory (defaults cover `~/.claude/skills`, `~/.openclaw/skills`, `~/.cursor/skills`, `~/.codex/skills`, `~/.copilot/skills`, `~/.windsurf/skills`)
 
 Change it via `sv config`, the app's Settings page, or by editing the file — each tool preserves keys it doesn't own.
+
+## Documentation
+
+- [Getting Started](docs/getting-started.md) — full installation and setup guide
+- [Features & Use Cases](docs/features.md) — the app and CLI feature tour, with screenshots
+- [Configuration Reference](docs/configuration.md) — every setting: config.json, env vars, CLI flags
+- [Examples](docs/examples.md) — copy-pasteable recipes for common workflows
+- [Troubleshooting](docs/troubleshooting.md) — common issues and fixes
+- [FAQ](docs/faq.md) — frequently asked questions
+- [Vault Format](docs/vault-format.md) — the on-disk contract both tools implement
 
 ## License
 
