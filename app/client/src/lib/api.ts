@@ -1,0 +1,316 @@
+import type {
+  ActivityEntry,
+  AdoptScanResult,
+  AppConfig,
+  CreateSkillRequest,
+  FileContent,
+  Provider,
+  PullResult,
+  PushResult,
+  RenameSkillRequest,
+  Skill,
+  SkillDetail,
+  SkillDiff,
+  SyncPlan,
+  UpdateSkillRequest,
+  WriteFileRequest,
+} from "./types";
+
+/**
+ * Thin wrapper around fetch that:
+ *  - defaults to JSON bodies
+ *  - throws typed errors with the server's `error` field when non-2xx
+ *  - returns `null` for 204s
+ *
+ * Callers wrap these in TanStack Query hooks (see queries.ts) so the
+ * UI layer never touches fetch directly.
+ */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+    public raw: unknown,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Encode a relative file path for use in /files/<relpath> URLs.
+ * Each segment is encoded INDEPENDENTLY so legal '/' separators are
+ * preserved while filename oddities (spaces, unicode, etc.) are
+ * percent-escaped. Server-side resolveSkillFilePath() rejects any
+ * "../" attempt, so this helper does no path validation of its own.
+ */
+function encodeFilePath(relpath: string): string {
+  return relpath
+    .split("/")
+    .filter(Boolean)
+    .map((s) => encodeURIComponent(s))
+    .join("/");
+}
+
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<T> {
+  const res = await fetch(path, {
+    method,
+    headers: body ? { "content-type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  if (res.status === 204) return null as T;
+
+  let data: unknown = null;
+  const text = await res.text();
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { error: text };
+    }
+  }
+
+  if (!res.ok) {
+    const msg =
+      (data as { error?: string })?.error ?? `Request failed (${res.status})`;
+    throw new ApiError(msg, res.status, data);
+  }
+
+  return data as T;
+}
+
+// ── config ──────────────────────────────────────────────────────
+
+export const api = {
+  getConfig: () => request<AppConfig>("GET", "/api/config"),
+  updateConfig: (body: Partial<AppConfig>) =>
+    request<AppConfig>("PUT", "/api/config", body),
+  setVaultPath: (path: string) =>
+    request<AppConfig>("PUT", "/api/config/vault-path", { path }),
+  upsertProvider: (provider: Provider) =>
+    request<AppConfig>("POST", "/api/config/providers", provider),
+  removeProvider: (id: string) =>
+    request<AppConfig>("DELETE", `/api/config/providers/${encodeURIComponent(id)}`),
+  searchSkills: (q: string) =>
+    request<{ matches: { name: string; snippet: string }[] }>(
+      "GET", `/api/skills/search?q=${encodeURIComponent(q)}`,
+    ),
+  checkProviders: () =>
+    request<{
+      checks: Record<
+        string,
+        {
+          status: "ok" | "missing" | "not_dir" | "readonly" | "denied" | "unreachable";
+          message?: string;
+        }
+      >;
+    }>("GET", "/api/config/providers/check"),
+
+  // ── skills ────────────────────────────────────────────────────
+  listSkills: (params: { q?: string; target?: string; source?: string } = {}) => {
+    const usp = new URLSearchParams();
+    if (params.q) usp.set("q", params.q);
+    if (params.target) usp.set("target", params.target);
+    if (params.source) usp.set("source", params.source);
+    const qs = usp.toString();
+    return request<{ skills: Skill[]; total: number }>(
+      "GET",
+      `/api/skills${qs ? `?${qs}` : ""}`,
+    );
+  },
+  getSkill: (name: string) =>
+    request<SkillDetail>("GET", `/api/skills/${encodeURIComponent(name)}`),
+  createSkill: (body: CreateSkillRequest) =>
+    request<SkillDetail>("POST", "/api/skills", body),
+  renameSkill: (name: string, body: RenameSkillRequest) =>
+    request<SkillDetail>(
+      "POST",
+      `/api/skills/${encodeURIComponent(name)}/rename`,
+      body,
+    ),
+  updateSkill: (name: string, body: UpdateSkillRequest) =>
+    request<SkillDetail>("PATCH", `/api/skills/${encodeURIComponent(name)}`, body),
+  removeSkill: (name: string) =>
+    request<null>("DELETE", `/api/skills/${encodeURIComponent(name)}`),
+
+  // ── skill files ───────────────────────────────────────────────
+  getFile: (skill: string, relpath: string) =>
+    request<FileContent>(
+      "GET",
+      `/api/skills/${encodeURIComponent(skill)}/files/${encodeFilePath(relpath)}`,
+    ),
+  writeFile: (skill: string, relpath: string, body: WriteFileRequest) =>
+    request<{ sha256: string; size: number }>(
+      "PUT",
+      `/api/skills/${encodeURIComponent(skill)}/files/${encodeFilePath(relpath)}`,
+      body,
+    ),
+
+  // ── adopt ─────────────────────────────────────────────────────
+  scanForAdopt: (path: string, recursive = false) =>
+    request<{ source: string; results: AdoptScanResult[]; recursive: boolean; truncated: boolean }>(
+      "POST",
+      "/api/adopt/scan",
+      { path, recursive },
+    ),
+  importAdopt: (body: {
+    source_path: string;
+    items?: { name: string; path: string }[];
+    skills?: string[];
+    paths?: Record<string, string>;
+    provider_id?: string;
+  }) =>
+    request<{ imported: string[]; skipped: string[] }>(
+      "POST",
+      "/api/adopt/import",
+      body,
+    ),
+  adoptClone: (body: { url: string; branch?: string }) =>
+    request<{ tmp_path: string; results: AdoptScanResult[]; truncated?: boolean }>(
+      "POST",
+      "/api/adopt/clone",
+      body,
+    ),
+  adoptCleanup: (body: { tmp_path: string }) =>
+    request<{ ok: boolean }>(
+      "POST",
+      "/api/adopt/cleanup",
+      body,
+    ),
+  adoptBrowse: (path?: string) =>
+    request<{
+      path: string;
+      parent: string | null;
+      dirs: { name: string; path: string }[];
+    }>("POST", "/api/adopt/browse", { path }),
+
+  // ── push ──────────────────────────────────────────────────────
+  push: (body: { skill: string; provider_id: string; method: string }) =>
+    request<PushResult>("POST", "/api/push", body),
+
+  // ── pull ──────────────────────────────────────────────────────
+  pull: (body: { skill: string; provider_id: string }) =>
+    request<PullResult>("POST", "/api/pull", body),
+
+  // ── sync ──────────────────────────────────────────────────────
+  syncPlan: () => request<SyncPlan>("GET", "/api/sync/plan?include_pulls=true"),
+
+  // ── diff ──────────────────────────────────────────────────────
+  diff: (skill: string, provider_id: string) =>
+    request<SkillDiff>(
+      "GET",
+      `/api/diff?skill=${encodeURIComponent(skill)}&provider_id=${encodeURIComponent(provider_id)}`,
+    ),
+
+  // ── devices ─────────────────────────────────────────────────
+  listDevices: () =>
+    request<{ devices: Array<{ machine_id: string; skill_count: number; timestamp: string; is_current: boolean }>; current_machine: string }>(
+      "GET", "/api/devices",
+    ),
+  saveSnapshot: () =>
+    request<{ machine_id: string; timestamp: string; skill_count: number }>(
+      "POST", "/api/devices/snapshot",
+    ),
+  compareDevice: (name: string) =>
+    request<{ comparisons: Array<{ skill: string; local_stage: string | null; remote_stage: string | null; local_hash: string | null; remote_hash: string | null; status: string }> }>(
+      "GET", `/api/devices/${encodeURIComponent(name)}/compare`,
+    ),
+  syncFromDevice: (name: string, decisions: Array<{ skill: string; action: string }>) =>
+    request<{ applied: string[]; skipped: string[] }>(
+      "POST", `/api/devices/${encodeURIComponent(name)}/sync`, { decisions },
+    ),
+  deleteDevice: (name: string) =>
+    request<null>("DELETE", `/api/devices/${encodeURIComponent(name)}`),
+
+  // ── discover ───────────────────────────────────────────────────
+  discover: () =>
+    request<{ results: Array<{ provider_id: string; skills: Array<{ name: string; path: string; file_count: number; has_skill_md: boolean; provider_id: string; status: string }> }> }>(
+      "POST", "/api/adopt/discover",
+    ),
+
+  // ── import ─────────────────────────────────────────────────────
+  importScan: (path: string) =>
+    request<{ source: string; results: Array<{ name: string; stage: string; targets: string[]; conflict: boolean }> }>(
+      "POST", "/api/import/scan", { path },
+    ),
+  importMerge: (path: string, skills: string[]) =>
+    request<{ imported: string[]; skipped: string[] }>(
+      "POST", "/api/import/merge", { path, skills },
+    ),
+
+  // ── add existing ───────────────────────────────────────────────
+  addExistingSkill: (body: { path: string; name?: string; targets?: string[] }) =>
+    request<SkillDetail>("POST", "/api/skills/add", body),
+
+  // ── tags ────────────────────────────────────────────────────
+  listTags: () => request<{ tags: string[] }>("GET", "/api/tags"),
+  bulkTag: (body: { skills: string[]; add?: string[]; remove?: string[] }) =>
+    request<{ ok: boolean; updated: number }>("POST", "/api/tags/bulk", body),
+  createTag: (tag: string) =>
+    request<{ ok: boolean; tag: string }>("POST", "/api/tags", { tag }),
+  zipSkills: (skills: string[]) =>
+    request<{ zips: Array<{ skill: string; path: string }>; failed: Array<{ skill: string; error: string }> }>(
+      "POST", "/api/skills/zip", { skills },
+    ),
+
+  // ── activity ──────────────────────────────────────────────────
+  getActivity: () => request<{ entries: ActivityEntry[] }>("GET", "/api/activity"),
+
+  // ── fix / audit ──────────────────────────────────────────────
+  runAudit: () =>
+    request<{ issues: Array<{ id: string; kind: string; target: string; description: string; fixes: Array<{ label: string; action: string }> }> }>(
+      "POST", "/api/fix/audit",
+    ),
+  repairIssue: (body: { kind: string; target: string; action: string }) =>
+    request<{ ok: boolean }>("POST", "/api/fix/repair", body),
+
+  // ── package / export ──────────────────────────────────────────
+  packageSkill: (name: string, body: { output_dir: string }) =>
+    request<{ output_path: string }>(
+      "POST", `/api/skills/${encodeURIComponent(name)}/package`, body,
+    ),
+
+  // ── tag manager (Settings) ────────────────────────────────────
+  // Appended at the bottom to minimize merge conflicts with parallel
+  // edits higher up in the file. Functionally a peer of listTags/bulkTag.
+  listTagsWithCounts: () =>
+    request<{ tags: { tag: string; count: number }[] }>(
+      "GET", "/api/tags?withCounts=1",
+    ),
+  renameTag: (body: { from: string; to: string }) =>
+    request<{ ok: boolean; updated: number }>(
+      "POST", "/api/tags/rename", body,
+    ),
+
+  // ── claude desktop (package target) ────────────────────────
+  // Claude Desktop has no local skills directory — "pushing" builds an
+  // upload-ready zip in a staging folder (see routes/desktop.ts).
+  packageForDesktop: (skill: string) =>
+    request<{ skill: string; zip_path: string; stage_dir: string }>(
+      "POST", "/api/desktop", { skill },
+    ),
+  revealDesktopStage: () =>
+    request<{ ok: boolean; stage_dir: string }>("POST", "/api/desktop/reveal"),
+  setDesktopStage: (path: string) =>
+    request<AppConfig>("PUT", "/api/desktop/stage", { path }),
+
+  // ── openclaw (export target) ───────────────────────────────
+  // OpenClaw runs in an isolated WSL distro with no filesystem bridge, so
+  // it is NOT a provider — export shells to `openclaw skills install`
+  // inside the distro (see routes/openclaw.ts). win32-only; status.available
+  // is false elsewhere and the UI hides the action.
+  openclawStatus: () =>
+    request<{ available: boolean; distro?: string; installed?: number }>(
+      "GET", "/api/openclaw/status",
+    ),
+  exportToOpenClaw: (
+    skill: string,
+    opts: { global?: boolean; force?: boolean } = {},
+  ) =>
+    request<{ ok: boolean; skill: string; output: string }>(
+      "POST", "/api/openclaw/export", { skill, ...opts },
+    ),
+};

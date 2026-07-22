@@ -1,0 +1,79 @@
+# Changelog
+
+All notable changes to the Skill Vault App are documented here. Format loosely
+follows [Keep a Changelog](https://keepachangelog.com); versions use semver
+(the app package is `0.x` — minor bumps carry user-facing feature batches).
+
+## [0.2.0] — 2026-07-02
+
+A large feature batch centered on making skill→provider coverage visible and
+actionable, curating the library, and adding an OpenClaw export path.
+
+### Added
+- **Filter skills by target.** A first-class `Target` control next to the status
+  pills — pick a provider and a state (`configured` · `synced` · `stale` ·
+  `missing`). Turns "show me everything missing from Cursor" into two clicks.
+- **`Missing` status pill** on the Skills toolbar (surfaces the previously
+  unfilterable missing skills).
+- **Coverage matrix layout** — a skills × providers grid; click a column header
+  to push everything missing/stale to that provider, or a single cell to push
+  one skill.
+- **Dashboard provider health bars** (`synced/total`, color-coded) and
+  **clickable status tiles**, all deep-linking into the target filter.
+- **Auto-tagging** — an "Auto-tag" review dialog that suggests tags from each
+  skill's name + description (heuristic, dependency-free). ~78% of untagged
+  skills get a suggestion.
+- **Full-text search** over `SKILL.md` bodies (unioned into the existing
+  name/description search box).
+- **Command palette (⌘K/Ctrl-K) jump-to-skill** — type to jump straight to any
+  skill, alongside the existing route commands.
+- **Health board** (new "Health" button on Skills) with two tabs:
+  - **Trigger collisions** — flags skills with near-identical descriptions that
+    could make an agent fire the wrong one.
+  - **Needs work** — a SKILL.md quality score (A–F) with per-skill issues.
+- **Saved views** — name and recall filter/sort/layout presets from the Skills
+  toolbar.
+- **Global activity drawer** — a slide-in recent-activity feed reachable from
+  the sidebar on every page (reuses the SSE stream).
+- **Keyboard cheatsheet** — press `?` anywhere for the shortcut list.
+- **Live provider-path validation** in Settings — a per-provider status dot
+  (`ready` / `read-only` / `path missing` / `unreachable`).
+- **"★ All providers"** one-click bulk action to add every configured provider
+  to the selected skills.
+- **Graph/Topology deep-links** — provider nodes/edges now navigate to the
+  target-filtered Skills view (warn nodes → the `missing` set).
+- **Diff-before-run on Sync** — a `diff` button on push/pull rows opens the
+  file diff before you run the action.
+- **Export to OpenClaw** — install vault skills into the isolated OpenClaw WSL
+  gateway (which has no filesystem bridge) via `openclaw skills install`, run
+  over `wsl.exe` + `tar`. Available as a bulk action and a single-skill dialog
+  (`--global` / `--force`); self-hides when the distro isn't detected.
+
+### Changed
+- The `/api` error handler now returns **400** for malformed/absent JSON bodies
+  instead of flattening everything to 500.
+- `Adopt`/provider errors now distinguish *missing* vs *permission-denied* vs
+  *unreachable* (e.g. a dropped WSL/network share) instead of always reporting
+  "does not exist".
+
+### Fixed
+- **Invisible stale-target filter**: a persisted `target` filter for a provider
+  that no longer exists (e.g. after removing OpenClaw) silently filtered the list
+  to 0 while the dropdown read "any". The filter now ignores unknown providers
+  and self-heals the saved preference.
+- Removed the openclaw provider and stripped 99 stale `openclaw` target entries
+  from the vault manifest.
+
+### Removed
+- Orphaned dead module `server/services/files.ts` (superseded by `vault.ts`;
+  had zero importers) — `npm run typecheck` is now clean.
+
+### New API
+- `GET  /api/skills/search?q=` — full-text SKILL.md search.
+- `GET  /api/config/providers/check` — per-provider path validation.
+- `GET  /api/openclaw/status` · `POST /api/openclaw/export` — OpenClaw export.
+
+## [0.1.0]
+
+Initial app: dashboard, skills list/detail, adopt, sync, devices, graph,
+settings — a Node/React UI over the shared `sv` vault format.

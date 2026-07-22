@@ -1,0 +1,180 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Design tokens — warm-neutral palette ported from the Skill Vault design.
+   Component code reads these via `var(--name)` so a single token edit
+   restyles everything. The Tailwind config still exists for layout
+   utilities (flex/grid/spacing/sizing) but colors come from these vars. */
+@layer base {
+  :root {
+    /* Warm neutral palette */
+    --bg:        oklch(0.985 0.005 80);
+    --surface:   oklch(0.975 0.006 75);
+    --surface-2: oklch(0.96 0.008 70);
+    --border:    oklch(0.91 0.01 70);
+    --border-2:  oklch(0.86 0.012 70);
+    --ink:       oklch(0.22 0.012 60);
+    --ink-2:     oklch(0.42 0.01 60);
+    --ink-3:     oklch(0.62 0.008 60);
+    --ink-4:     oklch(0.78 0.006 60);
+
+    /* Status colors */
+    --ok:         oklch(0.62 0.12 150);
+    --ok-bg:      oklch(0.94 0.04 150);
+    --warn:       oklch(0.72 0.13 75);
+    --warn-bg:    oklch(0.95 0.05 80);
+    --info:       oklch(0.62 0.12 240);
+    --info-bg:    oklch(0.95 0.04 240);
+    --neutral:    oklch(0.55 0.05 200);
+    --neutral-bg: oklch(0.94 0.025 200);
+    --bad:        oklch(0.58 0.16 25);
+    --bad-bg:     oklch(0.95 0.04 25);
+    --new:        oklch(0.4 0.012 60);
+    --new-bg:     oklch(0.92 0.008 60);
+
+    --accent:    oklch(0.65 0.16 50);
+    --accent-2:  oklch(0.55 0.18 50);
+
+    --sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+    --mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', Menlo, monospace;
+
+    --radius-sm: 4px;
+    --radius:    6px;
+    --radius-lg: 10px;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  #root { min-height: 100%; }
+
+  code, pre, .font-mono {
+    font-family: var(--mono);
+  }
+
+  button {
+    font-family: inherit;
+    cursor: pointer;
+  }
+
+  *:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    border-radius: 4px;
+  }
+}
+
+/* Scrollbar — muted, narrow, matches surface tones */
+.sv-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+.sv-scroll::-webkit-scrollbar-track { background: transparent; }
+.sv-scroll::-webkit-scrollbar-thumb {
+  background: oklch(0.85 0.01 70);
+  border-radius: 5px;
+  border: 2px solid var(--bg);
+}
+.sv-scroll::-webkit-scrollbar-thumb:hover { background: oklch(0.78 0.01 70); }
+
+/* Page transition — used on top-level page wrappers */
+.sv-fade-in {
+  animation: svFade 220ms ease-out;
+}
+@keyframes svFade {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* "Live" pulse — provider/git status indicators */
+@keyframes svPulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.4; }
+}
+.sv-pulse { animation: svPulse 2s ease-in-out infinite; }
+
+/* ── Markdown rendered preview (Phase 2) ─────────────────────────── */
+
+.sv-markdown {
+  font-family: var(--sans);
+}
+.sv-markdown h1,
+.sv-markdown h2,
+.sv-markdown h3,
+.sv-markdown h4 {
+  color: var(--ink);
+  margin: 1.2em 0 0.5em;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+.sv-markdown h1 { font-size: 22px; font-weight: 600; }
+.sv-markdown h2 { font-size: 18px; font-weight: 600; }
+.sv-markdown h3 { font-size: 15px; font-weight: 600; }
+.sv-markdown h4 { font-size: 13.5px; font-weight: 600; }
+.sv-markdown p,
+.sv-markdown ul,
+.sv-markdown ol {
+  margin: 0.6em 0;
+}
+.sv-markdown a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, var(--accent) 40%, transparent);
+}
+.sv-markdown code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+  padding: 1px 5px;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 3px;
+}
+.sv-markdown pre {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  overflow-x: auto;
+  line-height: 1.5;
+}
+.sv-markdown pre code {
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+.sv-markdown blockquote {
+  margin: 0.6em 0;
+  padding: 0.4em 12px;
+  border-left: 3px solid var(--border-2);
+  color: var(--ink-2);
+}
+.sv-markdown table {
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  font-size: 12.5px;
+}
+.sv-markdown th,
+.sv-markdown td {
+  padding: 4px 8px;
+  border: 0.5px solid var(--border);
+}
+.sv-markdown th {
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+}
+.sv-markdown ul ul,
+.sv-markdown ol ol,
+.sv-markdown ul ol,
+.sv-markdown ol ul {
+  margin: 0;
+}

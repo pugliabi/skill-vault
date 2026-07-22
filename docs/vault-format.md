@@ -1,0 +1,196 @@
+# Skill Vault — Directory Format
+
+**Status:** authoritative. This document is the **single source of truth**
+for the on-disk format shared by:
+
+- `src/skill_vault/` — the Python `sv` CLI
+- `app/` — the standalone Node/React web app
+
+The two tools are otherwise independent: they do not share code, processes,
+or config files. The only contract between them is this format. If you
+change anything in this document, both implementations must be updated to
+match, and the `schema_version` field must be bumped for any breaking
+change.
+
+## Directory layout
+
+A "vault" is any directory with the following structure. Nothing else in
+the directory is interpreted; users can keep README files, notes, zip
+archives, etc. alongside the managed entries without confusing either tool.
+
+```
+<vault>/
+├── skills.json                 # manifest (required)
+├── .sync-log.json              # push history (optional, written by CLI)
+├── skills/                     # canonical skill copies (required)
+│   ├── <skill-name>/
+│   │   ├── SKILL.md            # optional but strongly recommended
+│   │   └── ...                 # any other files the skill needs
+│   └── ...
+├── staging/                    # work-in-progress skills (optional)
+│   └── <skill-name>/
+└── snapshots/                  # per-device state snapshots (optional)
+    └── <machine-id>.json
+```
+
+## `skills.json` — the manifest
+
+JSON file at `<vault>/skills.json`. This is the only file an implementation
+is required to read to list the skills it manages.
+
+### Top-level schema
+
+```jsonc
+{
+  "version": "1.0",                 // optional — legacy top-level version
+  "machine_id": "DESKTOP-01",   // optional — writer's machine id
+  "default_targets": ["claude"],    // optional — writer's default providers
+  "skills": {
+    "<skill-name>": { /* SkillEntry */ }
+  }
+}
+```
+
+All top-level fields except `skills` are **optional**. Readers MUST
+tolerate their absence. Writers SHOULD preserve any top-level field they
+did not originate (round-trip safe).
+
+### `SkillEntry`
+
+```jsonc
+{
+  "targets": ["claude", "cursor"],  // required, may be empty []
+  "stage": "production",            // optional: "staging" | "production"
+  "source": "adopted from claude"   // optional free-form provenance string
+}
+```
+
+Field meanings:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `targets` | `string[]` | Provider ids the skill should be pushed to. Required; empty array is valid (unlinked skill). |
+| `stage` | `"staging"` \| `"production"` | Lifecycle state. Missing = `"production"`. |
+| `source` | `string` | Free-form provenance. Conventional prefixes: `"adopted from <x>"`, `"pulled from <x>"`, `"scanned from <x>"`, `"searched from <x>"`. |
+
+Readers MUST ignore unknown fields. Writers SHOULD preserve unknown fields
+when rewriting the manifest (round-trip safe).
+
+### Derived fields (NOT stored)
+
+These fields are computed at read-time from the filesystem and MUST NOT
+be written to `skills.json`:
+
+- **`description`** — first `description:` value in `SKILL.md` YAML
+  frontmatter, or the first non-blank paragraph of the body. Empty string
+  if `SKILL.md` is missing or unparseable.
+- **`file_count`** — recursive count of files under `<vault>/skills/<name>/`.
+- **`has_skill_md`** — true iff `<vault>/skills/<name>/SKILL.md` exists.
+- **`modified_at`** / **`last_synced_at`** — filesystem `mtime` of the
+  skill directory. UIs are free to display this.
+
+Derived fields are a convenience for UIs and MUST match what the
+filesystem currently says. They become stale if the skill directory is
+edited outside the tool — both tools are expected to recompute them on
+every read, not cache them in `skills.json`.
+
+## `.sync-log.json` — push history
+
+Optional file at `<vault>/.sync-log.json`. Written by the CLI after each
+push to record which content hash was pushed where. The web app reads
+this file when rendering drift badges (v2+) but does not write to it.
+
+```jsonc
+{
+  "<content-hash>": {
+    "skill_name": "my-skill",
+    "pushed_at": "2026-03-15T14:30:00.000Z",
+    "target": "claude"
+  }
+}
+```
+
+The content hash is SHA-256 of the skill directory's contents (algorithm
+defined by `src/skill_vault/hashing.py`; app readers should treat it as
+an opaque string).
+
+If the file is missing, empty, or malformed, readers MUST fall back to
+behavior equivalent to "no push history known" — never crash.
+
+## `snapshots/<machine-id>.json` — device snapshots
+
+Optional files under `<vault>/snapshots/`. One file per device that has
+checked into the vault. Used for multi-device sync (a v4 feature).
+
+```jsonc
+{
+  "machine_id": "DESKTOP-01",
+  "hostname": "desktop-01.local",
+  "snapshot_at": "2026-03-15T14:30:00.000Z",
+  "skills": {
+    "<skill-name>": "<content-hash>"
+  }
+}
+```
+
+Not required for v1 functionality in either tool. Writers MUST use a
+filename-safe `machine_id`; readers MUST tolerate missing files or an
+empty `snapshots/` directory.
+
+## `skills/<name>/` and `staging/<name>/`
+
+Each subdirectory is a "skill" — a folder the tools push (via symlink,
+junction, or copy) to provider directories like `~/.claude/skills/<name>`.
+
+Conventions:
+
+- **`SKILL.md`** at the root of a skill folder is the authoritative
+  description entry point. YAML frontmatter is encouraged:
+  ```markdown
+  ---
+  name: my-skill
+  description: One-liner about what it does.
+  ---
+
+  Body here.
+  ```
+- Any other files in the folder are the skill's actual implementation.
+- `node_modules/`, `.git/`, `__pycache__/`, `Thumbs.db`, `.DS_Store`,
+  `*.tmp`, and `.temp-*` paths MUST be ignored by copy fallbacks — they
+  are not part of the skill.
+- `staging/` is identical in structure to `skills/`. Skills in `staging/`
+  are hidden from normal browsing and are not pushed to providers.
+
+## Schema versioning
+
+This document corresponds to schema version **1**. The `schema_version`
+field is NOT currently written to `skills.json` (legacy reasons) but
+MUST be added to the top-level object when any field definition changes
+in a backwards-incompatible way.
+
+Compatibility rules:
+
+1. **Additive changes** (new optional fields) — MAY be made without
+   bumping `schema_version`, as long as readers can ignore them.
+2. **Breaking changes** (removed/renamed/retyped fields) — MUST bump
+   `schema_version` at the top level of `skills.json` and update this
+   doc in the same commit.
+3. **Readers** SHOULD warn on an unknown major `schema_version` but
+   still attempt to read the file (unknown fields are ignored).
+4. **Writers** MUST NOT silently downgrade the schema version.
+
+## Implementation checklist
+
+When implementing read/write for this format, both sides must:
+
+- [ ] Handle missing `skills.json` by treating the vault as empty
+- [ ] Tolerate extra top-level and per-entry fields (round-trip safe)
+- [ ] Write atomically (temp file + rename) to avoid half-written files
+- [ ] Ignore the junk patterns above during recursive scans
+- [ ] Accept paths with either `/` or `\` (Windows) and normalize to
+      absolute form before touching disk
+
+The Python side lives in `src/skill_vault/` (primary: `scanner.py`,
+`config.py`, `linking.py`). The TypeScript side lives in `app/server/`
+(primary: `services/vault.ts`, `services/linking.ts`,
+`services/adoption.ts`).

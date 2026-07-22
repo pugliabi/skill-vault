@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+build/
+*.egg-info/
+dist/
+
+# Node (app/)
+node_modules/
+
+# Local environment
+.env
+.env.local
+*.log
+
+# OS
+Thumbs.db
+.DS_Store
+Desktop.ini
+
+# Editor
+*.swp
+*.swo
+*~
