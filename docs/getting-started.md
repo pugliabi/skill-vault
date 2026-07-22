@@ -1,109 +1,88 @@
 # Getting Started
 
-This guide walks through installing both Skill Vault tools, creating your first vault, and syncing skills to your agents. If you just want the two-minute version, see the [README quick start](../README.md#quickstart).
+This guide walks through installing the Skill Vault App, creating your first vault, adopting the skills you already have, and pushing them to your agents — then adds the optional `sv` CLI. For the two-minute version, see the [README quick start](../README.md#quickstart).
 
 ## Prerequisites
 
-- **Python 3.10+** — for the `sv` CLI
-- **Node.js 20+** — for the Skill Vault App (the web dashboard). Optional; the CLI works standalone.
-- **git** — required for `sv adopt-remote` and multi-device sync via a vault repo; optional otherwise
-- A machine with at least one agent tool installed (Claude Code, Cursor, OpenClaw, Codex, Copilot, Windsurf, …). Not strictly required — you can build a vault first and add providers later.
+- **Node.js 20+** — for the Skill Vault App
+- **Python 3.10+** — only if you also want the `sv` CLI
+- **git** — required for adopting skills from git URLs and multi-device sync; optional otherwise
+- At least one agent tool that loads skills from a directory (Claude Code, Cursor, OpenClaw, Codex, Copilot, Windsurf, …). Not strictly required — you can build a vault first and add providers later.
 
-## Install the CLI
+## Install and launch the app
 
 ```bash
 git clone https://github.com/pugliabi/skill-vault.git
-cd skill-vault
-pip install .
+cd skill-vault/app
+npm install
+npm run dev
+# → opens http://localhost:5174
 ```
 
-`pipx install .` also works and keeps the tool isolated. Both install two identical entry points: `sv` (short) and `skill-vault` (long).
+On Windows, `app\run.bat` does the same and prints the resolved port/host first. Port, host, and browser auto-open are configurable — see [Configuration](./configuration.md).
 
-Verify:
+## First-run setup
 
-```bash
-sv --help
-```
+The first launch shows a **Setup** page:
 
-## Initialize your vault
+1. **Pick a vault directory** — the folder that will hold your skill library (e.g. `C:\Github\my-skills` or `~/skills-vault`). Choose somewhere you back up, ideally a git repo; the vault is the source of truth. The app creates the layout:
 
-```bash
-sv init
-```
+   ```
+   <vault>/
+   ├── skills.json     # manifest: one entry per skill
+   ├── skills/         # one folder per production skill
+   ├── staging/        # skills not yet promoted to production
+   └── snapshots/      # per-device state files (multi-device sync)
+   ```
 
-The interactive wizard asks for:
+2. **Add providers** — go to **Settings → Providers** and add each agent tool: a name plus the directory it reads skills from (`~/.claude/skills`, `~/.cursor/skills`, and so on). Path validation is live, and "★ All providers" adds every detected tool in one click.
 
-1. **Vault path** — the directory that will hold your skill library (e.g. `C:\Github\my-skills` or `~/skills-vault`). Pick a directory you back up or keep in a git repo; the vault is the source of truth.
-2. **Agent locations** — `sv` detects standard skills directories (`~/.claude/skills`, `~/.cursor/skills`, `~/.openclaw/skills`, `~/.codex/skills`, `~/.copilot/skills`, `~/.windsurf/skills`) and asks which to register as providers.
-3. **Defaults** — which providers new skills should push to by default.
+3. **Set defaults** — the Defaults section picks which providers new skills push to unless you say otherwise.
 
-The wizard writes `~/.skill-vault/config.json` and creates the vault layout:
-
-```
-<vault>/
-├── skills.json     # manifest: name → entry for every skill
-├── skills/         # one folder per production skill
-├── staging/        # skills not yet promoted to production
-└── snapshots/      # per-device state files (multi-device sync)
-```
+Everything is stored in `~/.skill-vault/config.json`, shared with the CLI.
 
 ## Bring in the skills you already have
 
-Most people already have skills scattered across agent directories. Two commands pull them into the vault:
-
-```bash
-sv discover        # scan registered agent directories for skills
-sv adopt           # interactively pick which discovered skills to import
-```
-
-Or do the whole loop guided:
-
-```bash
-sv quick           # discover → adopt → push in one step
-```
+Open **Adopt**. Pick a source — **Discover** scans all your providers at once for skills that aren't in the vault yet; **Path** scans any folder; **Git URL** clones a repo and harvests its skills. Scan, tick the skills you want, and import. Duplicates and things already in the vault are flagged so you don't import twice.
 
 ## Push to your agents
 
-```bash
-sv push                     # push everything to your default targets
-sv push my-skill            # push one skill
-sv push -t claude -t cursor # limit to specific providers
-```
+Open **Skills** and switch to the **coverage matrix** layout (grid icon). Click a provider's column header to push everything missing there, or individual cells for one skill at a time. Pushes are symlinks by default, so future edits in the vault are live everywhere immediately; the push drawer's `auto` method falls back to a Windows junction, then a full copy, when symlinks aren't available.
 
-By default `sv push` creates **symlinks** from the agent directory into the vault, so a skill edited in the vault is instantly current everywhere. Use `--copy` for real file copies (some tools or filesystems don't follow symlinks; Windows may require Developer Mode for symlink creation).
-
-Check the result:
-
-```bash
-sv status
-```
-
-Each skill shows its state per provider: `synced` (identical), `stale` (vault changed since last push), `missing` (not present at the target), or vault-only.
-
-## Run the app (optional)
-
-```bash
-cd app
-npm install
-npm run dev
-# → http://localhost:5174
-```
-
-The app reads the same `~/.skill-vault/config.json` — if you ran `sv init`, your vault and providers appear immediately. If you never ran the CLI, the app shows a first-run Setup page that does the same job in the browser.
-
-On Windows, `app\run.bat` loads `.env`, prints the resolved port/host, and starts the dev server.
+Then check the **Dashboard** — the status cards and per-provider health bars should show your pushes, and any drift shows up as a one-click fix action.
 
 ## Verify everything works
 
-1. `sv list` shows your vault's skills.
-2. `sv status` shows sync state per provider.
-3. The app Dashboard shows skill/provider counts, health bars per provider, and one-click fix actions for anything drifted or missing.
-4. Open your agent tool — the pushed skills should be available (for Claude Code, check `~/.claude/skills`).
+1. The Dashboard shows your skill count and providers with green/amber health bars.
+2. Skills page: pushed skills show a `synced` badge for their providers.
+3. Open your agent tool — the pushed skills should be available (for Claude Code, look in `~/.claude/skills`).
+
+## Add the CLI (optional)
+
+Same vault, same config, for terminals and scripts:
+
+```bash
+cd skill-vault
+pip install .        # or: pipx install .
+sv --help
+```
+
+If you set up in the app, `sv status` immediately shows your vault — no re-entry. Starting fresh from the CLI instead? `sv init` runs the same setup as a wizard. The daily commands:
+
+```bash
+sv quick             # discover → adopt → push, guided
+sv sync              # two-way sync plan (the Sync page's engine)
+sv push [skill]      # push all or one; -t <provider> to limit
+sv status            # sync state per skill × provider
+sv list              # what's in the vault
+```
+
+Also available: `sv add`, `sv remove`, `sv adopt`, `sv adopt-remote`, `sv scan`, `sv share`, `sv package`, `sv watch`, `sv promote`/`sv demote`, `sv snapshot`/`sv devices`/`sv sync-from`, `sv fix`, `sv config`.
 
 ## Common first-run issues
 
-- **`sv: command not found`** — the pip scripts directory isn't on PATH. Use `pipx`, or `python -m skill_vault`.
-- **Symlink creation fails on Windows** — enable Developer Mode (Settings → System → For developers) or run `sv push --copy`.
-- **App port already in use** — the launcher automatically picks the next free port; or set one explicitly with `npm run dev -- --port 5500`.
+- **Symlink creation fails on Windows** — enable Developer Mode (Settings → System → For developers), or use the `copy` method in the push drawer (`sv push --copy`).
+- **App port already in use** — the launcher picks the next free port automatically; pin one with `npm run dev -- --port 5500`.
+- **`sv: command not found`** — pip's scripts directory isn't on PATH; use `pipx`, or `python -m skill_vault`.
 
 More in [Troubleshooting](./troubleshooting.md).

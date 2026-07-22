@@ -2,113 +2,118 @@
 
 One library of agent skills, synced everywhere.
 
-Skill Vault is a local-first tool for managing agent skills — the `SKILL.md` folder convention used by Claude Code, Claude Desktop, OpenClaw, Cursor, Codex, Copilot, Windsurf, and others. Instead of maintaining separate copies of each skill per tool, you keep a single **vault** directory on disk and push skills out to every agent that should have them.
+Skill Vault manages agent skills — the `SKILL.md` folder convention used by Claude Code, Claude Desktop, OpenClaw, Cursor, Codex, Copilot, Windsurf, and others. Instead of maintaining separate copies of each skill per tool, you keep a single **vault** directory on disk and push skills out to every agent that should have them.
 
-It ships as two independent tools that share the same configuration and on-disk format:
+The main way in is the **Skill Vault App**, a local web dashboard. A Python CLI (`sv`) covers the same vault for terminal workflows and automation — both share the same configuration and on-disk format, so you can use either or both.
 
-- **`sv`** — a Python CLI for init, discover, adopt, push/pull, two-way sync, packaging, and multi-device snapshots.
-- **Skill Vault App** (`app/`) — a Node/React web dashboard for the same vault: skills browser, coverage matrix, health board, diff-before-run sync, provider management, and device compare.
-
-Both read and write `~/.skill-vault/config.json` and the same vault layout, so you can use either one — or both interchangeably. The format is documented in [docs/vault-format.md](docs/vault-format.md).
-
-![Skill Vault dashboard](docs/images/dashboard.jpg)
-
-```
-┌──────────────┐     reads/writes    ┌─────────────────────────┐
-│  sv (CLI)    │──┬───────────────▶  │ ~/.skill-vault/         │
-│  Python      │  │                  │   config.json           │
-└──────────────┘  │                  └─────────────────────────┘
-                  │
-┌──────────────┐  │                  ┌─────────────────────────┐
-│ skill-vault- │──┴───────────────▶  │ <vault>/                │
-│   app (Node) │     reads/writes    │   skills.json           │
-└──────────────┘                     │   skills/<name>/...     │
-                                     └─────────────────────────┘
-```
-
-## Repository layout
-
-```
-src/skill_vault/    the sv CLI (Python 3.10+, click)
-app/                the Skill Vault App (Node 20+, Express + React/Vite)
-docs/vault-format.md   the shared vault + config format spec
-pyproject.toml      packaging for the CLI (installs `sv` and `skill-vault`)
-```
-
-## Install the CLI
-
-Requires Python 3.10+.
-
-```bash
-git clone https://github.com/pugliabi/skill-vault.git
-cd skill-vault
-pip install .        # or: pipx install .
-sv --help
-```
-
-## Install the app
+## Quickstart
 
 Requires Node 20+.
 
 ```bash
-cd app
+git clone https://github.com/pugliabi/skill-vault.git
+cd skill-vault/app
 npm install
 npm run dev
 # → opens http://localhost:5174
 ```
 
-Port, host, and auto-open are configurable — see [app/README.md](app/README.md) and [app/.env.example](app/.env.example). On Windows, `app/run.bat` is a convenience launcher.
+First run shows a Setup page: pick a vault directory, then add your agent tools as providers under **Settings**. Full walkthrough in [Getting Started](docs/getting-started.md); the optional `sv` CLI is covered there too.
 
-## Quickstart
+## A tour of what you can do
+
+### See the state of everything
+
+![Dashboard](docs/images/dashboard.jpg)
+
+The **Dashboard** is home base: skill and provider counts, synced / stale / missing status cards, a health bar per provider, and an *actions available* list. Each action row is a one-click fix — "1 skill drifted — re-push to update", "87 skills missing from a target — push to restore" — with the equivalent CLI command shown on the right.
+
+### Find skills fast
+
+![Skills list](docs/images/skills-list.jpg)
+
+**Skills** lists the whole library with descriptions, tags, providers, and sync state. To find something: type in the filter box (matches names, descriptions, and full SKILL.md text), click a status pill (All · Production · Staging · Stale · Missing · Vault-only), or use the **Target** dropdown to combine a provider with a state — "show me everything missing from Cursor" is two clicks. Multi-select rows to push, tag, or remove in bulk, and press Ctrl/⌘-K anywhere for the command palette.
+
+### Add a skill
+
+![New skill](docs/images/new-skill.jpg)
+
+Click **+ New** on the Skills page, give it a lowercase-hyphen name and an optional description (it becomes the `description:` frontmatter agents trigger on), and hit Create. The skill lands in the vault with a starter SKILL.md ready to edit. Already have a skill folder on disk? **Add existing** imports it instead (CLI: `sv add ./my-skill`).
+
+### Edit a skill in place
+
+![Editing SKILL.md](docs/images/skill-editor.jpg)
+
+Open any skill → **files** tab → pick a file → **Edit**. You get the raw markdown with Save/Cancel; the preview mode renders it like an agent would read it. Because pushes are symlinks by default, saving here updates every agent that has the skill — no re-push needed.
+
+### Push skills to your agents — and add targets
+
+![Coverage matrix](docs/images/coverage-matrix.png)
+
+The **coverage matrix** layout (grid icon on the Skills page) is the fastest way to push: rows are skills, columns are providers, a dot means synced. Click a single cell to push one skill to one provider, or a column header to push everything that's missing or stale there. The **Push** button on any skill opens a drawer where you pick targets per push and choose the method (`auto` tries a symlink, then a Windows junction, then a full copy).
+
+Targets (providers) are managed in **Settings → Providers**: add a provider by giving it a name and the directory the agent reads skills from — path validation is live, and "★ All providers" adds every detected tool at once. CLI: `sv push [skill] -t <provider>`, providers via `sv config`.
+
+### Adopt skills you already have — or from any repo
+
+![Adopt scan](docs/images/adopt-scan.jpg)
+
+**Adopt** pulls existing skills *into* the vault. Four sources: a local **Path** (scan any folder, recursively), a **Provider** (skills sitting in an agent directory that aren't in the vault yet), **Discover** (scan all providers at once), or a **Git URL** (clone a repo and harvest its skills). Scan results show every SKILL.md found, flag duplicates and what's already in the vault, and let you tick the ones to import. CLI: `sv discover`, `sv adopt`, `sv adopt-remote <git-url>`.
+
+### Sync everything with a plan you approve
+
+![Sync plan](docs/images/sync-plan.jpg)
+
+**Sync** is the daily driver: it computes a two-way plan — push skills that drifted or are missing, pull edits made in provider directories back into the vault, adopt new skills it finds, promote staging — and shows it as a checklist with a per-row diff before anything runs. Deselect what you don't want, then **Run selected**. CLI: `sv sync`.
+
+### Package for Claude Desktop
+
+![Claude Desktop packaging](docs/images/claude-desktop-package.png)
+
+Claude Desktop loads skills from your claude.ai account, so there's no folder to symlink into. Instead, pushing to the Claude Desktop target builds an **upload-ready zip** in a staging folder; finish by uploading it in Claude Desktop → Settings → Capabilities → Skills. Configure the staging folder in Settings, or zip any single skill from its detail view. CLI: `sv package <skill>`.
+
+### Sync between your devices
+
+![Devices](docs/images/devices.jpg)
+
+Keep the vault in a git repo and every machine can share it. **Devices** shows a snapshot per machine — hit **Save snapshot** after a work session, commit/push the vault repo, and on another machine use **Sync from →** to compare that device's snapshot with local state and pick which skills to bring over. CLI: `sv snapshot`, `sv devices`, `sv sync-from <device>`.
+
+### Inspect everything about a skill
+
+![Skill detail](docs/images/skill-detail.jpg)
+
+The skill detail view ties it together: overview (stage, source, path, tags), per-target sync state, and the full file tree with preview. From here you can Push, Pull, Zip, export to OpenClaw, Rename (cascades through the manifest and every provider), or Remove.
+
+## The `sv` CLI
+
+Everything above works headless. Requires Python 3.10+:
 
 ```bash
-sv init          # wizard: choose a vault directory, detect agent tools
-sv discover      # scan agent directories for skills you already have
-sv adopt         # pick discovered skills to import into the vault
-sv push          # push vault skills out to your agents (symlinks by default)
-sv status        # see what's synced, stale, or missing per target
-sv sync          # smart two-way sync: detects changes everywhere, proposes a plan
+cd skill-vault
+pip install .        # or: pipx install .
+sv init              # wizard: vault directory + provider detection
+sv quick             # discover → adopt → push, guided
+sv status            # sync state per skill × provider
+sv sync              # two-way sync plan
 ```
 
-Or run `sv quick` for a guided discover → adopt → push in one step. The app's first-run Setup page does the same job in the browser.
+Full command list and flags in [Getting Started](docs/getting-started.md) and [Configuration](docs/configuration.md).
 
-## Adding your own skills
-
-A skill is a folder containing a `SKILL.md` (YAML frontmatter with `name` and `description`, then instructions), plus any supporting files or scripts:
+## Repository layout
 
 ```
-my-skill/
-├── SKILL.md
-├── references/     (optional)
-└── scripts/        (optional)
+app/                the Skill Vault App (Node 20+, Express + React/Vite)
+src/skill_vault/    the sv CLI (Python 3.10+, click)
+docs/               documentation + the shared vault format spec
+pyproject.toml      packaging for the CLI (installs `sv` and `skill-vault`)
 ```
-
-Add it to the vault and push it everywhere:
-
-```bash
-sv add ./my-skill
-sv push my-skill
-```
-
-Or create it in the app: **Skills → New skill**, edit the `SKILL.md` in place, then push from the coverage matrix. You can also pull in third-party skills with `sv adopt-remote <git-url>`.
-
-Other useful commands: `sv list`, `sv share` (cross-publish one skill to more providers), `sv package` (build a target-specific package, e.g. a Claude Desktop zip), `sv watch` (auto-push on change), `sv snapshot` / `sv devices` / `sv sync-from` (multi-machine sync via your vault repo), `sv fix` (audit and repair vault state).
-
-## Configuration
-
-Everything lives in `~/.skill-vault/config.json`, shared by both tools:
-
-- `vault_path` — the directory holding `skills.json` and `skills/`
-- `agent_locations` — map of provider slug → skills directory (defaults cover `~/.claude/skills`, `~/.openclaw/skills`, `~/.cursor/skills`, `~/.codex/skills`, `~/.copilot/skills`, `~/.windsurf/skills`)
-
-Change it via `sv config`, the app's Settings page, or by editing the file — each tool preserves keys it doesn't own.
 
 ## Documentation
 
 - [Getting Started](docs/getting-started.md) — full installation and setup guide
 - [Features & Use Cases](docs/features.md) — the app and CLI feature tour, with screenshots
 - [Configuration Reference](docs/configuration.md) — every setting: config.json, env vars, CLI flags
-- [Examples](docs/examples.md) — copy-pasteable recipes for common workflows
+- [Examples](docs/examples.md) — recipes for common workflows
 - [Troubleshooting](docs/troubleshooting.md) — common issues and fixes
 - [FAQ](docs/faq.md) — frequently asked questions
 - [Vault Format](docs/vault-format.md) — the on-disk contract both tools implement

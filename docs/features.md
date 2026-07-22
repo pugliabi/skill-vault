@@ -45,14 +45,28 @@ Clicking a skill opens the detail overlay with three tabs: **overview** (stage, 
 
 Related CLI: `sv push`, `sv import` (pull one skill from an agent dir), `sv watch` (auto-push on file change).
 
+## Creating skills
+
+![New skill](images/new-skill.jpg)
+
+**+ New** on the Skills page creates a skill from a name and optional description (which becomes the `description:` frontmatter). Then edit its SKILL.md right in the detail view:
+
+![Editing SKILL.md](images/skill-editor.jpg)
+
+With symlink pushes, saving the editor updates every agent that has the skill instantly.
+
 ## Discovery and adoption — grow the vault
+
+![Adopt scan](images/adopt-scan.jpg)
+
+The app's **Adopt** page scans four kinds of sources — a local path, a single provider, all providers (Discover), or a git URL — lists every SKILL.md found with duplicate/in-vault flags, and imports the ones you tick. The same flows in the CLI:
 
 - `sv discover` scans registered agent directories (optionally including Claude plugins) for skills that aren't in the vault.
 - `sv adopt` interactively imports discovered skills.
 - `sv adopt-remote <git-url>` clones a repo or plugin URL, discovers its skills, and lets you pick which to import.
 - `sv scan <path>` analyzes a local repo for skills, hooks, and commands; with the AI scanner configured it can use Claude to identify skill-like content (see [Configuration](./configuration.md#ai_scanner)).
 
-The app's **Adopt** page covers the same flow, and **Add existing** imports a skill folder from disk.
+**Add existing** on the Skills page imports a single skill folder from disk (CLI: `sv add <path>`).
 
 ## Curation — keep the library healthy
 
@@ -62,6 +76,10 @@ The app's **Adopt** page covers the same flow, and **Add existing** imports a sk
 
 ## Packaging and sharing
 
+![Claude Desktop packaging](images/claude-desktop-package.png)
+
+Claude Desktop loads skills from your claude.ai account rather than a local folder, so Skill Vault treats it as a **package target**: pushing to it builds an upload-ready zip in a staging folder, and you finish in Claude Desktop → Settings → Capabilities → Skills. Other packaging/sharing paths:
+
 - `sv package <skill> --target <format>` builds a target-specific artifact for tools that can't consume a plain skills directory — e.g. a Claude Desktop upload-ready zip (the app's Claude Desktop packaging does the same, staging zips in a folder you pick).
 - `sv share <skill>` cross-publishes a skill to additional providers.
 - **Export to OpenClaw** — installs a skill into the isolated OpenClaw WSL gateway via its own CLI.
@@ -69,7 +87,9 @@ The app's **Adopt** page covers the same flow, and **Add existing** imports a sk
 
 ## Multi-device sync
 
-Keep the vault directory in a git repo, then:
+![Devices](images/devices.jpg)
+
+The **Devices** page shows one snapshot card per machine — **Save snapshot** records the current machine's state, and **Sync from →** on any other device compares its snapshot with local state so you can pick what to bring over. Keep the vault directory in a git repo, then:
 
 ```bash
 sv snapshot          # record this machine's state to snapshots/<machine-id>.json
