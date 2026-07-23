@@ -61,7 +61,8 @@ did not originate (round-trip safe).
 {
   "targets": ["claude", "cursor"],  // required, may be empty []
   "stage": "production",            // optional: "staging" | "production"
-  "source": "adopted from claude"   // optional free-form provenance string
+  "source": "adopted from claude",  // optional free-form provenance string
+  "origin": { /* SkillOrigin */ }   // optional structured provenance
 }
 ```
 
@@ -71,10 +72,74 @@ Field meanings:
 |---|---|---|
 | `targets` | `string[]` | Provider ids the skill should be pushed to. Required; empty array is valid (unlinked skill). |
 | `stage` | `"staging"` \| `"production"` | Lifecycle state. Missing = `"production"`. |
-| `source` | `string` | Free-form provenance. Conventional prefixes: `"adopted from <x>"`, `"pulled from <x>"`, `"scanned from <x>"`, `"searched from <x>"`. |
+| `source` | `string` | Free-form provenance for display. Conventional prefixes: `"adopted from <x>"`, `"pulled from <x>"`, `"scanned from <x>"`, `"searched from <x>"`. |
+| `origin` | `SkillOrigin` | Structured provenance for update-from-source. Optional (additive, compatibility rule 1). |
 
 Readers MUST ignore unknown fields. Writers SHOULD preserve unknown fields
 when rewriting the manifest (round-trip safe).
+
+### `SkillEntry.origin` — structured provenance
+
+Written at adopt/import time so the tools can later re-check the source and
+offer to pull upstream changes. Entries without `origin` are simply excluded
+from update checks; `source` remains the human-readable display string.
+
+```jsonc
+{
+  "type": "git",                              // "git" | "dir" | "provider"
+  "url": "https://github.com/x/skills.git",   // git only — remote URL
+  "path": "C:\\Repos\\x",                     // dir/provider — source root; absent for pure-remote git
+  "provider_id": "claude",                    // provider only
+  "subpath": "skills/my-skill",               // skill dir relative to url/path root, "/"-separated
+  "ref": "main",                              // git only, optional — branch used at adopt
+  "adopted_at": "2026-07-23T15:04:00Z",       // ISO 8601 UTC; refreshed on every update
+  "content_hash": "<sha256>"                  // normalized hash of the VAULT copy at adopt/update time
+}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `type` | `"git"` \| `"dir"` \| `"provider"` | `git` = remote repo (clone to temp to check); `dir` = local directory, typically a clone the user pulls themselves; `provider` = a provider's skills directory. |
+| `url` | `string` | Remote URL. `git` origins only. |
+| `path` | `string` | Absolute source-root path. `dir`/`provider` origins. |
+| `provider_id` | `string` | Provider id. `provider` origins only. |
+| `subpath` | `string` | Skill folder relative to the source root, `/`-separated. `""` means the root itself is the skill. |
+| `ref` | `string` | Git branch recorded at adopt time. Optional. |
+| `adopted_at` | `string` | ISO 8601 UTC of the last adopt/update from this source. |
+| `content_hash` | `string` | Normalized content hash (see below) of the vault copy taken right after adopt/update. Lets checkers distinguish "upstream changed" from "vault copy edited locally". |
+
+Update-check semantics (both implementations): with `recorded` =
+`origin.content_hash`, `vault` = hash of the vault copy now, `upstream` =
+hash of the source copy now — `upstream == vault` → up to date;
+`vault == recorded` (and upstream differs) → update available;
+`upstream == recorded` (and vault differs) → local changes only; all three
+different → conflict (pulling would overwrite local edits). Checks are
+read-only; only applying an update rewrites the skill dir and refreshes
+`content_hash`/`adopted_at`.
+
+Readers MUST ignore unknown fields inside `origin` and writers SHOULD
+preserve them (same round-trip rule as the entry itself).
+
+### Content hash algorithm
+
+The "normalized content hash" used by `origin.content_hash`,
+`.sync-log.json`, and `snapshots/*.json` is defined by
+`src/skill_vault/hashing.py` (`hash_directory`) and mirrored exactly by
+`app/server/services/skillHash.ts` (`hashSkillDirNormalized`):
+
+1. Collect every file under the skill dir, skipping any path containing a
+   component in `{node_modules, __pycache__, .git, .DS_Store, Thumbs.db}`.
+2. Order files by their `/`-separated relative path, lowercased.
+3. Hash each file with SHA-256. Files whose extension is in the binary set
+   (images, archives, office docs, fonts, executables — see `_BINARY_EXTS`
+   in `hashing.py`) hash their raw bytes. All other files are treated as
+   UTF-8 text (undecodable bytes replaced) and normalized first: line
+   endings to `\n`, trailing whitespace stripped per line, trailing blank
+   lines stripped — so CRLF/LF and trailing-space differences never count
+   as changes.
+4. The directory hash is the SHA-256 of the concatenated per-file hex
+   digests. An existing directory with no hashable files hashes to the
+   literal string `"empty"`; a missing directory has no hash.
 
 ### Derived fields (NOT stored)
 
@@ -110,9 +175,9 @@ this file when rendering drift badges (v2+) but does not write to it.
 }
 ```
 
-The content hash is SHA-256 of the skill directory's contents (algorithm
-defined by `src/skill_vault/hashing.py`; app readers should treat it as
-an opaque string).
+The content hash is the normalized content hash defined in
+"Content hash algorithm" above (`src/skill_vault/hashing.py`, mirrored by
+`app/server/services/skillHash.ts`).
 
 If the file is missing, empty, or malformed, readers MUST fall back to
 behavior equivalent to "no push history known" — never crash.

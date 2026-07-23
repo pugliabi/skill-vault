@@ -14,9 +14,16 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { AdoptScanResult } from "../types/vault.ts";
+import type {
+  AdoptImportRequest,
+  AdoptScanResult,
+  ManifestSkill,
+  SkillOrigin,
+} from "../types/vault.ts";
+import { hashSkillDirNormalized } from "./skillHash.ts";
 import {
   listSkills,
+  readManifest,
   skillDir,
   skillsDir,
   upsertManifestSkill,
@@ -136,7 +143,38 @@ export function scanForSkills(
   out.sort((a, b) =>
     a.name.localeCompare(b.name) || (a.rel_path ?? "").localeCompare(b.rel_path ?? ""),
   );
+  flagUpdateAvailable(vaultPath, out);
   return { results: out, truncated: state.truncated };
+}
+
+/**
+ * For rows already in the vault, mark whether re-adopting would actually
+ * change the vault copy. Fast path first: the SKILL.md signature (`sig`,
+ * already computed per row) is compared against the vault side's — a
+ * differing sig proves the content differs without hashing whole dirs.
+ * Equal sigs (or both sides missing SKILL.md) fall back to the normalized
+ * dir hash, since non-SKILL.md files can still differ. Only in-vault rows
+ * pay any of this, so huge recursive scans stay cheap.
+ */
+function flagUpdateAvailable(vaultPath: string, rows: AdoptScanResult[]): void {
+  const vaultSigs = new Map<string, string>();
+  const vaultHashes = new Map<string, string | null>();
+  for (const row of rows) {
+    if (!row.already_in_vault) continue;
+    const dest = skillDir(vaultPath, row.name);
+    if (!vaultSigs.has(row.name)) {
+      vaultSigs.set(row.name, readSkillMeta(dest).sig);
+    }
+    if ((row.sig ?? "") !== vaultSigs.get(row.name)) {
+      row.update_available = true;
+      continue;
+    }
+    if (!vaultHashes.has(row.name)) {
+      vaultHashes.set(row.name, hashSkillDirNormalized(dest));
+    }
+    row.update_available =
+      hashSkillDirNormalized(row.path) !== vaultHashes.get(row.name);
+  }
 }
 
 const RECURSIVE_IGNORE = new Set([
@@ -309,9 +347,24 @@ export interface ImportItem {
   path: string;
 }
 
+/** Extra behavior flags for {@link importSkills}. */
+export interface ImportOptions {
+  /**
+   * Allow replacing skills already in the vault. Never the default —
+   * without it, existing dests are skipped exactly as before. Even with
+   * it, a source whose content hashes identical to the vault copy is
+   * skipped (nothing to do).
+   */
+  overwrite?: boolean;
+  /** Where this batch came from — recorded as each skill's `origin`. */
+  originContext?: AdoptImportRequest["origin_context"];
+}
+
 /**
  * Copy a subset of scanned skills into the vault. Updates `skills.json`
- * with a `source` of `"adopted from <provider_id>"` when provided.
+ * with a `source` of `"adopted from <provider_id>"` when provided, and a
+ * structured `origin` block so the skill can later be updated from its
+ * source (see docs/vault-format.md § SkillEntry.origin).
  *
  * Selection arrives one of two ways:
  *   - `items`: explicit {name, path} pairs (used by the scan-based flows,
@@ -323,6 +376,9 @@ export interface ImportItem {
  * The vault is keyed by name, so a name can only be adopted once. When the
  * selection contains two folders with the same name (e.g. `pdf` from two
  * repos) the first is imported and the rest are reported in `skipped`.
+ * Overwriting an existing entry preserves its `targets`, `tags`, `stage`,
+ * and any unknown manifest keys (round-trip rule) — only the content,
+ * `source`, and `origin` are replaced.
  */
 export function importSkills(
   vaultPath: string,
@@ -331,17 +387,20 @@ export function importSkills(
   providerId?: string,
   paths?: Record<string, string>,
   items?: ImportItem[],
-): { imported: string[]; skipped: string[] } {
+  opts?: ImportOptions,
+): { imported: string[]; updated: string[]; skipped: string[] } {
   const work: ImportItem[] =
     items && items.length > 0
       ? items
       : names.map((name) => ({ name, path: paths?.[name] ?? path.join(sourceDir, name) }));
 
   const imported: string[] = [];
+  const updated: string[] = [];
   const skipped: string[] = [];
   const seenNames = new Set<string>();
   const vaultSkills = skillsDir(vaultPath);
   fs.mkdirSync(vaultSkills, { recursive: true });
+  const priorEntries = readManifest(vaultPath).skills;
 
   for (const item of work) {
     const { name } = item;
@@ -359,24 +418,79 @@ export function importSkills(
       skipped.push(name);
       continue;
     }
-    // Refuse to overwrite an existing vault skill. The Adopt UI should
-    // disable the checkbox for rows flagged `already_in_vault`, so if
-    // we get here it's either a race or a user override — either way,
-    // skip to avoid silently clobbering local edits.
-    if (fs.existsSync(dest)) {
+    const destExists = fs.existsSync(dest);
+    if (destExists && !opts?.overwrite) {
+      // Refuse to overwrite an existing vault skill unless explicitly
+      // asked. The Adopt UI only enables in-vault rows flagged
+      // `update_available` and sends `overwrite` for them; anything else
+      // reaching here is a race or user override — skip to avoid
+      // silently clobbering local edits.
       skipped.push(name);
       continue;
     }
+    if (destExists) {
+      if (hashSkillDirNormalized(src) === hashSkillDirNormalized(dest)) {
+        skipped.push(name);
+        continue;
+      }
+      fs.rmSync(dest, { recursive: true, force: true });
+    }
     copyRecursive(src, dest);
+    const prior = priorEntries[name];
     upsertManifestSkill(vaultPath, name, {
-      targets: [],
+      // Spread first: preserves tags and any unknown keys on overwrite.
+      ...(prior ?? {}),
+      targets: prior?.targets ?? [],
+      stage: prior?.stage ?? "production",
       source: providerId ? `adopted from ${providerId}` : "adopted",
-      stage: "production",
+      origin: buildImportOrigin(dest, src, sourceDir, providerId, opts?.originContext),
     });
-    imported.push(name);
+    (destExists ? updated : imported).push(name);
   }
 
-  return { imported, skipped };
+  return { imported, updated, skipped };
+}
+
+/**
+ * Build the `origin` block for one imported skill. With an explicit
+ * origin_context from the route, `subpath` is the skill's location under
+ * the context root (the scan root, or the temp clone dir for git). Without
+ * one (legacy Discover flow) a `provider`/`dir` origin is synthesized from
+ * the source directory so every adoption stays trackable.
+ */
+function buildImportOrigin(
+  dest: string,
+  src: string,
+  sourceDir: string,
+  providerId?: string,
+  ctx?: AdoptImportRequest["origin_context"],
+): SkillOrigin {
+  const now = new Date().toISOString();
+  const contentHash = hashSkillDirNormalized(dest) ?? "empty";
+  const subpathFrom = (root: string): string => {
+    const rel = path.relative(root, src);
+    return rel && !rel.startsWith("..") ? rel.replace(/\\/g, "/") : "";
+  };
+  if (ctx) {
+    return {
+      type: ctx.type,
+      ...(ctx.type === "git"
+        ? { ...(ctx.url ? { url: ctx.url } : {}), ...(ctx.ref ? { ref: ctx.ref } : {}) }
+        : { path: ctx.root }),
+      ...(ctx.provider_id ? { provider_id: ctx.provider_id } : {}),
+      subpath: subpathFrom(ctx.root),
+      adopted_at: now,
+      content_hash: contentHash,
+    };
+  }
+  return {
+    type: providerId ? "provider" : "dir",
+    path: sourceDir,
+    ...(providerId ? { provider_id: providerId } : {}),
+    subpath: subpathFrom(sourceDir),
+    adopted_at: now,
+    content_hash: contentHash,
+  };
 }
 
 /** A single browsable directory entry returned to the folder picker. */
@@ -452,7 +566,8 @@ export function browseDirs(dir?: string): BrowseResult {
 
 // ── helpers ─────────────────────────────────────────────────────
 
-function copyRecursive(src: string, dest: string): void {
+/** Recursive copy that skips junk dirs. Also used by the updates service. */
+export function copyRecursive(src: string, dest: string): void {
   fs.mkdirSync(dest, { recursive: true });
   const entries = fs.readdirSync(src, { withFileTypes: true });
   for (const entry of entries) {

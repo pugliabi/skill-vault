@@ -2,6 +2,7 @@ import type {
   ActivityEntry,
   AdoptScanResult,
   AppConfig,
+  ApplyUpdatesResult,
   CreateSkillRequest,
   FileContent,
   Provider,
@@ -12,6 +13,7 @@ import type {
   SkillDetail,
   SkillDiff,
   SyncPlan,
+  UpdateCheckResult,
   UpdateSkillRequest,
   WriteFileRequest,
 } from "./types";
@@ -162,12 +164,30 @@ export const api = {
     skills?: string[];
     paths?: Record<string, string>;
     provider_id?: string;
+    /** Allow replacing in-vault skills — only sent for "update available" rows. */
+    overwrite?: boolean;
+    /** Source description recorded as each imported skill's `origin`. */
+    origin_context?: {
+      type: "git" | "dir" | "provider";
+      url?: string;
+      ref?: string;
+      root: string;
+      provider_id?: string;
+    };
   }) =>
-    request<{ imported: string[]; skipped: string[] }>(
+    request<{ imported: string[]; updated: string[]; skipped: string[] }>(
       "POST",
       "/api/adopt/import",
       body,
     ),
+  checkUpdates: (skills?: string[]) =>
+    request<{ results: UpdateCheckResult[] }>(
+      "POST",
+      "/api/adopt/check-updates",
+      { skills },
+    ),
+  applyUpdates: (items: { name: string; upstream_path?: string; tmp_path?: string }[]) =>
+    request<ApplyUpdatesResult>("POST", "/api/adopt/update", { items }),
   adoptClone: (body: { url: string; branch?: string }) =>
     request<{ tmp_path: string; results: AdoptScanResult[]; truncated?: boolean }>(
       "POST",

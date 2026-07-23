@@ -60,10 +60,16 @@ def hash_directory(directory: Path) -> str | None:
     """
     if not directory.exists():
         return None
-    hashes: list[str] = []
-    for f in sorted(directory.rglob("*")):
-        if f.is_file() and not any(part in _SKIP for part in f.parts):
-            hashes.append(hash_file(f))
+    files = [
+        f for f in directory.rglob("*")
+        if f.is_file() and not any(part in _SKIP for part in f.parts)
+    ]
+    # Explicit platform-stable order: lowercased "/"-separated relative path.
+    # This matches historic Windows behaviour (Path ordering casefolds) and
+    # must stay in lockstep with hashSkillDirNormalized in the app
+    # (app/server/services/skillHash.ts).
+    files.sort(key=lambda f: f.relative_to(directory).as_posix().lower())
+    hashes = [hash_file(f) for f in files]
     if not hashes:
         return "empty"
     return hashlib.sha256("".join(hashes).encode()).hexdigest()

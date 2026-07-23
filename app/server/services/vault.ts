@@ -282,6 +282,7 @@ export function listSkills(vaultPath: string, providers: Provider[] = []): Skill
       created_at: createdAt,
       target_status: byTarget,
       status: aggregateStatus(stage, targets, byTarget),
+      ...(entry.origin ? { origin: entry.origin } : {}),
     });
   }
   out.sort((a, b) => a.name.localeCompare(b.name));

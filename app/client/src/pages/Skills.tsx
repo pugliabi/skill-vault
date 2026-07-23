@@ -22,6 +22,7 @@ import { SkillMatrixView } from "../components/SkillMatrixView";
 import { FilterBar, type ActiveFilters } from "../components/FilterBar";
 import { AutoTagDialog } from "../components/AutoTagDialog";
 import { HealthDialog } from "../components/HealthDialog";
+import { UpdateDialog } from "../components/UpdateDialog";
 import { TagChips } from "../components/TagChips";
 import { loadPrefs, savePrefs, type SavedView, type SkillsPreferences } from "../lib/preferences";
 import type { Skill } from "../lib/types";
@@ -65,6 +66,9 @@ export default function Skills() {
   const [autoTagOpen, setAutoTagOpen] = useState(false);
   const [healthOpen, setHealthOpen] = useState(false);
   const [bulkPushOpen, setBulkPushOpen] = useState(false);
+  // Update-from-source dialog: null = closed, [] = check all adopted,
+  // non-empty = check exactly these skills.
+  const [updateScope, setUpdateScope] = useState<string[] | null>(null);
   const [panelEditorDirty, setPanelEditorDirty] = useState(false);
   const [overlayEditorDirty, setOverlayEditorDirty] = useState(false);
 
@@ -653,6 +657,15 @@ export default function Skills() {
               <Button
                 kind="ghost"
                 size="sm"
+                icon={Icon.pull}
+                onClick={() => setUpdateScope([])}
+                title="Check every adopted skill against its source for upstream changes"
+              >
+                Updates
+              </Button>
+              <Button
+                kind="ghost"
+                size="sm"
                 icon={Icon.download}
                 onClick={() => navigate("/adopt")}
               >
@@ -1091,6 +1104,13 @@ export default function Skills() {
         />
       )}
 
+      {updateScope !== null && (
+        <UpdateDialog
+          skills={updateScope.length > 0 ? updateScope : undefined}
+          onClose={() => setUpdateScope(null)}
+        />
+      )}
+
       {bulkPushOpen && (
         <PushDrawer
           skills={[...selected]}
@@ -1116,6 +1136,11 @@ export default function Skills() {
           onDemote={handleBulkDemote}
           onAddProvider={handleBulkAddProvider}
           onAddAllProviders={handleBulkAddAllProviders}
+          onCheckUpdates={
+            selectedSkills.some((s) => s.origin)
+              ? () => setUpdateScope([...selected])
+              : undefined
+          }
           onZip={handleBulkZip}
           onExportOpenClaw={handleBulkExportOpenClaw}
           openclawAvailable={openclaw?.available}

@@ -8,6 +8,31 @@
 
 // ── On-disk manifest (skills.json) ──────────────────────────────
 
+/**
+ * Structured provenance recorded at adopt/import time so a skill can later
+ * be checked and updated from its original source. See docs/vault-format.md
+ * § "SkillEntry.origin". Optional — entries adopted before this feature
+ * simply have no origin and are excluded from update checks.
+ */
+export interface SkillOrigin {
+  /** Where the skill came from: a git remote, a local directory, or a provider dir. */
+  type: "git" | "dir" | "provider";
+  /** Remote URL — `git` origins only. */
+  url?: string;
+  /** Absolute path of the source root — `dir`/`provider` origins. */
+  path?: string;
+  /** Provider id (e.g. "claude") — `provider` origins only. */
+  provider_id?: string;
+  /** Skill dir relative to the source root, "/"-separated. "" = the root itself. */
+  subpath: string;
+  /** Branch used at adopt time — `git` origins, optional. */
+  ref?: string;
+  /** ISO 8601 UTC timestamp; refreshed on every update-from-source. */
+  adopted_at: string;
+  /** Normalized content hash of the VAULT copy at adopt/update time. */
+  content_hash: string;
+}
+
 /** One entry in the `skills` map in `skills.json`. */
 export interface ManifestSkill {
   /** Which providers this skill should be pushed to (e.g. "claude", "cursor"). */
@@ -18,6 +43,8 @@ export interface ManifestSkill {
   source?: string;
   /** User-assigned tags for organization/filtering. */
   tags?: string[];
+  /** Structured provenance for update-from-source. Optional. */
+  origin?: SkillOrigin;
 }
 
 /** Top-level shape of `<vault>/skills.json`. */
@@ -64,6 +91,8 @@ export interface Skill {
   target_status: Record<string, TargetStatus>;
   /** Aggregate state derived from target_status + stage + targets. */
   status: SkillStatus;
+  /** Structured provenance when the skill was adopted from a trackable source. */
+  origin?: SkillOrigin;
 }
 
 /** A single node in the detail-view file tree. */
@@ -140,6 +169,11 @@ export interface AdoptScanResult {
   description?: string;
   /** True if the vault already has a skill of this name. */
   already_in_vault: boolean;
+  /**
+   * Only meaningful when `already_in_vault` — true when the incoming copy's
+   * content differs from the vault copy, i.e. re-adopting would change it.
+   */
+  update_available?: boolean;
 }
 
 export interface AdoptImportRequest {
@@ -163,6 +197,78 @@ export interface AdoptImportRequest {
   paths?: Record<string, string>;
   /** Optional provider id to record in the skill's `source` field. */
   provider_id?: string;
+  /**
+   * Allow overwriting skills that are already in the vault. Off by default
+   * so a stray selection can never clobber local edits; the UI sends it
+   * when the user explicitly selected "update available" rows.
+   */
+  overwrite?: boolean;
+  /**
+   * Where this import came from, used to record `origin` on each imported
+   * skill. `root` is the scan root the items' paths are relative to (for
+   * the clone flow it's the temp clone dir, and `url`/`ref` describe the
+   * remote instead of a persistent local path).
+   */
+  origin_context?: {
+    type: "git" | "dir" | "provider";
+    url?: string;
+    ref?: string;
+    root: string;
+    provider_id?: string;
+  };
+}
+
+// ── Update-from-source payloads ────────────────────────────────
+
+export type UpdateStatus =
+  | "up_to_date"
+  | "update_available"
+  | "local_changed"
+  | "conflict"
+  | "no_origin"
+  | "source_missing"
+  | "upstream_missing"
+  | "error";
+
+/** One row of POST /api/adopt/check-updates — read-only, no manifest writes. */
+export interface UpdateCheckResult {
+  name: string;
+  status: UpdateStatus;
+  origin?: SkillOrigin;
+  /** Normalized hash of the vault copy right now. */
+  vault_hash?: string;
+  /** Normalized hash of the source copy right now. */
+  upstream_hash?: string;
+  /** origin.content_hash — the vault copy's hash when last adopted/updated. */
+  recorded_hash?: string;
+  /** Absolute dir holding the upstream copy (local dir or inside a temp clone). */
+  upstream_path?: string;
+  /** Set when a temp clone was made; echo to /update and /cleanup. */
+  tmp_path?: string;
+  /** True when a local `git pull --ff-only` ran successfully before comparing. */
+  git_pulled?: boolean;
+  /** Human detail: pull failures, "moved to <rel>", clone stderr, etc. */
+  message?: string;
+}
+
+export interface CheckUpdatesRequest {
+  /** Skill names to check. Empty/omitted = every skill with an origin. */
+  skills?: string[];
+}
+
+export interface ApplyUpdatesRequest {
+  items: {
+    name: string;
+    /** Upstream dir from the check result — reused when it still exists. */
+    upstream_path?: string;
+    /** Temp clone the check created, if any. */
+    tmp_path?: string;
+  }[];
+}
+
+export interface ApplyUpdatesResult {
+  updated: string[];
+  skipped: { name: string; reason: string }[];
 }
 
 export type LinkMethod = "symlink" | "junction" | "copy" | "auto";
@@ -192,6 +298,7 @@ export type ActivityKind =
   | "push"
   | "pull"
   | "adopt"
+  | "update"
   | "promote"
   | "demote"
   | "remove"

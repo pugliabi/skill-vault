@@ -6,7 +6,12 @@ import { readAppConfig } from "../services/appConfig.ts";
 import { recordActivity } from "../services/activity.ts";
 import { browseDirs, importSkills, scanForSkills } from "../services/adoption.ts";
 import { discoverAll } from "../services/discover.ts";
-import type { AdoptImportRequest } from "../types/vault.ts";
+import { applyUpdates, checkUpdates } from "../services/updates.ts";
+import type {
+  AdoptImportRequest,
+  ApplyUpdatesRequest,
+  CheckUpdatesRequest,
+} from "../types/vault.ts";
 
 export function adoptRouter(): Router {
   const router = Router();
@@ -94,8 +99,10 @@ export function adoptRouter(): Router {
         body.provider_id,
         body.paths,
         body.items,
+        { overwrite: body.overwrite, originContext: body.origin_context },
       );
-      // Per-skill outcome records: ok=true for imported, ok=false for skipped.
+      // Per-skill outcome records: ok=true for imported/updated, ok=false
+      // for skipped.
       for (const skill of result.imported) {
         recordActivity({
           kind: "adopt",
@@ -103,6 +110,15 @@ export function adoptRouter(): Router {
           provider_id: body.provider_id,
           ok: true,
           message: "imported",
+        });
+      }
+      for (const skill of result.updated) {
+        recordActivity({
+          kind: "adopt",
+          skill,
+          provider_id: body.provider_id,
+          ok: true,
+          message: "updated from source",
         });
       }
       for (const skill of result.skipped ?? []) {
@@ -156,18 +172,70 @@ export function adoptRouter(): Router {
     }
   });
 
-  /** Cleanup a temp clone dir. */
+  /** Cleanup a temp clone dir (adopt-clone or update-check clones). */
   router.post("/cleanup", (req, res) => {
     const { tmp_path } = req.body as { tmp_path?: string };
-    if (!tmp_path || !tmp_path.includes("sv-adopt-")) {
+    if (!tmp_path || !(tmp_path.includes("sv-adopt-") || tmp_path.includes("sv-update-"))) {
       res.status(400).json({ error: "invalid tmp_path" });
       return;
     }
     try {
-      fs.rmSync(tmp_path, { recursive: true, force: true });
+      fs.rmSync(tmp_path, { recursive: true, force: true, maxRetries: 3 });
       res.json({ ok: true });
     } catch {
       res.json({ ok: true });
+    }
+  });
+
+  /**
+   * Check adopted skills against their recorded origins. Read-only; temp
+   * clones it makes are reported via `tmp_path` on each result and cleaned
+   * up by the client through /cleanup when its dialog closes.
+   */
+  router.post("/check-updates", async (req, res) => {
+    const cfg = readAppConfig();
+    if (!cfg.vault_path) {
+      res.status(409).json({ error: "vault not configured" });
+      return;
+    }
+    const body = (req.body ?? {}) as CheckUpdatesRequest;
+    try {
+      const results = await checkUpdates(cfg.vault_path, body.skills);
+      res.json({ results });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  /** Overwrite selected vault skills with their upstream content. */
+  router.post("/update", async (req, res) => {
+    const cfg = readAppConfig();
+    if (!cfg.vault_path) {
+      res.status(409).json({ error: "vault not configured" });
+      return;
+    }
+    const body = req.body as ApplyUpdatesRequest;
+    if (!Array.isArray(body.items) || body.items.length === 0) {
+      res.status(400).json({ error: "items[] is required" });
+      return;
+    }
+    try {
+      const result = await applyUpdates(cfg.vault_path, body.items);
+      for (const skill of result.updated) {
+        recordActivity({ kind: "update", skill, ok: true, message: "updated from source" });
+      }
+      for (const s of result.skipped) {
+        recordActivity({ kind: "update", skill: s.name, ok: false, message: s.reason });
+      }
+      res.json(result);
+    } catch (err) {
+      recordActivity({
+        kind: "update",
+        skill: body.items.map((i) => i.name).join(","),
+        ok: false,
+        message: (err as Error).message,
+      });
+      res.status(500).json({ error: (err as Error).message });
     }
   });
 

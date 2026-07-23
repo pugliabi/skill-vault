@@ -28,6 +28,7 @@ export function BulkActionBar({
   onDemote,
   onAddProvider,
   onAddAllProviders,
+  onCheckUpdates,
   onApplyTags,
   onZip,
   onExportOpenClaw,
@@ -46,6 +47,11 @@ export function BulkActionBar({
   onAddProvider: (providerId: string) => void | Promise<void>;
   /** Add every configured provider to the selected skills in one pass. */
   onAddAllProviders?: () => void | Promise<void>;
+  /**
+   * Check the selected skills against their adopted sources. Present only
+   * when at least one selected skill has a recorded origin.
+   */
+  onCheckUpdates?: () => void;
   onApplyTags: (add: string[], remove: string[]) => void | Promise<void>;
   onZip: () => void | Promise<void>;
   /** Present only when the OpenClaw WSL gateway is detected (win32). */
@@ -128,6 +134,18 @@ export function BulkActionBar({
         onAddAll={onAddAllProviders}
         disabled={count === 0}
       />
+      {onCheckUpdates && (
+        <Button
+          kind="default"
+          size="sm"
+          icon={Icon.pull}
+          onClick={guarded(onCheckUpdates)}
+          disabled={count === 0}
+          title="Check the selected skills against their adopted sources for upstream changes"
+        >
+          Check updates
+        </Button>
+      )}
       <BulkTagButton
         selectedSkills={selectedSkills}
         allTags={allTags}

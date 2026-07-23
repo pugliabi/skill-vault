@@ -87,6 +87,13 @@ from skill_vault.discovery import (
 )
 from skill_vault.hashing import hash_directory
 from skill_vault.linking import LinkResult, is_link, link_skill_dir, unlink_or_remove
+from skill_vault.updates import (
+    apply_update,
+    build_origin,
+    check_updates,
+    local_dir_root,
+    rmtree_force,
+)
 
 console = Console()
 
@@ -2222,10 +2229,26 @@ def adopt(ctx, from_target: str | None, yes: bool, do_push: bool):
             # Provider isolation: only push to source provider by default
             targets = default_target
 
-        manifest.setdefault("skills", {})[s.name] = {
+        # Merge into any existing entry so tags/stage/unknown keys survive a
+        # re-adopt, and record a structured origin for `sv update` later.
+        entry = manifest.setdefault("skills", {}).get(s.name) or {}
+        entry.update({
             "targets": targets,
             "source": f"adopted from {s.source_tool}",
-        }
+        })
+        provider_root = agent_locs.get(source)
+        if provider_root and s.path.resolve().is_relative_to(provider_root):
+            o_root, o_subpath = provider_root, s.path.resolve().relative_to(provider_root).as_posix()
+        else:
+            o_root, o_subpath = s.path.parent, s.path.name
+        entry["origin"] = build_origin(
+            "provider",
+            path=o_root,
+            provider_id=source,
+            subpath=o_subpath,
+            vault_skill_dir=dest,
+        )
+        manifest["skills"][s.name] = entry
 
         h = hash_directory(dest)
         if h:
@@ -2412,11 +2435,18 @@ def scan(repo_path: str | None, do_adopt: bool, no_ai: bool):
                             dest = paths.staging / hit.skill_name
                             if hit.skill_path.is_dir():
                                 _copy_skill(hit.skill_path, dest)
-                            manifest.setdefault("skills", {})[hit.skill_name] = {
-                                "targets": [],
+                            entry = manifest.setdefault("skills", {}).get(hit.skill_name) or {}
+                            entry.update({
+                                "targets": entry.get("targets", []),
                                 "stage": "staging",
                                 "source": f"searched from {hit.repo_name}",
-                            }
+                            })
+                            if hit.skill_path.is_dir():
+                                o_root, o_subpath = local_dir_root(hit.skill_path)
+                                entry["origin"] = build_origin(
+                                    "dir", path=o_root, subpath=o_subpath, vault_skill_dir=dest,
+                                )
+                            manifest["skills"][hit.skill_name] = entry
                             console.print(f"  {ICON['ok']} {hit.skill_name} → staging [dim](from {hit.repo_name})[/]")
                         save_manifest(manifest, paths.manifest)
                         console.print(f"\n  {ICON['ok']} [bold]Imported {len(to_import_hits)} skill(s) to staging.[/]")
@@ -2802,11 +2832,18 @@ Respond in JSON format:
             dest.mkdir(parents=True, exist_ok=True)
             shutil.copy2(str(item.path), str(dest / item.path.name))
 
-        manifest.setdefault("skills", {})[item.name] = {
-            "targets": [],
+        entry = manifest.setdefault("skills", {}).get(item.name) or {}
+        entry.update({
+            "targets": entry.get("targets", []),
             "stage": "staging",
             "source": f"scanned from {target_path.name}",
-        }
+        })
+        if item.path.is_dir():
+            o_root, o_subpath = local_dir_root(item.path, fallback_root=target_path)
+            entry["origin"] = build_origin(
+                "dir", path=o_root, subpath=o_subpath, vault_skill_dir=dest,
+            )
+        manifest["skills"][item.name] = entry
         console.print(f"  {ICON['ok']} {item.name} → staging")
 
     save_manifest(manifest, paths.manifest)
@@ -2965,10 +3002,19 @@ def adopt_remote(url: str, branch: str | None, yes: bool):
             if not targets:
                 console.print(f"    [dim]vault-only (use [bold]sv share[/] to push to providers)[/]")
 
-            manifest.setdefault("skills", {})[s.name] = {
+            entry = manifest.setdefault("skills", {}).get(s.name) or {}
+            entry.update({
                 "targets": targets,
                 "source": f"adopted from {url}",
-            }
+            })
+            entry["origin"] = build_origin(
+                "git",
+                url=url,
+                ref=branch,
+                subpath=s.path.resolve().relative_to(repo_info.clone_dir.resolve()).as_posix(),
+                vault_skill_dir=dest,
+            )
+            manifest["skills"][s.name] = entry
 
             h = hash_directory(dest)
             if h:
@@ -2982,8 +3028,125 @@ def adopt_remote(url: str, branch: str | None, yes: bool):
         console.print(f"\n[bold green]Adopted {len(selected)} skill(s) from remote.[/] Run [bold]sv push[/] to sync them out.")
 
     finally:
-        # Always clean up the temp clone
-        shutil.rmtree(repo_info.clone_dir, ignore_errors=True)
+        # Always clean up the temp clone (rmtree_force clears the read-only
+        # bit on git object files, which plain rmtree leaves behind on Windows)
+        rmtree_force(repo_info.clone_dir)
+
+
+# ── UPDATE (pull upstream changes for adopted skills) ────────
+
+
+@cli.command()
+@click.argument("skill_names", nargs=-1)
+@click.option("--all", "update_all", is_flag=True,
+              help="Check every skill with a recorded origin (default when no names given)")
+@click.option("--check-only", is_flag=True, help="Report statuses without changing anything")
+@click.option("--yes", "-y", is_flag=True, help="Apply all safe updates without prompting (conflicts are never auto-applied)")
+def update(skill_names: tuple[str, ...], update_all: bool, check_only: bool, yes: bool):
+    """Check adopted skills against their sources and pull upstream changes.
+
+    Sources are recorded automatically at adopt time (sv adopt, sv scan,
+    sv adopt-remote). Local git checkouts are freshened with
+    `git pull --ff-only` before comparing; remote git origins are
+    shallow-cloned to a temp dir. A three-way hash comparison separates
+    safe updates (vault copy untouched since adoption) from conflicts
+    (both the vault copy and upstream changed).
+    """
+    _rule("Update from source")
+    cfg, paths = require_config()
+    manifest = load_manifest(paths.manifest)
+
+    names = list(skill_names) if skill_names else None
+    checks = check_updates(manifest, paths, names)
+    if not checks:
+        console.print("[yellow]No skills with a recorded origin to check.[/]")
+        console.print("[dim]Origins are recorded when skills are adopted — re-adopt a skill to start tracking its source.[/]")
+        return
+
+    STATUS_STYLE = {
+        "update_available": ("green", "update available"),
+        "conflict": ("yellow", "conflict (local changes)"),
+        "local_changed": ("cyan", "local changes only"),
+        "up_to_date": ("dim", "up to date"),
+        "no_origin": ("dim", "no origin recorded"),
+        "source_missing": ("red", "source missing"),
+        "upstream_missing": ("red", "gone upstream"),
+        "error": ("red", "error"),
+    }
+    tmp_roots = {c.tmp_root for c in checks if c.tmp_root}
+    try:
+        for c in checks:
+            color, label = STATUS_STYLE.get(c.status, ("white", c.status))
+            pulled = " [dim](pulled)[/]" if c.git_pulled else ""
+            extra = f" [dim]{c.message}[/]" if c.message else ""
+            console.print(f"  [{color}]{label:<24}[/] [bold]{c.name}[/]{pulled}{extra}")
+
+        updatable = [c for c in checks if c.status == "update_available"]
+        conflicts = [c for c in checks if c.status == "conflict"]
+
+        if not updatable and not conflicts:
+            if not check_only:
+                console.print(f"\n  {ICON['ok']} [green]Nothing to update.[/]")
+            return
+        if check_only:
+            return
+
+        if yes:
+            selected = list(updatable)
+        else:
+            def _update_title(c) -> str:
+                hashes = f"{(c.vault_hash or '?')[:8]} → {(c.upstream_hash or '?')[:8]}"
+                return f"{c.name:<30} {hashes}" + (f"  {c.message}" if c.message else "")
+
+            selected = _sectioned_checkbox(
+                "Select skills to update from source:",
+                {
+                    "Updates available": updatable,
+                    "Conflicts — local changes will be overwritten": conflicts,
+                },
+                title_fn=_update_title,
+                checked_fn=lambda c: c.status == "update_available",
+            )
+        if not selected:
+            console.print("[dim]Nothing selected.[/]")
+            return
+
+        applied = 0
+        for c in selected:
+            entry = manifest.setdefault("skills", {}).get(c.name)
+            if entry is None or c.upstream_path is None:
+                continue
+            if c.status == "conflict":
+                origin = c.origin or {}
+                origin_label = origin.get("url") or origin.get("path") or "source"
+                conflict = detect_conflict(c.name, paths.skills, c.upstream_path, str(origin_label))
+                if conflict is not None:
+                    console.print(f"\n  {ICON['warn']} [yellow]Conflict for '{c.name}':[/]")
+                    msg = resolve_interactive(conflict, paths.skills, machine_id=cfg.get("machine_id"))
+                    console.print(f"    {msg}")
+                    # Rebaseline the origin only when the vault now matches
+                    # upstream (the user took the incoming version). Keeping
+                    # the vault version must NOT refresh content_hash — that
+                    # would make a later `sv update -y` silently clobber the
+                    # local edits it just chose to keep.
+                    if hash_directory(paths.skills / c.name) == c.upstream_hash:
+                        from skill_vault.updates import refresh_origin
+                        entry["origin"] = refresh_origin(origin, paths.skills / c.name)
+                        applied += 1
+                    continue
+                # Not in skills/ (e.g. staged) — no interactive machinery; the
+                # user explicitly selected the conflict row, so overwrite.
+            apply_update(c, paths, entry)
+            applied += 1
+            console.print(f"  {ICON['ok']} [bold]{c.name}[/] updated")
+
+        save_manifest(manifest, paths.manifest)
+        if applied:
+            console.print(f"\n  {ICON['ok']} [bold green]Updated {applied} skill(s).[/]")
+            _suggest("Run [bold]sv push[/] to sync the updated skills to agents")
+    finally:
+        for t in tmp_roots:
+            rmtree_force(t)
 
 
 # ── SHARE (cross-publish to other providers) ─────────────────

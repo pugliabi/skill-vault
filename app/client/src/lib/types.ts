@@ -8,6 +8,22 @@
  * exercise; both sides conform to `docs/vault-format.md`.
  */
 
+/**
+ * Structured provenance recorded at adopt/import time so a skill can later
+ * be checked and updated from its original source (mirrors
+ * server/types/vault.ts SkillOrigin).
+ */
+export interface SkillOrigin {
+  type: "git" | "dir" | "provider";
+  url?: string;
+  path?: string;
+  provider_id?: string;
+  subpath: string;
+  ref?: string;
+  adopted_at: string;
+  content_hash: string;
+}
+
 export type TargetStatus = "synced" | "stale" | "missing" | "error";
 export type SkillStatus =
   | "synced"
@@ -33,6 +49,8 @@ export interface Skill {
   target_status: Record<string, TargetStatus>;
   /** Aggregate status — server-derived. */
   status: SkillStatus;
+  /** Structured provenance when the skill was adopted from a trackable source. */
+  origin?: SkillOrigin;
 }
 
 export interface FileNode {
@@ -93,6 +111,43 @@ export interface AdoptScanResult {
   /** First line of the SKILL.md description, if any. Empty when absent. */
   description?: string;
   already_in_vault: boolean;
+  /**
+   * Only meaningful when `already_in_vault` — true when the incoming copy's
+   * content differs from the vault copy (re-adopting would change it).
+   */
+  update_available?: boolean;
+}
+
+// ── Update-from-source payloads ────────────────────────────────
+
+export type UpdateStatus =
+  | "up_to_date"
+  | "update_available"
+  | "local_changed"
+  | "conflict"
+  | "no_origin"
+  | "source_missing"
+  | "upstream_missing"
+  | "error";
+
+export interface UpdateCheckResult {
+  name: string;
+  status: UpdateStatus;
+  origin?: SkillOrigin;
+  vault_hash?: string;
+  upstream_hash?: string;
+  recorded_hash?: string;
+  /** Absolute dir holding the upstream copy (local dir or inside a temp clone). */
+  upstream_path?: string;
+  /** Set when a temp clone was made; echo to /update and /cleanup. */
+  tmp_path?: string;
+  git_pulled?: boolean;
+  message?: string;
+}
+
+export interface ApplyUpdatesResult {
+  updated: string[];
+  skipped: { name: string; reason: string }[];
 }
 
 export type LinkMethod = "symlink" | "junction" | "copy" | "auto";
@@ -156,6 +211,7 @@ export type ActivityKind =
   | "push"
   | "pull"
   | "adopt"
+  | "update"
   | "promote"
   | "demote"
   | "remove"

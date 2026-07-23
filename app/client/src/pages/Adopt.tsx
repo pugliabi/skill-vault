@@ -45,6 +45,21 @@ function pickedItems(
   return out;
 }
 
+/** A row the user may select: new to the vault, or in-vault but changed. */
+function isSelectable(r: AdoptScanResult): boolean {
+  return !r.already_in_vault || Boolean(r.update_available);
+}
+
+/**
+ * Whether the current selection includes any in-vault "update available"
+ * rows — the only case where the import request sends `overwrite`.
+ */
+function hasPickedUpdates(results: AdoptScanResult[] | null, picked: Set<string>): boolean {
+  return (results ?? []).some(
+    (r) => picked.has(r.path) && r.already_in_vault && r.update_available,
+  );
+}
+
 /** Directory portion of a result's rel_path, formatted as a dim breadcrumb. */
 function relDir(r: AdoptScanResult): string {
   const rel = r.rel_path ?? "";
@@ -84,11 +99,13 @@ function groupByName(rows: AdoptScanResult[]): AdoptScanResult[] {
   return [...groups.values()].map((g) => ({ ...g.rep, dup_count: g.copies, variant_count: g.variants }));
 }
 
-/** Toast text for an import result, noting any skipped (collision) skills. */
-function adoptSummary(res: { imported: string[]; skipped: string[] }): string {
-  const base = `Adopted ${res.imported.length} skill(s)`;
+/** Toast text for an import result, noting updates and skipped skills. */
+function adoptSummary(res: { imported: string[]; updated?: string[]; skipped: string[] }): string {
+  const parts = [`Adopted ${res.imported.length} skill(s)`];
+  if (res.updated && res.updated.length > 0) parts.push(`${res.updated.length} updated`);
   const n = res.skipped?.length ?? 0;
-  return n > 0 ? `${base} · ${n} skipped (name already taken)` : base;
+  if (n > 0) parts.push(`${n} skipped (name already taken)`);
+  return parts.join(" · ");
 }
 
 export default function Adopt() {
@@ -253,6 +270,8 @@ function PathMode({ droppedPath, onDropConsumed }: { droppedPath: string | null;
       const res = await api.importAdopt({
         source_path: scanPath.trim(),
         items: pickedItems(results, picked),
+        overwrite: hasPickedUpdates(results, picked),
+        origin_context: { type: "dir", root: scanPath.trim() },
       });
       toast.success(adoptSummary(res));
       qc.invalidateQueries({ queryKey: ["skills"] });
@@ -366,6 +385,8 @@ function ProviderMode() {
         source_path: prov.path,
         items: pickedItems(results, picked),
         provider_id: selectedProvider,
+        overwrite: hasPickedUpdates(results, picked),
+        origin_context: { type: "provider", root: prov.path, provider_id: selectedProvider },
       });
       toast.success(adoptSummary(res));
       qc.invalidateQueries({ queryKey: ["skills"] });
@@ -604,6 +625,13 @@ function GitUrlMode() {
       const res = await api.importAdopt({
         source_path: tmpPath,
         items: pickedItems(results, picked),
+        overwrite: hasPickedUpdates(results, picked),
+        origin_context: {
+          type: "git",
+          url: url.trim(),
+          ref: branch.trim() || undefined,
+          root: tmpPath,
+        },
       });
       toast.success(adoptSummary(res));
       qc.invalidateQueries({ queryKey: ["skills"] });
@@ -730,8 +758,9 @@ function ResultsTable({
 
   // Selection is keyed by absolute PATH (each row is unique) — not name —
   // so duplicate-named rows are independently selectable. Select-all targets
-  // exactly the new, currently-shown rows, so a search narrows the picks.
-  const selectableKeys = filtered.filter((r) => !r.already_in_vault).map((r) => r.path);
+  // exactly the new + update-available currently-shown rows, so a search
+  // narrows the picks.
+  const selectableKeys = filtered.filter(isSelectable).map((r) => r.path);
   const sel = useChecklistSelection(selectableKeys, picked, setPicked);
 
   const toggleCollapse = () => {
@@ -747,8 +776,18 @@ function ResultsTable({
   // How many distinct names the current selection covers — i.e. how many
   // skills will actually import (the rest collide and get skipped).
   const pickedNames = new Set<string>();
-  for (const r of results) if (picked.has(r.path)) pickedNames.add(r.name);
+  const pickedUpdateNames = new Set<string>();
+  for (const r of results) {
+    if (!picked.has(r.path)) continue;
+    pickedNames.add(r.name);
+    if (r.already_in_vault && r.update_available) pickedUpdateNames.add(r.name);
+  }
   const collisions = picked.size - pickedNames.size;
+  const adoptCount = pickedNames.size - pickedUpdateNames.size;
+  const adoptLabel = [
+    ...(adoptCount > 0 || pickedUpdateNames.size === 0 ? [`Adopt ${adoptCount}`] : []),
+    ...(pickedUpdateNames.size > 0 ? [`Update ${pickedUpdateNames.size}`] : []),
+  ].join(" · ");
 
   return (
     <div>
@@ -832,7 +871,7 @@ function ResultsTable({
         </div>
         {picked.size > 0 && (
           <Button kind="primary" size="sm" onClick={onAdopt} disabled={adopting}>
-            {adopting ? "Adopting…" : `Adopt ${pickedNames.size}`}
+            {adopting ? "Adopting…" : adoptLabel}
           </Button>
         )}
       </div>
@@ -852,6 +891,7 @@ function ResultsTable({
         ) : (
           visible.map((r) => {
             const inVault = r.already_in_vault;
+            const selectable = isSelectable(r);
             const dir = relDir(r);
             // Expanded view: this name also appears with DIFFERENT content elsewhere.
             const sameNameOther = !collapse && (nameCounts.get(r.name) ?? 0) > 1;
@@ -861,22 +901,22 @@ function ResultsTable({
               <div
                 key={r.path}
                 onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); }}
-                onClick={(e) => { if (!inVault) sel.onItemClick(r.path, e); }}
+                onClick={(e) => { if (selectable) sel.onItemClick(r.path, e); }}
                 style={{
                   display: "flex",
                   alignItems: "center",
                   gap: 10,
                   padding: "9px 14px",
                   borderBottom: "0.5px solid var(--border)",
-                  cursor: inVault ? "default" : "pointer",
-                  opacity: inVault ? 0.5 : 1,
+                  cursor: selectable ? "pointer" : "default",
+                  opacity: selectable ? 1 : 0.5,
                   userSelect: "none",
                 }}
               >
                 <input
                   type="checkbox"
                   checked={picked.has(r.path)}
-                  disabled={inVault}
+                  disabled={!selectable}
                   readOnly
                   style={{ accentColor: "var(--accent)", flexShrink: 0 }}
                 />
@@ -935,7 +975,15 @@ function ResultsTable({
                 {r.has_skill_md && (
                   <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--ok)", flexShrink: 0 }}>SKILL.md</span>
                 )}
-                {inVault && (
+                {inVault && r.update_available && (
+                  <span
+                    title="Already in the vault, but this copy's content differs — selecting it will overwrite the vault copy"
+                    style={{ fontFamily: "var(--mono)", fontSize: 10.5, fontWeight: 500, color: "var(--warn)", flexShrink: 0 }}
+                  >
+                    update available
+                  </span>
+                )}
+                {inVault && !r.update_available && (
                   <span style={{ fontFamily: "var(--mono)", fontSize: 10.5, color: "var(--neutral)", flexShrink: 0 }}>in vault</span>
                 )}
               </div>
