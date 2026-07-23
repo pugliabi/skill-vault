@@ -4,7 +4,7 @@ import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { api, ApiError } from "../lib/api";
 import { Icon } from "./ui/icons";
-import { Button, StatusBadge } from "./ui/primitives";
+import { Button, DesktopBadge, StatusBadge } from "./ui/primitives";
 import { timeAgo } from "../lib/status";
 import { FilePreviewPane } from "./FilePreviewPane";
 import { TargetsTab } from "./TargetsTab";
@@ -210,6 +210,7 @@ export function SkillSidePanel({
         {/* Stage badge (interactive) + status */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
           <StatusBadge status={skill.status} size="lg" />
+          <DesktopBadge status={skill.desktop_status} size="lg" />
           <div ref={stageMenuRef} style={{ position: "relative" }}>
             <button
               onClick={() => setStageMenuOpen(!stageMenuOpen)}

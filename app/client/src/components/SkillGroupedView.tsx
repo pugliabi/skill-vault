@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Skill } from "../lib/types";
-import { StatusBadge } from "./ui/primitives";
+import { DesktopBadge, StatusBadge } from "./ui/primitives";
 import { TagChips } from "./TagChips";
 
 type GroupByKey = "tag" | "provider" | "stage" | "status";
@@ -235,6 +235,7 @@ function GroupSection({
             </span>
             {s.tags.length > 0 && <TagChips tags={s.tags} />}
             <span style={{ flex: 1 }} />
+            <DesktopBadge status={s.desktop_status} />
             <StatusBadge status={s.status} />
           </div>
         ))}

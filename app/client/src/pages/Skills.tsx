@@ -65,7 +65,7 @@ export default function Skills() {
 
   const urlFilter = searchParams.get("filter") as Filter | null;
   const [filter, setFilter] = useState<Filter>(
-    urlFilter && ["all", "production", "staging", "stale", "vault-only", "missing"].includes(urlFilter)
+    urlFilter && ["all", "production", "staging", "stale", "vault-only", "missing", "desktop-outdated"].includes(urlFilter)
       ? urlFilter
       : "all"
   );
