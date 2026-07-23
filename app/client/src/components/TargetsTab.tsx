@@ -53,7 +53,13 @@ export function TargetsTab({ skill }: { skill: Skill }) {
   // Settings → Capabilities → Skills.
   const packageDesktop = useMutation({
     mutationFn: () => api.packageForDesktop(skill.name),
-    onSuccess: (r) => toast.success(`Packaged → ${r.zip_path}`),
+    onSuccess: (r) => {
+      toast.success(`Packaged → ${r.zip_path}`);
+      // Packaging records desktop_package in the manifest — refresh so the
+      // desktop badge flips to current.
+      qc.invalidateQueries({ queryKey: ["skill", skill.name] });
+      qc.invalidateQueries({ queryKey: ["skills"] });
+    },
     onError: (err) =>
       toast.error(err instanceof ApiError ? err.message : "Package failed"),
   });
@@ -221,6 +227,28 @@ export function TargetsTab({ skill }: { skill: Skill }) {
           <span style={{ fontSize: 13, color: "var(--ink)", flex: 1 }}>
             claude-desktop
           </span>
+          {skill.desktop_status !== "not-packaged" && (
+            <span
+              style={{
+                fontFamily: "var(--mono)",
+                fontSize: 10.5,
+                fontWeight: 500,
+                color:
+                  skill.desktop_status === "current"
+                    ? "var(--ok)"
+                    : "var(--warn)",
+                textTransform: "lowercase",
+                letterSpacing: "0.04em",
+              }}
+              title={
+                skill.desktop_package
+                  ? `Last packaged ${new Date(skill.desktop_package.packaged_at).toLocaleString()}`
+                  : undefined
+              }
+            >
+              ·{skill.desktop_status}
+            </span>
+          )}
           <span
             style={{
               fontFamily: "var(--mono)",
@@ -236,6 +264,16 @@ export function TargetsTab({ skill }: { skill: Skill }) {
           </span>
           <ProviderChip slug="claude-desktop" />
         </div>
+        {skill.desktop_status === "outdated" && (
+          <div style={{ fontSize: 11.5, color: "var(--ink-3)", paddingLeft: 22 }}>
+            The vault copy changed since this skill was packaged
+            {skill.desktop_package
+              ? ` on ${new Date(skill.desktop_package.packaged_at).toLocaleDateString()}`
+              : ""}
+            . Re-package, then upload the new zip in Claude Desktop →
+            Settings → Capabilities → Skills.
+          </div>
+        )}
         <div style={{ display: "flex", gap: 6, paddingLeft: 22 }}>
           <Button
             kind="ghost"
@@ -245,7 +283,11 @@ export function TargetsTab({ skill }: { skill: Skill }) {
             disabled={packageDesktop.isPending}
             title="Build an upload-ready zip in the staging folder, then upload it in Claude Desktop → Settings → Capabilities → Skills"
           >
-            {packageDesktop.isPending ? "Packaging…" : "Package zip"}
+            {packageDesktop.isPending
+              ? "Packaging…"
+              : skill.desktop_status === "outdated"
+                ? "Re-package zip"
+                : "Package zip"}
           </Button>
           <Button
             kind="ghost"

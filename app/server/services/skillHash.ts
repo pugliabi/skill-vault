@@ -121,8 +121,12 @@ const RSTRIP_RE =
 
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: false });
 
-function normalizedFileHash(abs: string, fileName: string): string {
-  const raw = fs.readFileSync(abs);
+/**
+ * Normalized hash of one file's bytes — the per-file step of the canonical
+ * algorithm, exposed so callers with in-memory content (zip entries in the
+ * desktop backfill) produce digests identical to on-disk hashing.
+ */
+export function normalizedContentHash(fileName: string, raw: Buffer): string {
   const ext = path.extname(fileName).toLowerCase();
   if (NORMALIZED_BINARY_EXTS.has(ext)) {
     return crypto.createHash("sha256").update(raw).digest("hex");
@@ -134,6 +138,10 @@ function normalizedFileHash(abs: string, fileName: string): string {
     .join("\n")
     .replace(/\n+$/, "");
   return crypto.createHash("sha256").update(Buffer.from(normalized, "utf8")).digest("hex");
+}
+
+function normalizedFileHash(abs: string, fileName: string): string {
+  return normalizedContentHash(fileName, fs.readFileSync(abs));
 }
 
 function walkNormalized(rootDir: string, rel: string, out: string[]): void {
@@ -190,6 +198,30 @@ export function hashSkillDirNormalized(rootDir: string): string | null {
       // never being pointed at files it cannot read.
     }
   }
+  if (hashes.length === 0) return "empty";
+  return crypto.createHash("sha256").update(hashes.join(""), "ascii").digest("hex");
+}
+
+/**
+ * Canonical normalized content hash over an in-memory file list (the zip
+ * variant of hashSkillDirNormalized, used by the desktop backfill). `rel`
+ * paths must be "/"-separated relative to the skill root. Applies the same
+ * skip set, sort order, and combination as the directory walker, so a zip
+ * whose entries match a directory's files byte-for-byte produces the same
+ * digest. Returns `"empty"` when nothing hashable remains.
+ */
+export function hashFileBuffersNormalized(
+  files: Array<{ rel: string; data: Buffer }>,
+): string {
+  const eligible = files.filter(
+    (f) => !f.rel.split("/").some((seg) => NORMALIZED_SKIP.has(seg)),
+  );
+  eligible.sort((a, b) => {
+    const x = a.rel.toLowerCase();
+    const y = b.rel.toLowerCase();
+    return x < y ? -1 : x > y ? 1 : 0;
+  });
+  const hashes = eligible.map((f) => normalizedContentHash(f.rel, f.data));
   if (hashes.length === 0) return "empty";
   return crypto.createHash("sha256").update(hashes.join(""), "ascii").digest("hex");
 }

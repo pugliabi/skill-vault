@@ -7,6 +7,7 @@ import { Layout } from "../components/Layout";
 import { Icon } from "../components/ui/icons";
 import {
   Button,
+  DesktopBadge,
   KBD,
   ProviderChip,
   StatusBadge,
@@ -27,7 +28,14 @@ import { TagChips } from "../components/TagChips";
 import { loadPrefs, savePrefs, type SavedView, type SkillsPreferences } from "../lib/preferences";
 import type { Skill } from "../lib/types";
 
-type Filter = "all" | "production" | "staging" | "stale" | "vault-only" | "missing";
+type Filter =
+  | "all"
+  | "production"
+  | "staging"
+  | "stale"
+  | "vault-only"
+  | "missing"
+  | "desktop-outdated";
 
 export default function Skills() {
   const params = useParams<{ name?: string }>();
@@ -194,6 +202,8 @@ export default function Skills() {
       if (filter === "stale" && s.status !== "stale") return false;
       if (filter === "vault-only" && s.status !== "vault-only") return false;
       if (filter === "missing" && s.status !== "missing") return false;
+      if (filter === "desktop-outdated" && s.desktop_status !== "outdated")
+        return false;
       if (query) {
         const ql = query.toLowerCase();
         const localMatch =
@@ -726,6 +736,7 @@ export default function Skills() {
                     { id: "stale", label: "Stale" },
                     { id: "missing", label: "Missing" },
                     { id: "vault-only", label: "Vault-only" },
+                    { id: "desktop-outdated", label: "Desktop" },
                   ] as Array<{ id: Filter; label: string }>
                 ).map((f) => (
                   <button
@@ -1303,7 +1314,10 @@ function SkillRow({
           s.targets.map((t) => <ProviderChip key={t} slug={t} />)
         )}
       </div>
-      <StatusBadge status={status} />
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+        <StatusBadge status={status} />
+        <DesktopBadge status={s.desktop_status} />
+      </span>
       {/* Preview button */}
       <button
         onClick={onPreview}

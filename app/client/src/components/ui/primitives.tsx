@@ -61,6 +61,53 @@ export function StatusBadge({
   );
 }
 
+/* ── DesktopBadge ────────────────────────────────────────────────── */
+
+/**
+ * Claude Desktop packaging state. Rendered only when the skill was ever
+ * packaged — "not-packaged" is the silent default, since packaging is
+ * opt-in per skill.
+ */
+export function DesktopBadge({
+  status,
+  size = "sm",
+}: {
+  status: "current" | "outdated" | "not-packaged";
+  size?: "sm" | "lg";
+}) {
+  if (status === "not-packaged") return null;
+  const current = status === "current";
+  const color = current ? "var(--ok)" : "var(--warn)";
+  const bg = current ? "var(--ok-bg)" : "var(--warn-bg)";
+  const sz = size === "lg" ? { fs: 11, py: 3, px: 8 } : { fs: 10, py: 2, px: 7 };
+  return (
+    <span
+      title={
+        current
+          ? "Packaged for Claude Desktop — zip matches the vault copy"
+          : "Vault copy changed since it was packaged for Claude Desktop — re-package and re-upload"
+      }
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+        fontFamily: "var(--mono)",
+        fontSize: sz.fs,
+        fontWeight: 500,
+        color,
+        background: bg,
+        padding: `${sz.py}px ${sz.px}px`,
+        borderRadius: 4,
+        letterSpacing: "0.01em",
+        whiteSpace: "nowrap",
+        border: `0.5px solid ${color}22`,
+      }}
+    >
+      {current ? "desktop ✓" : "desktop outdated"}
+    </span>
+  );
+}
+
 /* ── ProviderChip ────────────────────────────────────────────────── */
 
 export function ProviderChip({

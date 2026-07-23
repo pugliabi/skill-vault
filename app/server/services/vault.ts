@@ -12,6 +12,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type {
+  DesktopStatus,
   FileNode,
   ManifestSkill,
   Provider,
@@ -21,6 +22,7 @@ import type {
   SkillsManifest,
   TargetStatus,
 } from "../types/vault.ts";
+import { hashSkillDirNormalized } from "./skillHash.ts";
 import { statusByTarget } from "./syncStatus.ts";
 
 // ── Path helpers ────────────────────────────────────────────────
@@ -116,7 +118,9 @@ export function writeManifest(
   const file = manifestPath(vaultPath);
   fs.mkdirSync(vaultPath, { recursive: true });
   const tmp = `${file}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(manifest, null, 2), "utf-8");
+  // Trailing newline matches the Python writer (config.py:save_manifest)
+  // so diffs stay minimal when both tools rewrite the file.
+  fs.writeFileSync(tmp, JSON.stringify(manifest, null, 2) + "\n", "utf-8");
   fs.renameSync(tmp, file);
 }
 
@@ -269,6 +273,14 @@ export function listSkills(vaultPath: string, providers: Provider[] = []): Skill
       providers.length && targets.length
         ? statusByTarget(sp, providers, name, targets)
         : Object.fromEntries(targets.map((t) => [t, "synced" as TargetStatus]));
+    // Claude Desktop drift: only skills with a desktop_package record pay
+    // for the normalized hash — never-packaged skills short-circuit.
+    let desktopStatus: DesktopStatus = "not-packaged";
+    if (entry.desktop_package) {
+      const vaultHash = exists ? hashSkillDirNormalized(sp) : null;
+      desktopStatus =
+        vaultHash === entry.desktop_package.content_hash ? "current" : "outdated";
+    }
     out.push({
       name,
       targets,
@@ -282,6 +294,10 @@ export function listSkills(vaultPath: string, providers: Provider[] = []): Skill
       created_at: createdAt,
       target_status: byTarget,
       status: aggregateStatus(stage, targets, byTarget),
+      desktop_status: desktopStatus,
+      ...(entry.desktop_package
+        ? { desktop_package: entry.desktop_package }
+        : {}),
       ...(entry.origin ? { origin: entry.origin } : {}),
     });
   }

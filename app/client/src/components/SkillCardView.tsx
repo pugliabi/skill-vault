@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Skill } from "../lib/types";
-import { ProviderChip, StatusBadge } from "./ui/primitives";
+import { DesktopBadge, ProviderChip, StatusBadge } from "./ui/primitives";
 import { TagChips } from "./TagChips";
 
 export function SkillCardView({
@@ -159,6 +159,7 @@ function SkillCard({
         }}
       >
         <StatusBadge status={s.status} />
+        <DesktopBadge status={s.desktop_status} />
         <span style={{ flex: 1 }} />
         {s.targets.length > 0 ? (
           s.targets.map((t) => <ProviderChip key={t} slug={t} />)

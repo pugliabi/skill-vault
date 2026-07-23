@@ -499,6 +499,27 @@ function ClaudeDesktopSection({
       toast.error(err instanceof ApiError ? err.message : "Open failed"),
   });
 
+  // Seed desktop_package records from zips built before status tracking
+  // existed. Safe to re-run — existing records are never overwritten.
+  const backfill = useMutation({
+    mutationFn: () => api.desktopBackfill(),
+    onSuccess: (r) => {
+      const outdated = r.seeded.filter(
+        (s) => s.desktop_status === "outdated",
+      ).length;
+      toast.success(
+        r.seeded.length === 0
+          ? "No new zips found to backfill"
+          : `Backfilled ${r.seeded.length} skill${r.seeded.length === 1 ? "" : "s"}${
+              outdated ? ` (${outdated} outdated)` : ""
+            }`,
+      );
+      qc.invalidateQueries({ queryKey: ["skills"] });
+    },
+    onError: (err) =>
+      toast.error(err instanceof ApiError ? err.message : "Backfill failed"),
+  });
+
   const stage = config?.claude_desktop_stage ?? "";
 
   return (
@@ -521,7 +542,10 @@ function ClaudeDesktopSection({
           Claude Desktop loads skills from your claude.ai account — there is no local
           skills folder to link into. Pushing to this target builds an upload-ready zip
           in the staging folder below; finish by uploading it in Claude Desktop →
-          Settings → Capabilities → Skills.
+          Settings → Capabilities → Skills. Each packaging is recorded, so skills show
+          a desktop badge that flips to “outdated” when the vault copy changes and the
+          zip needs a re-package + re-upload. Zips built before this tracking existed
+          can be imported with “Scan existing zips”.
         </p>
         <div
           style={{
@@ -609,6 +633,15 @@ function ClaudeDesktopSection({
                 disabled={reveal.isPending}
               >
                 Open folder
+              </Button>
+              <Button
+                kind="ghost"
+                size="sm"
+                onClick={() => backfill.mutate()}
+                disabled={backfill.isPending}
+                title="Look for <skill>.zip files in the staging folder and provider directories, and record them as packaged for Claude Desktop"
+              >
+                {backfill.isPending ? "Scanning…" : "Scan existing zips"}
               </Button>
             </div>
           )}

@@ -161,14 +161,23 @@ export function computeSyncPlan(
     .map((s) => ({ name: s.name, modified_at: s.modified_at }));
 
   // Claude Desktop re-packaging: a production skill is stale for desktop
-  // when its zip already exists in the stage dir but the skill folder has
-  // changed since the zip was built. Never-packaged skills are skipped —
-  // packaging is opt-in via the per-skill "Package zip" action.
+  // when the vault copy no longer matches what was last packaged.
+  // Preferred signal: the desktop_package hash record listSkills already
+  // compared (accurate, survives zip deletion). Fallback for skills with
+  // a zip but no record yet (pre-backfill): zip mtime vs folder mtime.
+  // Never-packaged skills are skipped — packaging is opt-in via the
+  // per-skill "Package zip" action.
   const stageDir = readClaudeDesktopStage() ?? defaultStageDir(vaultPath);
   const packagePlan: SyncPlan["package"] = [];
   for (const s of skills) {
     if (s.stage !== "production") continue;
     const zipPath = path.join(stageDir, `${s.name}.zip`);
+    if (s.desktop_status !== "not-packaged") {
+      if (s.desktop_status === "outdated") {
+        packagePlan.push({ skill: s.name, reason: "stale", zip_path: zipPath });
+      }
+      continue;
+    }
     let zipMtime: number;
     try {
       zipMtime = fs.statSync(zipPath).mtimeMs;

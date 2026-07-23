@@ -23,9 +23,50 @@
 import fs from "node:fs";
 import path from "node:path";
 import archiver from "archiver";
+import AdmZip from "adm-zip";
+import { hashFileBuffersNormalized } from "./skillHash.ts";
 
 export function defaultStageDir(vaultPath: string): string {
   return path.resolve(vaultPath, "..", ".claude-desktop-packages");
+}
+
+/**
+ * Normalized content hash of a zip's payload, comparable 1:1 with
+ * hashSkillDirNormalized() of the folder the zip was built from.
+ *
+ * Handles the wrapper-folder contract: when every entry lives under a
+ * single top-level folder (the claude.ai upload format above), that
+ * folder is stripped so entry paths line up with the skill folder's
+ * relative paths. Zips built without the wrapper (the generic
+ * /api/skills/zip route) hash as-is. Returns null when the zip can't
+ * be read.
+ */
+export function hashZipContentsNormalized(zipPath: string): string | null {
+  let entries: Array<{ rel: string; data: Buffer }>;
+  try {
+    const zip = new AdmZip(zipPath);
+    entries = zip
+      .getEntries()
+      .filter((e) => !e.isDirectory)
+      .map((e) => ({
+        rel: e.entryName.replace(/\\/g, "/"),
+        data: e.getData(),
+      }));
+  } catch {
+    return null;
+  }
+  if (entries.length === 0) return "empty";
+
+  const firstSegs = new Set(entries.map((e) => e.rel.split("/")[0]));
+  const hasWrapper =
+    firstSegs.size === 1 && entries.every((e) => e.rel.includes("/"));
+  if (hasWrapper) {
+    entries = entries.map((e) => ({
+      rel: e.rel.slice(e.rel.indexOf("/") + 1),
+      data: e.data,
+    }));
+  }
+  return hashFileBuffersNormalized(entries);
 }
 
 export async function packageForClaudeDesktop(

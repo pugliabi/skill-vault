@@ -32,6 +32,19 @@ export type SkillStatus =
   | "staging"
   | "missing";
 
+/**
+ * Claude Desktop packaging state (mirrors server/types/vault.ts
+ * DesktopStatus). Separate from SkillStatus — claude-desktop is a
+ * package target, not a `targets` entry.
+ */
+export type DesktopStatus = "current" | "outdated" | "not-packaged";
+
+/** Last Claude Desktop packaging of a skill (mirrors DesktopPackageInfo). */
+export interface DesktopPackageInfo {
+  packaged_at: string;
+  content_hash: string;
+}
+
 export interface Skill {
   name: string;
   targets: string[];
@@ -49,6 +62,10 @@ export interface Skill {
   target_status: Record<string, TargetStatus>;
   /** Aggregate status — server-derived. */
   status: SkillStatus;
+  /** Claude Desktop packaging state — server-derived (hash comparison). */
+  desktop_status: DesktopStatus;
+  /** Last Desktop packaging record, when ever packaged. */
+  desktop_package?: DesktopPackageInfo;
   /** Structured provenance when the skill was adopted from a trackable source. */
   origin?: SkillOrigin;
 }
@@ -90,6 +107,19 @@ export interface DesktopPackageResult {
   skill: string;
   zip_path: string;
   stage_dir: string;
+  /** Normalized vault hash recorded in the skill's desktop_package. */
+  content_hash: string;
+  packaged_at: string;
+}
+
+/** Result of POST /api/desktop/backfill — seeding records from existing zips. */
+export interface DesktopBackfillResult {
+  seeded: Array<{
+    skill: string;
+    zip_path: string;
+    desktop_status: "current" | "outdated";
+  }>;
+  skipped: Array<{ zip: string; reason: string }>;
 }
 
 export interface AdoptScanResult {

@@ -33,6 +33,20 @@ export interface SkillOrigin {
   content_hash: string;
 }
 
+/**
+ * Record of the last Claude Desktop packaging of a skill. Written when the
+ * upload-ready zip is built (POST /api/desktop) or seeded by the backfill
+ * from an existing zip. Claude Desktop skills live in the user's claude.ai
+ * account with no list/upload API, so this record — not the account — is
+ * what desktop staleness is computed against ("packaged = uploaded" proxy).
+ */
+export interface DesktopPackageInfo {
+  /** ISO 8601 UTC timestamp of the packaging (zip mtime when backfilled). */
+  packaged_at: string;
+  /** Normalized content hash of the vault copy when the zip was built. */
+  content_hash: string;
+}
+
 /** One entry in the `skills` map in `skills.json`. */
 export interface ManifestSkill {
   /** Which providers this skill should be pushed to (e.g. "claude", "cursor"). */
@@ -45,6 +59,8 @@ export interface ManifestSkill {
   tags?: string[];
   /** Structured provenance for update-from-source. Optional. */
   origin?: SkillOrigin;
+  /** Last Claude Desktop packaging, if the skill was ever packaged. */
+  desktop_package?: DesktopPackageInfo;
 }
 
 /** Top-level shape of `<vault>/skills.json`. */
@@ -71,6 +87,16 @@ export type SkillStatus =
   | "staging"
   | "missing";
 
+/**
+ * Claude Desktop packaging state, kept separate from the aggregate
+ * SkillStatus because claude-desktop is a package target, not a `targets`
+ * entry (see routes/desktop.ts).
+ *   - current      — desktop_package.content_hash matches the vault copy
+ *   - outdated     — vault changed since packaging → re-package + re-upload
+ *   - not-packaged — never packaged (no desktop_package record)
+ */
+export type DesktopStatus = "current" | "outdated" | "not-packaged";
+
 export interface Skill {
   name: string;
   targets: string[];
@@ -91,6 +117,10 @@ export interface Skill {
   target_status: Record<string, TargetStatus>;
   /** Aggregate state derived from target_status + stage + targets. */
   status: SkillStatus;
+  /** Claude Desktop packaging state (hash-compared at read time). */
+  desktop_status: DesktopStatus;
+  /** Last Desktop packaging record, when the skill was ever packaged. */
+  desktop_package?: DesktopPackageInfo;
   /** Structured provenance when the skill was adopted from a trackable source. */
   origin?: SkillOrigin;
 }
@@ -147,6 +177,22 @@ export interface DesktopPackageResult {
   skill: string;
   zip_path: string;
   stage_dir: string;
+  /** Normalized vault hash recorded in the skill's desktop_package. */
+  content_hash: string;
+  packaged_at: string;
+}
+
+/** Result of POST /api/desktop/backfill — seeding records from existing zips. */
+export interface DesktopBackfillResult {
+  /** Skills that got a desktop_package record seeded from a found zip. */
+  seeded: Array<{
+    skill: string;
+    zip_path: string;
+    /** Status right after seeding — outdated means the zip predates vault edits. */
+    desktop_status: "current" | "outdated";
+  }>;
+  /** Zips that were found but skipped, with the reason. */
+  skipped: Array<{ zip: string; reason: string }>;
 }
 
 // ── API payloads ───────────────────────────────────────────────

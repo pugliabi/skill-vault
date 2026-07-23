@@ -19,7 +19,8 @@ export type SkillsFilterPill =
   | "staging"
   | "stale"
   | "vault-only"
-  | "missing";
+  | "missing"
+  | "desktop-outdated";
 
 /** A named snapshot of the Skills view state (excludes the transient search). */
 export interface SavedView {

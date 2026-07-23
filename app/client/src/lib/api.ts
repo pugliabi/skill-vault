@@ -4,6 +4,8 @@ import type {
   AppConfig,
   ApplyUpdatesResult,
   CreateSkillRequest,
+  DesktopBackfillResult,
+  DesktopPackageResult,
   FileContent,
   Provider,
   PullResult,
@@ -309,13 +311,16 @@ export const api = {
   // Claude Desktop has no local skills directory — "pushing" builds an
   // upload-ready zip in a staging folder (see routes/desktop.ts).
   packageForDesktop: (skill: string) =>
-    request<{ skill: string; zip_path: string; stage_dir: string }>(
-      "POST", "/api/desktop", { skill },
-    ),
+    request<DesktopPackageResult>("POST", "/api/desktop", { skill }),
   revealDesktopStage: () =>
     request<{ ok: boolean; stage_dir: string }>("POST", "/api/desktop/reveal"),
   setDesktopStage: (path: string) =>
     request<AppConfig>("PUT", "/api/desktop/stage", { path }),
+  // Seed desktop_package records from zips built before tracking existed
+  // (stage dir + provider dirs). Safe to re-run: existing records are
+  // never overwritten.
+  desktopBackfill: () =>
+    request<DesktopBackfillResult>("POST", "/api/desktop/backfill"),
 
   // ── openclaw (export target) ───────────────────────────────
   // OpenClaw runs in an isolated WSL distro with no filesystem bridge, so
