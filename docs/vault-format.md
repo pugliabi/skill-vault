@@ -62,7 +62,8 @@ did not originate (round-trip safe).
   "targets": ["claude", "cursor"],  // required, may be empty []
   "stage": "production",            // optional: "staging" | "production"
   "source": "adopted from claude",  // optional free-form provenance string
-  "origin": { /* SkillOrigin */ }   // optional structured provenance
+  "origin": { /* SkillOrigin */ },  // optional structured provenance
+  "desktop_package": { /* DesktopPackageInfo */ }  // optional last Claude Desktop packaging
 }
 ```
 
@@ -74,6 +75,7 @@ Field meanings:
 | `stage` | `"staging"` \| `"production"` | Lifecycle state. Missing = `"production"`. |
 | `source` | `string` | Free-form provenance for display. Conventional prefixes: `"adopted from <x>"`, `"pulled from <x>"`, `"scanned from <x>"`, `"searched from <x>"`. |
 | `origin` | `SkillOrigin` | Structured provenance for update-from-source. Optional (additive, compatibility rule 1). |
+| `desktop_package` | `DesktopPackageInfo` | Record of the last Claude Desktop packaging. Optional (additive, compatibility rule 1). |
 
 Readers MUST ignore unknown fields. Writers SHOULD preserve unknown fields
 when rewriting the manifest (round-trip safe).
@@ -119,6 +121,37 @@ read-only; only applying an update rewrites the skill dir and refreshes
 
 Readers MUST ignore unknown fields inside `origin` and writers SHOULD
 preserve them (same round-trip rule as the entry itself).
+
+### `SkillEntry.desktop_package` — Claude Desktop packaging record
+
+Claude Desktop loads skills from the user's claude.ai account. Custom
+skills there cannot be listed or uploaded programmatically (they don't
+sync across surfaces), so the vault tracks its own side of the exchange:
+when a skill is packaged into an upload-ready zip for Claude Desktop, the
+packaging is recorded here. Entries without `desktop_package` were never
+packaged.
+
+```jsonc
+{
+  "packaged_at": "2026-07-23T15:04:00Z",  // ISO 8601 UTC of the packaging
+  "content_hash": "<sha256>"              // normalized hash of the vault copy at package time
+}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `packaged_at` | `string` | ISO 8601 UTC timestamp of the packaging. When the record is backfilled from a pre-existing zip, this is the zip's mtime. |
+| `content_hash` | `string` | Normalized content hash (see below) of the vault copy when the zip was built. When backfilled, the hash of the zip's contents (wrapper folder stripped) — identical content produces an identical digest. |
+
+Derived desktop status (computed at read time, never stored): comparing
+`content_hash` against the vault copy's current hash yields `current`
+(match — the last packaged zip still reflects the vault) or `outdated`
+(vault changed since packaging; re-package and re-upload). No record
+means `not-packaged`. Because there is no way to inspect the claude.ai
+account, "packaged" is used as a proxy for "uploaded".
+
+Readers MUST ignore unknown fields inside `desktop_package` and writers
+SHOULD preserve them (same round-trip rule as the entry itself).
 
 ### Content hash algorithm
 
