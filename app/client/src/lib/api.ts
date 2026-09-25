@@ -1,5 +1,16 @@
 import type {
   ActivityEntry,
+  ClaudeStatus,
+  ConflictResolveBody,
+  DiffLine,
+  MergeResult,
+  NotionConflict,
+  NotionConflictItem,
+  NotionDirection,
+  NotionGuardStatus,
+  NotionPlan,
+  NotionPlanDiff,
+  NotionRunJob,
   AdoptScanResult,
   AppConfig,
   ApplyUpdatesResult,
@@ -83,8 +94,10 @@ async function request<T>(
   }
 
   if (!res.ok) {
+    const d = data as { error?: string; message?: string } | null;
+    // "busy" is a code; its message is the readable text.
     const msg =
-      (data as { error?: string })?.error ?? `Request failed (${res.status})`;
+      (d?.error === "busy" && d.message) || (d?.error ?? `Request failed (${res.status})`);
     throw new ApiError(msg, res.status, data);
   }
 
@@ -387,6 +400,47 @@ export const api = {
     }>("GET", "/api/notion/summary"),
   notionUnlink: (name: string) =>
     request<{ ok: boolean }>("POST", `/api/notion/skills/${encodeURIComponent(name)}/unlink`),
+  /** Forget an "unlinked" link so the next Link run can match the skill again. */
+  notionRelink: (name: string) =>
+    request<{ ok: boolean }>("POST", `/api/notion/skills/${encodeURIComponent(name)}/relink`),
   notionVaultOnly: (name: string) =>
     request<{ ok: boolean }>("POST", `/api/notion/skills/${encodeURIComponent(name)}/vault-only`),
+
+  // ── notion conflicts + Claude merge (Phase 4) ───────────────────
+  notionConflicts: () =>
+    request<{ skills: NotionConflictItem[] }>("GET", "/api/notion/conflicts"),
+  notionConflict: (name: string) =>
+    request<NotionConflict>("GET", `/api/notion/conflicts/${encodeURIComponent(name)}`),
+  notionMerge: (name: string, expected_notion_version: string) =>
+    request<MergeResult>("POST", `/api/notion/conflicts/${encodeURIComponent(name)}/merge`, {
+      expected_notion_version,
+    }),
+  notionResolve: (name: string, body: ConflictResolveBody) =>
+    request<{ ok: true; status: string | null }>(
+      "POST", `/api/notion/conflicts/${encodeURIComponent(name)}/resolve`, body,
+    ),
+  claudeStatus: () => request<ClaudeStatus>("GET", "/api/claude/status"),
+
+  // ── notion push/pull review, run, force (Phase 3) ───────────────
+  notionPlan: (direction: NotionDirection) =>
+    request<NotionPlan>("GET", `/api/notion/plan?direction=${direction}`),
+  notionPlanDiff: (direction: NotionDirection, row: string) =>
+    request<NotionPlanDiff>(
+      "GET", `/api/notion/plan/diff?direction=${direction}&row=${encodeURIComponent(row)}`,
+    ),
+  notionRun: (body: {
+    direction: NotionDirection;
+    rows: Array<{ id: string; action?: string }>;
+    override_guard?: boolean;
+  }) => request<{ job_id: string }>("POST", "/api/notion/run", body),
+  notionForce: (body: { direction: NotionDirection; skills?: string[]; override_guard?: boolean }) =>
+    request<{ job_id: string }>("POST", "/api/notion/force", body),
+  /** Non-force push of the selected skills (a Notion edit is never overwritten). */
+  notionPushSelected: (body: { skills: string[]; override_guard?: boolean }) =>
+    request<{ job_id: string }>("POST", "/api/notion/push-selected", body),
+  notionRunJob: (id: string) =>
+    request<NotionRunJob>("GET", `/api/notion/run/${encodeURIComponent(id)}`),
+  notionGuard: () => request<NotionGuardStatus>("GET", "/api/notion/guard"),
+  diffText: (a: string, b: string) =>
+    request<{ hunks: DiffLine[] | null; reason?: string }>("POST", "/api/diff/text", { a, b }),
 };

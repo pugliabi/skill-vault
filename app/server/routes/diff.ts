@@ -2,7 +2,7 @@ import { Router } from "express";
 import path from "node:path";
 import { readAppConfig } from "../services/appConfig.ts";
 import { skillDir } from "../services/vault.ts";
-import { computeSkillDiff } from "../services/diff.ts";
+import { MAX_DIFF_BYTES, computeSkillDiff, diffText } from "../services/diff.ts";
 
 /**
  * GET /api/diff?skill=<name>&provider_id=<id>
@@ -35,6 +35,22 @@ export function diffRouter(): Router {
     const vaultDir = skillDir(cfg.vault_path, skill);
     const targetDir = path.join(provider.path, skill);
     res.json(computeSkillDiff(vaultDir, targetDir));
+  });
+
+  /**
+   * POST /api/diff/text {a, b} → { hunks: DiffLine[] } (a → b), or
+   * { hunks: null, reason: "too-large" } past the size/line caps.
+   * Used by the Claude merge panel ("vs vault" / "vs Notion").
+   */
+  router.post("/text", (req, res) => {
+    const { a, b } = (req.body ?? {}) as { a?: unknown; b?: unknown };
+    if (typeof a !== "string" || typeof b !== "string") {
+      res.status(400).json({ error: "a and b must be strings" });
+      return;
+    }
+    const tooBig = Buffer.byteLength(a, "utf8") > MAX_DIFF_BYTES || Buffer.byteLength(b, "utf8") > MAX_DIFF_BYTES;
+    const hunks = tooBig ? null : diffText(a, b);
+    res.json(hunks ? { hunks } : { hunks: null, reason: "too-large" });
   });
 
   return router;

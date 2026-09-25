@@ -68,13 +68,7 @@ export function computeSkillDiff(vaultDir: string, targetDir: string): SkillDiff
     }
   }
 
-  const summary = {
-    added: files.filter((f) => f.change === "added").length,
-    removed: files.filter((f) => f.change === "removed").length,
-    modified: files.filter((f) => f.change === "modified").length,
-    same: files.filter((f) => f.change === "same").length,
-  };
-  return { files, summary };
+  return { files, summary: summarize(files) };
 }
 
 function buildModified(
@@ -102,33 +96,63 @@ function buildModified(
       target_size: t.size,
     };
   }
+  return modifiedFromBuffers(rel, vBuf, tBuf);
+}
+
+/** A "modified" entry for two in-memory copies (size/binary/line caps applied). */
+function modifiedFromBuffers(rel: string, vBuf: Buffer, tBuf: Buffer): FileDiff {
+  const sizes = { vault_size: vBuf.length, target_size: tBuf.length };
+  if (vBuf.length > MAX_DIFF_BYTES || tBuf.length > MAX_DIFF_BYTES) {
+    return { path: rel, change: "modified", reason: "too-large", ...sizes };
+  }
   if (looksBinary(vBuf) || looksBinary(tBuf)) {
-    return {
-      path: rel,
-      change: "modified",
-      reason: "binary",
-      vault_size: v.size,
-      target_size: t.size,
-    };
+    return { path: rel, change: "modified", reason: "binary", ...sizes };
   }
-  const a = vBuf.toString("utf-8").split(/\r?\n/);
-  const b = tBuf.toString("utf-8").split(/\r?\n/);
-  if (a.length > MAX_DIFF_LINES || b.length > MAX_DIFF_LINES) {
-    return {
-      path: rel,
-      change: "modified",
-      reason: "too-large",
-      vault_size: v.size,
-      target_size: t.size,
-    };
+  const hunks = diffText(vBuf.toString("utf-8"), tBuf.toString("utf-8"));
+  if (!hunks) return { path: rel, change: "modified", reason: "too-large", ...sizes };
+  return { path: rel, change: "modified", ...sizes, hunks };
+}
+
+/**
+ * Line diff of two texts (left → right), or null when either side has more
+ * lines than the diff cap.
+ */
+export function diffText(a: string, b: string): DiffLine[] | null {
+  const al = a.split(/\r?\n/);
+  const bl = b.split(/\r?\n/);
+  if (al.length > MAX_DIFF_LINES || bl.length > MAX_DIFF_LINES) return null;
+  return lcsDiff(al, bl);
+}
+
+/**
+ * Same as computeSkillDiff, but for two in-memory file sets
+ * (relative "/"-separated path → bytes); `vault` is the left side.
+ */
+export function computeFilesDiff(vault: Map<string, Buffer>, target: Map<string, Buffer>): SkillDiff {
+  const all = new Set<string>([...vault.keys(), ...target.keys()]);
+  const files: FileDiff[] = [];
+  for (const rel of [...all].sort()) {
+    const v = vault.get(rel);
+    const t = target.get(rel);
+    if (v && !t) files.push({ path: rel, change: "removed", vault_size: v.length });
+    else if (!v && t) files.push({ path: rel, change: "added", target_size: t.length });
+    else if (v && t) {
+      files.push(
+        v.equals(t)
+          ? { path: rel, change: "same", vault_size: v.length, target_size: t.length }
+          : modifiedFromBuffers(rel, v, t),
+      );
+    }
   }
-  const hunks = lcsDiff(a, b);
+  return { files, summary: summarize(files) };
+}
+
+function summarize(files: FileDiff[]): SkillDiff["summary"] {
   return {
-    path: rel,
-    change: "modified",
-    vault_size: v.size,
-    target_size: t.size,
-    hunks,
+    added: files.filter((f) => f.change === "added").length,
+    removed: files.filter((f) => f.change === "removed").length,
+    modified: files.filter((f) => f.change === "modified").length,
+    same: files.filter((f) => f.change === "same").length,
   };
 }
 

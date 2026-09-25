@@ -12,6 +12,9 @@ export const REQUIRED_TOOLS = [
   "notion-query-data-sources",
   "notion-download-skill",
   "notion-update-data-source",
+  "notion-upload-skill",
+  "notion-create-pages",
+  "notion-update-page",
 ] as const;
 
 export class NotionNotConnectedError extends Error {

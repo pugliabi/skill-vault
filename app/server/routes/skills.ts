@@ -11,15 +11,14 @@ import {
   patchManifestSkill,
   readManifest,
   readSkillFile,
-  removeSkill,
-  renameSkill,
   resolveSkillFilePath,
   searchSkillBodies,
   upsertManifestSkill,
   writeSkillFile,
 } from "../services/vault.ts";
 import { validateSkillName } from "../services/skillName.ts";
-import { withHistory, moveHistory, recordVersion } from "../services/history.ts";
+import { withHistory, recordVersion } from "../services/history.ts";
+import { SkillOpError, deleteVaultSkill, renameVaultSkill } from "../services/skillLifecycle.ts";
 
 /**
  * `:name` must be a plain path segment before it reaches the filesystem
@@ -272,80 +271,15 @@ export function skillsRouter(): Router {
     const body = req.body as { new_name?: unknown };
     const newName =
       typeof body.new_name === "string" ? body.new_name.trim() : "";
-    const oldName = req.params.name;
-
-    if (!newName) {
-      res.status(400).json({ error: "new_name is required" });
-      return;
-    }
-    if (newName === oldName) {
-      res.status(400).json({ error: "new_name is the same as the current name" });
-      return;
-    }
-
-    // 404 the old name early so the user gets a clearer error than a
-    // misleading "skill <new> already exists".
-    const before = readManifest(cfg.vault_path).skills[oldName];
-    // Tolerate on-disk-only skills (mirroring listSkills semantics).
-    // Use top-of-file fs + path imports — NEVER inline require().
-    const skillExists =
-      !!before ||
-      fs.existsSync(path.join(cfg.vault_path, "skills", oldName));
-    if (!skillExists) {
-      res.status(404).json({ error: "skill not found" });
-      return;
-    }
-
-    const v = validateSkillName(cfg.vault_path, newName);
-    if (!v.ok) {
-      res.status(409).json({ error: v.reason });
-      return;
-    }
-
-    recordActivity({
-      kind: "rename",
-      skill: oldName,
-      ok: true,
-      message: "starting",
-    });
-
     try {
-      recordVersion(cfg.vault_path, oldName, { source: "external-edit", note: "unrecorded prior state" });
+      renameVaultSkill(cfg.vault_path, req.params.name, newName);
     } catch (err) {
-      console.error(`[history] pre-rename snapshot of ${oldName}: ${(err as Error).message}`);
-    }
-
-    try {
-      renameSkill(cfg.vault_path, oldName, newName);
-    } catch (err) {
-      recordActivity({
-        kind: "rename",
-        skill: oldName,
-        ok: false,
-        message: (err as Error).message,
-      });
+      if (err instanceof SkillOpError) {
+        res.status(err.status).json({ error: err.message });
+        return;
+      }
       throw err;
     }
-
-    // The rename itself succeeded; a history bookkeeping failure must not
-    // turn that into a 500 (the client would think nothing happened).
-    try {
-      moveHistory(cfg.vault_path, oldName, newName);
-      recordVersion(cfg.vault_path, newName, {
-        source: "rename",
-        note: `renamed from ${oldName}`,
-        always: true,
-      });
-    } catch (err) {
-      console.error(`[history] rename ${oldName} -> ${newName}: ${(err as Error).message}`);
-    }
-
-    recordActivity({
-      kind: "rename",
-      skill: newName,
-      ok: true,
-      message: `${oldName} → ${newName}`,
-    });
 
     const detail = getSkillDetail(cfg.vault_path, newName, cfg.providers);
     res.json(detail);
@@ -652,39 +586,8 @@ export function skillsRouter(): Router {
       res.status(409).json({ error: "vault not configured" });
       return;
     }
-    // Idempotent (no-op) deletes still record both starting and outcome
-    // so the user sees the click took effect; the message distinguishes.
-    const manifestEntry = readManifest(cfg.vault_path).skills[req.params.name];
-    const existed = !!manifestEntry;
-    recordActivity({
-      kind: "remove",
-      skill: req.params.name,
-      ok: true,
-      message: "starting",
-    });
-    try {
-      recordVersion(cfg.vault_path, req.params.name, {
-        source: "delete",
-        note: "final state before delete",
-        always: true,
-        manifest_entry: manifestEntry,
-      });
-      removeSkill(cfg.vault_path, req.params.name);
-      recordActivity({
-        kind: "remove",
-        skill: req.params.name,
-        ok: true,
-        message: existed ? "removed" : "no-op (not in manifest)",
-      });
-    } catch (err) {
-      recordActivity({
-        kind: "remove",
-        skill: req.params.name,
-        ok: false,
-        message: (err as Error).message,
-      });
-      throw err; // let /api error handler return 500
-    }
+    // Idempotent: a no-op delete still records its activity (see service).
+    deleteVaultSkill(cfg.vault_path, req.params.name); // errors → /api error handler (500)
     res.status(204).end();
   });
 

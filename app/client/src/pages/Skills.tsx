@@ -24,6 +24,7 @@ import { AutoTagDialog } from "../components/AutoTagDialog";
 import { HealthDialog } from "../components/HealthDialog";
 import { DeletedSkillsDialog } from "../components/DeletedSkillsDialog";
 import { UpdateDialog } from "../components/UpdateDialog";
+import { Menu, NotionMenu, useBulkPushToNotion } from "../components/ToolbarMenus";
 import { TagChips } from "../components/TagChips";
 import { loadPrefs, savePrefs, type SavedView, type SkillsPreferences } from "../lib/preferences";
 import type { NotionStatus, Skill } from "../lib/types";
@@ -630,8 +631,20 @@ export default function Skills() {
 
   const anySelected = selected.size > 0;
 
+  // Notion status (also queried by NotionMenu; react-query dedupes) — gates
+  // the BulkActionBar "Push to Notion" action the same way NotionMenu gates
+  // itself.
+  const { data: notionStatus } = useQuery({
+    queryKey: ["notion-status"],
+    queryFn: () => api.notionStatus(),
+    staleTime: 15000,
+  });
+  const notionConfigured = !!notionStatus?.connected && !!notionStatus.data_source;
+  const pushSelectedToNotion = useBulkPushToNotion([...selected]);
+
   return (
     <Layout>
+      {pushSelectedToNotion.banner}
       <div className="sv-fade-in" style={{ display: "flex", height: "100%" }}>
         {/* List pane */}
         <div
@@ -671,23 +684,20 @@ export default function Skills() {
                 {sorted.length}/{skills.length}
               </span>
               <span style={{ flex: 1 }} />
-              <Button
-                kind="primary"
-                size="sm"
+              <Menu
+                label="New"
                 icon={Icon.plus}
-                onClick={() => setNewOpen(true)}
-              >
-                New
-              </Button>
-              <Button
-                kind="ghost"
-                size="sm"
-                icon={Icon.folder}
-                onClick={handleAddExisting}
-                disabled={addExisting.isPending}
-              >
-                Add existing
-              </Button>
+                kind="primary"
+                items={[
+                  { id: "new-skill", label: "New skill", onSelect: () => setNewOpen(true) },
+                  {
+                    id: "add-existing",
+                    label: "Add existing",
+                    onSelect: handleAddExisting,
+                    disabled: addExisting.isPending,
+                  },
+                ]}
+              />
               <Button
                 kind="ghost"
                 size="sm"
@@ -696,6 +706,19 @@ export default function Skills() {
               >
                 Auto-tag
               </Button>
+              <Menu
+                label="Import"
+                icon={Icon.download}
+                items={[
+                  { id: "adopt", label: "Adopt", onSelect: () => navigate("/adopt") },
+                  {
+                    id: "updates",
+                    label: "Updates",
+                    onSelect: () => setUpdateScope([]),
+                  },
+                ]}
+              />
+              <NotionMenu navigate={navigate} />
               <Button
                 kind="ghost"
                 size="sm"
@@ -711,23 +734,6 @@ export default function Skills() {
                 onClick={() => setDeletedOpen(true)}
               >
                 Deleted
-              </Button>
-              <Button
-                kind="ghost"
-                size="sm"
-                icon={Icon.pull}
-                onClick={() => setUpdateScope([])}
-                title="Check every adopted skill against its source for upstream changes"
-              >
-                Updates
-              </Button>
-              <Button
-                kind="ghost"
-                size="sm"
-                icon={Icon.download}
-                onClick={() => navigate("/adopt")}
-              >
-                Adopt
               </Button>
             </div>
 
@@ -1294,6 +1300,7 @@ export default function Skills() {
           onZip={handleBulkZip}
           onExportOpenClaw={handleBulkExportOpenClaw}
           openclawAvailable={openclaw?.available}
+          onPushNotion={notionConfigured ? pushSelectedToNotion.run : undefined}
           onApplyTags={async (add, remove) => {
             const names = [...selected];
             try {
@@ -1336,6 +1343,7 @@ function SkillRow({
   onToggleSelect: (e: React.MouseEvent) => void;
 }) {
   const [hovered, setHovered] = useState(false);
+  const [, navigate] = useLocation();
   const status = s.status;
   return (
     <div
@@ -1458,7 +1466,24 @@ function SkillRow({
         <DesktopBadge status={s.desktop_status} />
         {s.notion_status && s.notion_status !== "synced" && (
           <span
+            {...(s.notion_status === "conflict"
+              ? {
+                  role: "link",
+                  tabIndex: 0,
+                  title: "Review this conflict",
+                  onClick: (e: React.MouseEvent) => {
+                    e.stopPropagation();
+                    navigate(`/notion/conflicts?skill=${encodeURIComponent(s.name)}`);
+                  },
+                  onKeyDown: (e: React.KeyboardEvent) => {
+                    if (e.key !== "Enter") return;
+                    e.stopPropagation();
+                    navigate(`/notion/conflicts?skill=${encodeURIComponent(s.name)}`);
+                  },
+                }
+              : {})}
             style={{
+              cursor: s.notion_status === "conflict" ? "pointer" : undefined,
               fontFamily: "var(--mono)",
               fontSize: 10,
               fontWeight: 500,

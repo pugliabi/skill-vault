@@ -26,7 +26,7 @@ import { fixRouter } from "./routes/fix.ts";
 import { tagsRouter } from "./routes/tags.ts";
 import { desktopRouter } from "./routes/desktop.ts";
 import { openclawRouter } from "./routes/openclaw.ts";
-import { notionRouter } from "./routes/notion.ts";
+import { anyJobRunning as anyNotionJobRunning, claudeRouter, notionRouter } from "./routes/notion.ts";
 import {
   eventsRouter,
   broadcastSse,
@@ -43,6 +43,7 @@ import {
 } from "./services/watcher.ts";
 import { readAppConfig } from "./services/appConfig.ts";
 import { createHistoryRecorder, scanForUnrecordedChanges } from "./services/historyRecorder.ts";
+import { startNotionChecker } from "./services/notion/checker.ts";
 import { findFreePort } from "./services/freePort.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -81,6 +82,15 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
   //      SIGINT/SIGTERM before server.close().
   const historyRecorder = createHistoryRecorder({
     getVaultPath: () => readAppConfig().vault_path,
+  });
+
+  // Background Notion checker: periodically records notion-side history for
+  // skills that changed on Notion's end (no pull, no vault write) so other
+  // devices' edits show up in history even before anyone opens Pull. See
+  // services/notion/checker.ts for the single-flight + guard behavior.
+  const notionChecker = startNotionChecker({
+    getVaultPath: () => readAppConfig().vault_path,
+    isBusy: anyNotionJobRunning,
   });
 
   const attachWatcherListeners = (w: VaultWatcher): void => {
@@ -139,6 +149,7 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
     unsubActivity();
     closeAllSse();
     historyRecorder.flush();
+    notionChecker.stop();
     const current = getActiveWatcher();
     if (current) {
       try {
@@ -165,6 +176,7 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
   app.use("/api/desktop", desktopRouter());
   app.use("/api/openclaw", openclawRouter());
   app.use("/api/notion", notionRouter());
+  app.use("/api/claude", claudeRouter());
   app.use("/api/activity", activityRouter());
   app.use("/api/events", eventsRouter());
 

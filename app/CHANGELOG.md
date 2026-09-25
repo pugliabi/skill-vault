@@ -10,6 +10,41 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
 - **Connect Notion** (Settings → Notion): sign in, pick your Skills database,
   link skills by page ID, legacy and Notion-native detection, Notion status
   filter on the Skills page.
+- **Notion Push/Pull review pages** — a plan grouped into Update · New ·
+  Rename · Deleted · Conflict, with a live per-row vault-vs-Notion diff,
+  select/run only what you choose, and keyboard navigation (J/K, Space).
+- **Conflicts page** for skills that need a decision, with a full per-file
+  diff against the last common base, and three resolutions: keep vault,
+  keep Notion, or **Merge with Claude** — a section-based merge (only the
+  differing, non-binary sections are sent to the local `claude` CLI;
+  formatting-only differences are auto-resolved) with an editable
+  recommendation preview. Nothing is written until you click Apply. When
+  Claude isn't available (or the change is too large for it), **Edit
+  manually** resolves the conflict by hand instead.
+- **Force push / force pull** (Notion ▾ only), with a pre-run confirmation
+  showing the skill count, and the overwritten copy always saved to history
+  first; force pull skips skills already in sync.
+- **Notion ▾ toolbar menu** (Push to Notion…, Pull from Notion…,
+  Conflicts (N), Force push…/Force pull…, Check Notion now, Notion
+  settings), plus a **Push to Notion** bulk action from the Skills page's
+  multi-select bar — a normal push of the selected skills that never
+  overwrites a Notion edit (those are reported for Conflicts).
+- **Relink** for unlinked skills (Settings → Notion), so the next Link run
+  matches them again.
+- **Background Notion check** — periodically refreshes Notion status while
+  the app is open, without ever writing to the vault or running while a
+  foreground sync job is active.
+- **Multi-device git guard** — before a Push/Pull run or force action, the
+  vault (if a git repo) is fetched and compared against its remote; a vault
+  that's behind is blocked with a banner and an explicit "run anyway"
+  override, so a stale device can't sync over a newer one.
+
+### Fixed
+- Notion file uploads no longer send a duplicate/conflicting
+  `Content-Length` header when Notion's upload URL already provides one.
+- Renaming a linked skill now updates `SKILL.md`'s `name` field on both
+  sides before pushing/pulling, so the Notion page title and the vault
+  frontmatter stay consistent through a rename.
 - **Version history.** Every skill change — in-app edits, pulls, updates,
   adopts, renames, deletes, and edits made outside the app — is now saved
   to `.history/` in the vault. New **History** tab on a skill's detail page

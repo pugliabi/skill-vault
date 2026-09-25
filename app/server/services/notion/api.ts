@@ -129,4 +129,116 @@ export class NotionApi {
       statements: `ADD COLUMN "${name.replace(/"/g, '""')}" LAST_EDITED_TIME`,
     });
   }
+
+  async prepareUpload(
+    pageId: string,
+    contentLength: number,
+    crc32Base64: string,
+  ): Promise<{ uploadUrl: string; headers: Record<string, string>; token: string; method: string }> {
+    const r = await this.call("notion-upload-skill", {
+      action: "prepare",
+      page_id: pageId,
+      content_length: contentLength,
+      checksum_crc32: crc32Base64,
+    });
+    const uploadUrl = r?.upload_url ?? r?.uploadUrl;
+    const rawHeaders = r?.upload_headers ?? r?.uploadHeaders;
+    const token = r?.upload_token ?? r?.uploadToken;
+    const method = String(r?.upload_method ?? r?.uploadMethod ?? "PUT");
+    if (!uploadUrl || !rawHeaders || !token) {
+      throw new Error(`notion-upload-skill prepare returned no upload details for ${pageId}`);
+    }
+    return { uploadUrl: String(uploadUrl), headers: normalizeHeaders(rawHeaders), token: String(token), method };
+  }
+
+  async completeUpload(pageId: string, token: string): Promise<void> {
+    await this.call("notion-upload-skill", { action: "complete", page_id: pageId, upload_token: token });
+  }
+
+  async createSkillPage(dataSourceId: string, name: string, description: string): Promise<string> {
+    const r = await this.call("notion-create-pages", {
+      parent: { data_source_id: dataSourceId },
+      pages: [{ properties: { "Skill name": name, Description: description }, is_skill: true }],
+    });
+    const url = findFirstUrl(r);
+    if (url) return pageIdFromUrl(url);
+    const id = findFirstBareId(r);
+    if (id) return pageIdFromUrl(id);
+    throw new Error(`no page id in notion-create-pages result for ${name}`);
+  }
+
+  async setTitle(pageId: string, title: string): Promise<void> {
+    await this.call("notion-update-page", {
+      page_id: pageId,
+      command: "update_properties",
+      properties: { "Skill name": title },
+    });
+  }
+}
+
+/**
+ * Notion's `upload_headers` may be a plain object or an array of
+ * `{name, value}` pairs (the real API shape). Normalize either to a
+ * `Record<string,string>`.
+ */
+function normalizeHeaders(raw: unknown): Record<string, string> {
+  if (Array.isArray(raw)) {
+    const out: Record<string, string> = {};
+    for (const entry of raw) {
+      if (entry && typeof entry === "object" && "name" in entry && "value" in entry) {
+        out[String((entry as { name: unknown }).name)] = String((entry as { value: unknown }).value);
+      }
+    }
+    return out;
+  }
+  if (raw && typeof raw === "object") {
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) out[k] = String(v);
+    return out;
+  }
+  return {};
+}
+
+/** Depth-first search of a JSON-ish value for the first notion.so/notion.com URL. */
+function findFirstUrl(value: unknown): string | null {
+  if (typeof value === "string") {
+    const m = /https?:\/\/[^\s"'<>]*notion\.(?:so|com)[^\s"'<>]*/i.exec(value);
+    return m ? m[0] : null;
+  }
+  if (Array.isArray(value)) {
+    for (const v of value) {
+      const found = findFirstUrl(v);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (value && typeof value === "object") {
+    for (const v of Object.values(value)) {
+      const found = findFirstUrl(v);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+/** Depth-first search of a JSON-ish value for the first standalone 32-hex id. */
+function findFirstBareId(value: unknown): string | null {
+  if (typeof value === "string") {
+    const m = /(?<![0-9a-f])[0-9a-f]{32}(?![0-9a-f])/i.exec(value);
+    return m ? m[0] : null;
+  }
+  if (Array.isArray(value)) {
+    for (const v of value) {
+      const found = findFirstBareId(v);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (value && typeof value === "object") {
+    for (const v of Object.values(value)) {
+      const found = findFirstBareId(v);
+      if (found) return found;
+    }
+  }
+  return null;
 }

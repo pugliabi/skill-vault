@@ -70,8 +70,11 @@ test("first link classifies pairs and writes link records", async () => {
   assert.ok(m.same.notion.synced_at);
   assert.equal(m.same.notion.notion_version_id, "v-p-same");
   assert.ok(m.same.notion.base_notion_version && m.same.notion.base_vault_version);
+  assert.equal(m.same.notion.vault_name, "same");
   assert.equal(m.diff.notion.synced_at, undefined);
+  assert.equal(m.diff.notion.vault_name, "diff");
   assert.equal(m.axelrod.notion.state, "legacy");
+  assert.equal(m.axelrod.notion.vault_name, "axelrod");
   assert.equal(m.mine.notion, undefined);
 });
 

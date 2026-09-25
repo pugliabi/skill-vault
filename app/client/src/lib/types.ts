@@ -250,7 +250,9 @@ export type ActivityKind =
   | "rename"
   | "restore"
   | "notion-link"
-  | "notion-check";
+  | "notion-check"
+  | "notion-resolve"
+  | "notion-sync";
 
 /**
  * One entry in the in-memory activity ring buffer. Recorded by route
@@ -400,4 +402,142 @@ export interface NotionLinkSummary {
   notion_only_native: Array<{ page_id: string; title: string }>;
   vault_only: string[];
   errors: Array<{ skill: string; error: string }>;
+}
+
+// ── Phase 4: Notion conflicts + Claude merge ────────────────────
+
+/** GET /api/notion/conflicts row. */
+export interface NotionConflictItem {
+  name: string;
+  notion_title?: string;
+  vault_edited_at?: string;
+  notion_edited_at?: string;
+}
+
+export interface NotionConflictFile {
+  path: string;
+  /** Text content (null when absent on that side, binary or too large). */
+  vault: string | null;
+  notion: string | null;
+  base: string | null;
+  binary: boolean;
+  too_large: boolean;
+  same: boolean;
+}
+
+/** GET /api/notion/conflicts/:name — a fresh snapshot of both sides. */
+export interface NotionConflict {
+  name: string;
+  notion_title?: string;
+  /** Notion version this snapshot was taken from — echo it on merge/resolve. */
+  notion_version_id: string;
+  /** Normalized hash of the vault copy in this snapshot — echo it on a "files" resolve. */
+  vault_hash: string | null;
+  base_available: boolean;
+  files: NotionConflictFile[];
+  diff_vault_vs_notion: SkillDiff;
+  vault_edited_at?: string;
+  notion_edited_at?: string;
+}
+
+/** Mirrors server/services/claude/merge.ts MergeDecision. */
+export interface MergeDecision {
+  id: string;
+  file: string;
+  summary: string;
+  chosen: "vault" | "notion" | "both";
+  vault_text: string;
+  notion_text: string;
+  merged_text: string;
+  overlapping: boolean;
+  /** false when the decision can't be flipped safely — hide its toggle. */
+  toggleable?: boolean;
+}
+
+/** Mirrors server/services/claude/merge.ts MergeResult (+ route extras). */
+export interface MergeResult {
+  explanation: string;
+  vault_changes: string[];
+  notion_changes: string[];
+  files: Array<{ path: string; content: string }>;
+  decisions: MergeDecision[];
+  warnings: string[];
+  cost_usd?: number;
+  notion_version_id?: string;
+}
+
+export interface ClaudeStatus {
+  available: boolean;
+  version: string | null;
+  reason?: string;
+}
+
+export type ConflictResolveBody =
+  | { mode: "keep-vault" | "keep-notion"; expected_notion_version: string }
+  | {
+      mode: "files";
+      expected_notion_version: string;
+      expected_vault_hash: string | null;
+      files: Array<{ path: string; content: string | null }>;
+      binary_choices?: Record<string, "vault" | "notion">;
+      /** True when the user flipped a decision or edited by hand (recorded as a vault edit). */
+      edited?: boolean;
+    };
+
+// ── Phase 3: Notion push/pull review ────────────────────────────
+
+export type NotionDirection = "push" | "pull";
+export type NotionPlanKind = "update" | "new" | "rename" | "deleted" | "conflict";
+export type NotionDeletedAction = "unlink" | "delete-vault" | "trash" | "recreate";
+
+/** Mirrors server/services/notion/run.ts ReviewRow. */
+export interface NotionPlanRow {
+  id: string;
+  kind: NotionPlanKind;
+  skill?: string;
+  page_id?: string;
+  title?: string;
+  direction: NotionDirection;
+  default_selected: boolean;
+  detail: string;
+  warnings: string[];
+  actions?: NotionDeletedAction[];
+  default_action?: NotionDeletedAction;
+}
+
+/** Multi-device guard status (filled in by the git guard; null = not checked). */
+export interface NotionGuardStatus {
+  is_repo: boolean;
+  behind: number;
+  ahead: number;
+  error?: string;
+}
+
+export interface NotionPlan {
+  rows: NotionPlanRow[];
+  guard: NotionGuardStatus | null;
+  stats: {
+    by_kind: Record<NotionPlanKind, number>;
+    force_eligible: number;
+    legacy: number;
+  };
+  checked_at: string | null;
+}
+
+export interface NotionPlanDiff extends SkillDiff {
+  labels: { left: string; right: string };
+  notion_available: boolean;
+  notion_version_id: string | null;
+}
+
+export interface NotionRunJob {
+  id: string;
+  kind: "run" | "force" | "push-selected";
+  direction: NotionDirection;
+  done: number;
+  total: number;
+  current: string;
+  running: boolean;
+  results: Array<{ id: string; ok: boolean; error?: string; message?: string }>;
+  error?: string;
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { Link } from "wouter";
 import { api, ApiError } from "../lib/api";
 import { Button, Rule } from "./ui/primitives";
 import type { NotionLinkSummary } from "../lib/types";
@@ -333,6 +334,7 @@ function Configured({
   useEffect(() => {
     if (job?.summary) {
       qc.invalidateQueries({ queryKey: ["skills"] });
+      qc.invalidateQueries({ queryKey: ["notion-conflicts"] });
       qc.invalidateQueries({ queryKey: ["notion-status"] });
       qc.invalidateQueries({ queryKey: ["notion-summary"] });
     }
@@ -358,6 +360,7 @@ function Configured({
     onSuccess: (r) => {
       toast.success(`Checked Notion — ${r.rows} skill${r.rows === 1 ? "" : "s"}`);
       qc.invalidateQueries({ queryKey: ["notion-status"] });
+      qc.invalidateQueries({ queryKey: ["notion-conflicts"] });
       qc.invalidateQueries({ queryKey: ["skills"] });
     },
     onError: (err) => reportNotionError(qc, err, "Check failed"),
@@ -372,6 +375,13 @@ function Configured({
   });
 
   const { disconnect, confirmAndDisconnect: handleDisconnect } = useNotionDisconnect(qc);
+
+  const { data: conflicts } = useQuery({
+    queryKey: ["notion-conflicts"],
+    queryFn: () => api.notionConflicts(),
+    retry: false,
+  });
+  const conflictCount = conflicts?.skills.length ?? 0;
 
   const busy = check.isPending || link.isPending || (jobId != null && job && !job.summary && !job.error);
 
@@ -388,6 +398,15 @@ function Configured({
         </div>
       </div>
 
+      {conflictCount > 0 && (
+        <Link
+          href="/notion/conflicts"
+          style={{ fontSize: 12.5, color: "var(--accent)", textDecoration: "none", fontWeight: 500 }}
+        >
+          Review {conflictCount} conflict{conflictCount === 1 ? "" : "s"} →
+        </Link>
+      )}
+
       <div style={{ display: "flex", gap: 8 }}>
         <Button kind="default" size="sm" onClick={() => check.mutate()} disabled={!!busy}>
           {check.isPending ? "Checking…" : "Check Notion now"}
@@ -399,6 +418,8 @@ function Configured({
           Disconnect
         </Button>
       </div>
+
+      <UnlinkedSkills qc={qc} />
 
       {jobId && job && !job.summary && !job.error && (
         <div style={{ fontSize: 12, color: "var(--ink-3)", fontFamily: "var(--mono)" }}>
@@ -471,5 +492,43 @@ function Configured({
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * Skills whose Notion link was cut ("unlinked"). Relink forgets the link so
+ * the next "Link skills" run matches the skill to a Notion page again.
+ */
+function UnlinkedSkills({ qc }: { qc: QC }) {
+  const { data } = useQuery({ queryKey: ["skills"], queryFn: () => api.listSkills() });
+  const unlinked = (data?.skills ?? []).filter((s) => s.notion_status === "unlinked").map((s) => s.name);
+  const relink = useMutation({
+    mutationFn: (name: string) => api.notionRelink(name),
+    onSuccess: (_r, name) => {
+      toast.success(`${name}: will be matched again on the next Link skills run`);
+      qc.invalidateQueries({ queryKey: ["skills"] });
+    },
+    onError: (err) => reportNotionError(qc, err, "Relink failed"),
+  });
+  if (unlinked.length === 0) return null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+        Unlinked from Notion ({unlinked.length}) — Relink, then run Link skills to match them again:
+      </div>
+      {unlinked.map((name) => (
+        <div key={name} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ flex: 1, fontFamily: "var(--mono)", fontSize: 12, color: "var(--ink-2)" }}>{name}</span>
+          <Button
+            kind="default"
+            size="sm"
+            disabled={relink.isPending}
+            onClick={() => relink.mutate(name)}
+          >
+            Relink
+          </Button>
+        </div>
+      ))}
+    </div>
   );
 }

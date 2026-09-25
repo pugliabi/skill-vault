@@ -220,6 +220,7 @@ export async function runFirstLink(
           notion_version_id: dl.versionId,
           ...(row.edited_at ? { notion_edited_at: row.edited_at } : {}),
           notion_title: row.title,
+          vault_name: name,
         };
 
         const legacy = isLegacyConversion({

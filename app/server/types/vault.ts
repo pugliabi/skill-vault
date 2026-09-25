@@ -64,6 +64,8 @@ export interface NotionLink {
   base_notion_version?: string;
   /** Notion Skill name at link time (display only). */
   notion_title?: string;
+  /** Vault folder name at the last link/sync — lets a later rename be detected. Absent on old links. */
+  vault_name?: string;
 }
 
 export type NotionStatus =
@@ -382,7 +384,9 @@ export type ActivityKind =
   | "rename"
   | "restore"
   | "notion-link"
-  | "notion-check";
+  | "notion-check"
+  | "notion-resolve"
+  | "notion-sync";
 
 /**
  * One entry in the in-memory activity ring buffer. Recorded by route

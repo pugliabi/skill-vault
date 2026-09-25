@@ -79,16 +79,17 @@ function frontmatterValue(lines: string[], key: string): string {
  * joined with no separator so re-splitting of words by autolinking or
  * link-splitting can't change the result.
  */
+/** HTML wrapper tags Notion and Markdown renderers swap in and out (open or close, any attributes). */
+export const HTML_WRAPPER_TAG_RE =
+  /<\/?(?:p|b|i|u|s|em|strong|code|a|br|span|div|sub|sup|mark|ul|ol|li|pre|blockquote|h[1-6]|hr|table|thead|tbody|tr|td|th|details|summary)\b[^>]*>/gi;
+
 export function contentFingerprint(text: string): string {
   const lines = text.replace(/\r\n?/g, "\n").split("\n");
   const noFences = lines.filter((l) => !/^\s*```/.test(l));
   const processed = noFences.map((l) => {
     let s = l;
     s = s.replace(/^\s*(?:[+*•-]|\d+[.)])\s*/, "");
-    s = s.replace(
-      /<\/?(?:p|b|i|u|s|em|strong|code|a|br|span|div|sub|sup|mark|ul|ol|li|pre|blockquote|h[1-6]|hr|table|thead|tbody|tr|td|th|details|summary)\b[^>]*>/gi,
-      "",
-    );
+    s = s.replace(HTML_WRAPPER_TAG_RE, "");
     s = s.replace(/\]\([^)]*\)/g, "");
     s = s.replace(/https?:\/\/\S+/g, "");
     s = s.replace(/[+•]/g, "");

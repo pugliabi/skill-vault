@@ -33,6 +33,7 @@ export function BulkActionBar({
   onZip,
   onExportOpenClaw,
   openclawAvailable,
+  onPushNotion,
   onDeselect,
 }: {
   count: number;
@@ -57,6 +58,8 @@ export function BulkActionBar({
   /** Present only when the OpenClaw WSL gateway is detected (win32). */
   onExportOpenClaw?: () => void | Promise<void>;
   openclawAvailable?: boolean;
+  /** Present only when Notion is connected and a data source is configured. */
+  onPushNotion?: () => void;
   onDeselect: () => void;
 }) {
   const guarded = (cb: () => void | Promise<void>) => () => {
@@ -171,6 +174,18 @@ export function BulkActionBar({
           title="Install selected skills into the OpenClaw agent (WSL)"
         >
           OpenClaw
+        </Button>
+      )}
+      {onPushNotion && (
+        <Button
+          kind="default"
+          size="sm"
+          icon={Icon.sync}
+          onClick={guarded(onPushNotion)}
+          disabled={count === 0}
+          title="Push the selected skills' vault changes to Notion (creates missing pages; skips skills changed in Notion)"
+        >
+          Push to Notion
         </Button>
       )}
       <Button

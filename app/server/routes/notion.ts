@@ -2,9 +2,11 @@ import { Router, type Request, type Response } from "express";
 import crypto from "node:crypto";
 import { readAppConfig } from "../services/appConfig.ts";
 import { recordActivity } from "../services/activity.ts";
-import { readManifest } from "../services/vault.ts";
+import { listSkills, readManifest, skillDir } from "../services/vault.ts";
+import { hashSkillDirNormalized } from "../services/skillHash.ts";
 import { NotionApi } from "../services/notion/api.ts";
 import { downloadAndExtract } from "../services/notion/archive.ts";
+import { gitGuard as realGitGuard, type GuardStatus } from "../services/notion/checker.ts";
 import {
   NotionNotConnectedError,
   callToolJson,
@@ -29,6 +31,48 @@ import {
   writeNotionSettings,
 } from "../services/notion/store.ts";
 import { isSafeNameSegment } from "./skills.ts";
+import {
+  ResolveInputError,
+  buildResolvedFiles,
+  buildSnapshot,
+  listConflicts,
+  parseFilesResolution,
+} from "../services/notion/conflicts.ts";
+import { LegacyLinkError, applyResolution, keepNotion, keepVault, type SyncDeps } from "../services/notion/sync.ts";
+import { readSkillFiles } from "../services/notion/linker.ts";
+import { syncCacheRow } from "../services/notion/run.ts";
+import { BUSY_MESSAGE, mountSyncRoutes, syncJobRunning } from "./notionSync.ts";
+import { ClaudeError, claudeAvailable, type ClaudeRunner } from "../services/claude/cli.ts";
+import { TooLargeError, mergeWithClaude } from "../services/claude/merge.ts";
+import type { NotionLink } from "../types/vault.ts";
+
+type ApiConn = { api: NotionApi; close(): Promise<void> };
+type ClaudeStatus = { available: boolean; version?: string; reason?: string };
+
+/** Injection points for tests (fake Notion API / archive / Claude); defaults are the real ones. */
+export interface NotionRouterDeps {
+  openApi?: (req: Request) => Promise<ApiConn>;
+  extract?: SyncDeps["extract"];
+  upload?: SyncDeps["upload"];
+  claudeStatus?: () => Promise<ClaudeStatus>;
+  claudeRunner?: ClaudeRunner;
+  /** Multi-device guard status lookup; defaults to the real gitGuard, overridable for tests. */
+  gitGuard?: (vaultPath: string) => Promise<GuardStatus>;
+}
+
+/** The vault folder changed since the client opened the conflict (→ 409 vault_changed). */
+class VaultMovedError extends Error {
+  constructor() {
+    super("vault_changed");
+  }
+}
+
+/** Notion moved since the client opened the conflict (→ 409 notion_changed). */
+class NotionMovedError extends Error {
+  constructor() {
+    super("notion_changed");
+  }
+}
 
 export const LAST_EDITED_PROPERTY = "Last edited";
 /** A Notion data source id: a UUID, with or without dashes. */
@@ -46,6 +90,15 @@ interface LinkJob {
 
 /** In-memory job registry: one running link job at a time; lost on restart. */
 const jobs = new Map<string, LinkJob>();
+/** True while a conflict resolution is writing to the vault and Notion (it holds the job slot). */
+let resolveRunning = false;
+/**
+ * True while a link job, a push/pull/force job or a conflict resolution is
+ * running (one Notion job at a time). Combines both job registries (link
+ * jobs here + push/pull/force jobs in notionSync.ts) — also the background
+ * checker's isBusy check (server/index.ts).
+ */
+export const anyJobRunning = () => resolveRunning || [...jobs.values()].some((j) => j.running) || syncJobRunning();
 /** Result of the last post-connect tool probe (undefined = no probe ran this process). */
 let lastMissingTools: string[] | undefined;
 
@@ -57,7 +110,7 @@ export function redirectUrlFor(req: Request): string {
   return `http://localhost:${req.socket.localPort}/api/notion/callback`;
 }
 
-async function getApi(req: Request): Promise<{ api: NotionApi; close(): Promise<void> }> {
+async function getApi(req: Request): Promise<ApiConn> {
   const client = await getNotionClient(redirectUrlFor(req));
   return {
     api: new NotionApi((name, args) => callToolJson(client, name, args)),
@@ -65,9 +118,13 @@ async function getApi(req: Request): Promise<{ api: NotionApi; close(): Promise<
   };
 }
 
-/** Run `fn` with a connected API client, always closing it afterwards. */
-async function withApi<T>(req: Request, fn: (api: NotionApi) => Promise<T>): Promise<T> {
-  const { api, close } = await getApi(req);
+/** Run `fn` with a connected API client (from `open`), always closing it afterwards. */
+async function withApiFrom<T>(
+  open: (req: Request) => Promise<ApiConn>,
+  req: Request,
+  fn: (api: NotionApi) => Promise<T>,
+): Promise<T> {
+  const { api, close } = await open(req);
   try {
     return await fn(api);
   } finally {
@@ -123,9 +180,15 @@ function vaultPathOr409(res: Response): string | null {
  *   GET  /summary                    Notion-only rows from cache vs manifest
  *   POST /skills/:name/unlink        link state → "unlinked"
  *   POST /skills/:name/vault-only    link state → "vault-only"
+ *   POST /skills/:name/relink        forget an "unlinked" link so the next Link run can re-link it
  */
-export function notionRouter(): Router {
+export function notionRouter(deps: NotionRouterDeps = {}): Router {
   const router = Router();
+  const openApi = deps.openApi ?? getApi;
+  const extract = deps.extract ?? ((url: string) => downloadAndExtract(url));
+  const withApi = <T>(req: Request, fn: (api: NotionApi) => Promise<T>) => withApiFrom(openApi, req, fn);
+  const syncDeps = (api: NotionApi): SyncDeps => ({ api, extract, ...(deps.upload ? { upload: deps.upload } : {}) });
+  const gitGuard = deps.gitGuard ?? realGitGuard;
 
   router.get("/status", (_req, res) => {
     const connected = !!readNotionAuth().tokens;
@@ -223,6 +286,11 @@ export function notionRouter(): Router {
   router.post("/check", async (req, res) => {
     const vp = vaultPathOr409(res);
     if (!vp) return;
+    // A running job owns the cache (and refreshes it when it finishes).
+    if (anyJobRunning()) {
+      res.status(409).json({ error: "busy", message: BUSY_MESSAGE });
+      return;
+    }
     try {
       const cache = await withApi(req, (api) => refreshNotionCache(api, vp));
       recordActivity({ kind: "notion-check", skill: "*", ok: true, message: `${cache.rows.length} Notion skills` });
@@ -238,25 +306,27 @@ export function notionRouter(): Router {
   router.post("/link", async (req, res) => {
     const vp = vaultPathOr409(res);
     if (!vp) return;
-    if ([...jobs.values()].some((j) => j.running)) {
-      res.status(409).json({ error: "a link job is already running" });
+    if (anyJobRunning()) {
+      res.status(409).json({ error: "a Notion job is already running" });
       return;
     }
-    let conn: Awaited<ReturnType<typeof getApi>>;
-    try {
-      conn = await getApi(req);
-    } catch (err) {
-      sendError(res, err);
-      return;
-    }
+    // Reserve the slot before any await so two requests can't both start.
     const job: LinkJob = { id: crypto.randomUUID(), done: 0, total: 0, current: "", running: true };
     jobs.clear(); // only the latest job is kept
     jobs.set(job.id, job);
+    let conn: ApiConn;
+    try {
+      conn = await openApi(req);
+    } catch (err) {
+      jobs.delete(job.id);
+      sendError(res, err);
+      return;
+    }
     res.json({ job_id: job.id });
 
     void (async () => {
       try {
-        job.summary = await runFirstLink({ api: conn.api, extract: (url) => downloadAndExtract(url) }, vp, (done, total, skill) => {
+        job.summary = await runFirstLink({ api: conn.api, extract }, vp, (done, total, skill) => {
           job.done = done;
           job.total = total;
           job.current = skill;
@@ -316,5 +386,292 @@ export function notionRouter(): Router {
   router.post("/skills/:name/unlink", setState("unlinked"));
   router.post("/skills/:name/vault-only", setState("vault-only"));
 
+  // Forget an "unlinked" link entirely so the next Link run can match the
+  // skill to a Notion page again (by name, like any never-linked skill).
+  router.post("/skills/:name/relink", (req, res) => {
+    const vp = vaultPathOr409(res);
+    if (!vp) return;
+    const name = req.params.name;
+    if (!isSafeNameSegment(name)) {
+      res.status(400).json({ error: "invalid skill name" });
+      return;
+    }
+    const entry = readManifest(vp).skills[name];
+    if (!entry) {
+      res.status(404).json({ error: `skill "${name}" not found` });
+      return;
+    }
+    if (entry.notion?.state !== "unlinked") {
+      res.status(409).json({ error: `"${name}" is not unlinked` });
+      return;
+    }
+    if (anyJobRunning()) {
+      res.status(409).json({ error: "busy", message: BUSY_MESSAGE });
+      return;
+    }
+    setNotionLink(vp, name, undefined);
+    res.json({ ok: true });
+  });
+
+  router.get("/guard", async (_req, res) => {
+    const vp = vaultPathOr409(res);
+    if (!vp) return;
+    try {
+      res.json(await gitGuard(vp));
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  mountConflictRoutes(router, deps, withApi, extract, syncDeps);
+  mountSyncRoutes(router, { openApi, withApi, extract, syncDeps, vaultPathOr409, sendError, anyJobRunning, gitGuard });
+
+  return router;
+}
+
+// ── Conflicts ───────────────────────────────────────────────────
+
+const RESOLVE_MODES = ["keep-vault", "keep-notion", "files"] as const;
+type ResolveMode = (typeof RESOLVE_MODES)[number];
+
+/** The skill's link for a conflict route, or a response already sent (null). */
+function conflictLinkOr4xx(res: Response, vp: string, name: string): NotionLink | null {
+  if (!isSafeNameSegment(name)) {
+    res.status(400).json({ error: "invalid skill name" });
+    return null;
+  }
+  const entry = readManifest(vp).skills[name];
+  if (!entry) {
+    res.status(404).json({ error: `skill "${name}" not found` });
+    return null;
+  }
+  const link = entry.notion;
+  if (link?.state === "legacy") {
+    res.status(409).json({ error: `"${name}" is linked to a legacy Notion page and cannot be synced` });
+    return null;
+  }
+  if (!link || link.state !== "linked" || !link.page_id) {
+    res.status(409).json({ error: `"${name}" is not linked to a Notion page` });
+    return null;
+  }
+  return link;
+}
+
+function sendConflictError(res: Response, err: unknown): void {
+  if (err instanceof VaultMovedError) {
+    res.status(409).json({
+      error: "vault_changed",
+      message: "The vault copy changed since this conflict was opened — reopen it to see the new state.",
+    });
+  } else if (err instanceof NotionMovedError) {
+    res.status(409).json({
+      error: "notion_changed",
+      message: "Notion's copy changed since this conflict was opened — reopen it to see the new state.",
+    });
+  } else if (err instanceof ResolveInputError) {
+    res.status(400).json({ error: err.message });
+  } else if (err instanceof LegacyLinkError) {
+    res.status(409).json({ error: err.message });
+  } else {
+    sendError(res, err);
+  }
+}
+
+/** Download + extract Notion's current copy and build the review snapshot. */
+async function loadSnapshot(
+  api: NotionApi,
+  extract: SyncDeps["extract"],
+  vp: string,
+  name: string,
+  link: NotionLink,
+) {
+  const dl = await api.downloadSkill(link.page_id);
+  const ex = await extract(dl.url);
+  try {
+    return buildSnapshot(vp, name, link, dl.versionId, readSkillFiles(ex.skillRoot));
+  } finally {
+    ex.cleanup();
+  }
+}
+
+/**
+ *   GET  /conflicts                  linked skills needing review
+ *   GET  /conflicts/:name            fresh side-by-side snapshot (+ notion_version_id)
+ *   POST /conflicts/:name/merge      Claude merge of the differing text files
+ *   POST /conflicts/:name/resolve    keep-vault | keep-notion | files (needs expected_notion_version;
+ *                                    files: edited=true records the result as a vault edit, else a Claude merge)
+ */
+function mountConflictRoutes(
+  router: Router,
+  deps: NotionRouterDeps,
+  withApi: <T>(req: Request, fn: (api: NotionApi) => Promise<T>) => Promise<T>,
+  extract: SyncDeps["extract"],
+  syncDeps: (api: NotionApi) => SyncDeps,
+): void {
+  const claudeStatus = deps.claudeStatus ?? (() => claudeAvailable());
+
+  router.get("/conflicts", (_req, res) => {
+    const vp = vaultPathOr409(res);
+    if (!vp) return;
+    if (!readNotionAuth().tokens) {
+      res.status(401).json({ error: "notion_not_connected" });
+      return;
+    }
+    res.json({ skills: listConflicts(vp) });
+  });
+
+  router.get("/conflicts/:name", async (req, res) => {
+    const vp = vaultPathOr409(res);
+    if (!vp) return;
+    const link = conflictLinkOr4xx(res, vp, req.params.name);
+    if (!link) return;
+    try {
+      res.json(await withApi(req, (api) => loadSnapshot(api, extract, vp, req.params.name, link)));
+    } catch (err) {
+      sendConflictError(res, err);
+    }
+  });
+
+  router.post("/conflicts/:name/merge", async (req, res) => {
+    const vp = vaultPathOr409(res);
+    if (!vp) return;
+    const name = req.params.name;
+    const link = conflictLinkOr4xx(res, vp, name);
+    if (!link) return;
+    const expected = (req.body ?? {}).expected_notion_version;
+    const status = await claudeStatus();
+    if (!status.available) {
+      res.status(409).json({ error: "claude_unavailable", ...(status.reason ? { reason: status.reason } : {}) });
+      return;
+    }
+    try {
+      const snap = await withApi(req, (api) => loadSnapshot(api, extract, vp, name, link));
+      if (typeof expected === "string" && expected && snap.notion_version_id !== expected) throw new NotionMovedError();
+      const files = snap.files
+        .filter((f) => !f.same && !f.binary && !f.too_large)
+        .map((f) => ({ path: f.path, base: f.base, vault: f.vault, notion: f.notion }));
+      if (files.length === 0) {
+        res.status(400).json({ error: "no differing text files to merge — pick a side" });
+        return;
+      }
+      const result = await mergeWithClaude(
+        {
+          skill: name,
+          files,
+          ...(snap.vault_edited_at ? { vaultEditedAt: snap.vault_edited_at } : {}),
+          ...(snap.notion_edited_at ? { notionEditedAt: snap.notion_edited_at } : {}),
+        },
+        deps.claudeRunner,
+      );
+      res.json({ ...result, notion_version_id: snap.notion_version_id });
+    } catch (err) {
+      if (err instanceof TooLargeError) {
+        res.status(413).json({ error: err.message, code: "claude_too_large" });
+      } else if (err instanceof ClaudeError) {
+        console.error("[claude-merge]", err.constructor.name, err.message.slice(0, 200));
+        res.status(502).json({ error: `Claude merge failed: ${err.message}` });
+      } else {
+        sendConflictError(res, err);
+      }
+    }
+  });
+
+  router.post("/conflicts/:name/resolve", async (req, res) => {
+    const vp = vaultPathOr409(res);
+    if (!vp) return;
+    const name = req.params.name;
+    const body = (req.body ?? {}) as {
+      mode?: unknown;
+      expected_notion_version?: unknown;
+      expected_vault_hash?: unknown;
+      files?: unknown;
+      binary_choices?: unknown;
+      /** files mode: true when the user flipped a decision or edited by hand (history source "vault-edit"). */
+      edited?: unknown;
+    };
+    if (!RESOLVE_MODES.includes(body.mode as ResolveMode)) {
+      res.status(400).json({ error: `mode must be one of ${RESOLVE_MODES.join(", ")}` });
+      return;
+    }
+    const mode = body.mode as ResolveMode;
+    if (typeof body.expected_notion_version !== "string" || !body.expected_notion_version) {
+      res.status(400).json({ error: "expected_notion_version is required" });
+      return;
+    }
+    const expected = body.expected_notion_version;
+    const expectedVault = body.expected_vault_hash;
+    if (mode === "files" && typeof expectedVault !== "string" && expectedVault !== null) {
+      res.status(400).json({ error: "expected_vault_hash is required for a files resolution" });
+      return;
+    }
+    if (body.edited !== undefined && typeof body.edited !== "boolean") {
+      res.status(400).json({ error: "edited must be a boolean" });
+      return;
+    }
+    const source = body.edited === true ? "vault-edit" : "claude-merge";
+    const link = conflictLinkOr4xx(res, vp, name);
+    if (!link) return;
+    // Take the single Notion job slot (synchronously, before any await) so a
+    // run/force/link or the background check can't interleave with it.
+    if (anyJobRunning()) {
+      res.status(409).json({ error: "busy", message: BUSY_MESSAGE });
+      return;
+    }
+    resolveRunning = true;
+    try {
+      const resolution = mode === "files" ? parseFilesResolution(body) : null;
+      await withApi(req, async (api) => {
+        const current = await api.downloadSkill(link.page_id);
+        if (current.versionId !== expected) throw new NotionMovedError();
+        if (
+          (typeof expectedVault === "string" || expectedVault === null) &&
+          hashSkillDirNormalized(skillDir(vp, name)) !== expectedVault
+        ) {
+          throw new VaultMovedError();
+        }
+        const d = syncDeps(api);
+        if (mode === "keep-vault") {
+          await keepVault(d, vp, name);
+        } else if (mode === "keep-notion") {
+          await keepNotion(d, vp, name);
+        } else {
+          const ex = await extract(current.url);
+          let files: Map<string, Buffer>;
+          try {
+            files = buildResolvedFiles(readSkillFiles(skillDir(vp, name)), readSkillFiles(ex.skillRoot), resolution!);
+          } finally {
+            ex.cleanup();
+          }
+          await applyResolution(d, vp, name, files, source);
+        }
+      });
+      syncCacheRow(vp, name);
+      recordActivity({ kind: "notion-resolve", skill: name, ok: true, message: mode });
+      const status = listSkills(vp).find((s) => s.name === name)?.notion_status ?? null;
+      res.json({ ok: true, status });
+    } catch (err) {
+      const expectedErr =
+        err instanceof NotionNotConnectedError ||
+        err instanceof NotionMovedError ||
+        err instanceof VaultMovedError ||
+        err instanceof ResolveInputError;
+      if (!expectedErr) {
+        recordActivity({ kind: "notion-resolve", skill: name, ok: false, message: (err as Error).message });
+      }
+      sendConflictError(res, err);
+    } finally {
+      resolveRunning = false;
+    }
+  });
+}
+
+/** GET /api/claude/status → { available, version?, reason? } (mounted at /api/claude). */
+export function claudeRouter(deps: { claudeStatus?: () => Promise<ClaudeStatus> } = {}): Router {
+  const router = Router();
+  const status = deps.claudeStatus ?? (() => claudeAvailable());
+  router.get("/status", async (_req, res) => {
+    const s = await status();
+    res.json({ available: s.available, version: s.version ?? null, ...(s.reason ? { reason: s.reason } : {}) });
+  });
   return router;
 }
