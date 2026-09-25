@@ -157,9 +157,10 @@ interval) so status pills and the Conflicts count stay current without you
 having to push or pull first. The check never runs while a push, pull,
 force, link or conflict resolution is running, and it never writes to the
 vault — it only updates what a skill's status is compared against. You can
-also trigger a check on demand from **Notion ▾ → Check Notion now** (it
-waits for any running job; opening a review page meanwhile uses the last
-check's results).
+also trigger a check on demand from **Notion ▾ → Check Notion now**, but it
+is refused while a push, pull, force, link or conflict resolution job is
+already running (try again once it finishes; opening a review page meanwhile
+uses the last check's results).
 
 ## Multi-device guard
 
