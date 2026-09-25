@@ -281,17 +281,21 @@ contract in the way `skills.json` and `skills/` are.
 }
 ```
 
-`.history/.gitattributes` contains the single line `* -text`, so git never
-rewrites line endings inside `.history/` — object filenames are content
-hashes, and EOL conversion would silently corrupt them.
+No `.gitattributes` is written inside `.history/`: its files follow the
+vault repository's own line-ending settings, the same as the skill files
+they copy.
 
 ### Objects
 
-`.history/objects/<sha256[0:2]>/<sha256>` holds the **raw, uncompressed**
-bytes of one file version, named by the SHA-256 of its content. Storing
-objects raw (not gzipped) is deliberate: git already deduplicates identical
-blobs against the vault's working-tree copies, so an unchanged file costs
-the repository nothing extra. Objects are content-addressed and shared
+`.history/objects/<sha256[0:2]>/<sha256>` holds the **uncompressed** bytes
+of one file version, named by the SHA-256 of those bytes as they were read
+when the version was recorded. Storing objects uncompressed (not gzipped)
+is deliberate: because objects follow the repository's EOL settings, git
+stores an unchanged file and its history object as the same blob, so it
+costs the repository nothing extra. After a checkout on a machine with
+different line-ending settings, an object's bytes on disk may no longer
+hash to its filename; that is expected, and readers MUST treat object
+names as opaque lookup keys rather than re-verifying them. Objects are content-addressed and shared
 across skills and versions; the same file contents anywhere in history
 resolve to the same object. Objects are **not reference-counted on write**
 — an object with no version left pointing to it (e.g. after old versions
@@ -346,9 +350,12 @@ Recognized `source` values: `vault-edit`, `external-edit`, `pull`,
 `notion`/`push-notion-copy`/`notion-edit`/`claude-merge` are reserved for a
 later phase that syncs against a Notion copy.
 
-**Deduplication:** a new version is only appended when its `files` map
-differs from the most recent version on the *same* `side`; recording an
-identical state is a no-op (unless the caller explicitly forces it, e.g.
+**Deduplication:** a new version is only appended when it differs from the
+most recent version on the *same* `side`. A state counts as identical when
+either its `files` map matches exactly, or both its `normalized_hash` and
+the previous version's `normalized_hash` are non-null and equal (so a
+line-ending-only difference is not a new version). Recording an identical
+state is a no-op (unless the caller explicitly forces it, e.g.
 `restore` always appends so the restore itself is visible in history).
 External edits are recorded after the app observes **60 seconds** of
 filesystem quiet on a skill folder, and the app also scans for
@@ -378,6 +385,14 @@ chronological even though the two histories were recorded independently.
 **Cap:** each skill keeps at most `max_versions` versions (default **50**,
 configurable via `.history/config.json`); once the count is exceeded, the
 oldest versions are dropped from the front of the array.
+
+**Unreadable `versions.json`:** a missing `versions.json` means the skill
+has no history yet. A `versions.json` that exists but can't be parsed (for
+example, one left with merge-conflict markers after syncing the vault
+between machines) is **never overwritten**: the app skips recording
+history for that skill, reports an error when asked to list it, and skips
+garbage collection of objects entirely until the file is repaired, since
+it can't tell which objects that file still references.
 
 ## Schema versioning
 
