@@ -453,11 +453,12 @@ vault copy lives on disk:
   version changed (no vault write happens in that last case — it only
   updates what "changed-notion" is compared against).
 - **`claude-merge`** (`vault` side) — a Conflicts-page resolution built from
-  a Claude-assisted merge, written to the vault immediately before it is
-  force-pushed back to Notion. (`vault-edit` is used instead when the
-  resolution is "keep my own hand-edited copy" rather than Claude's
-  output — it is not Notion-specific, but Conflicts reuses it as the other
-  resolution tag.)
+  a Claude-assisted merge, applied as Claude proposed it, written to the
+  vault immediately before it is force-pushed back to Notion. (`vault-edit`
+  is used instead when the user changed the result before applying —
+  flipped any of Claude's decisions, edited or removed a file by hand — or
+  resolved the conflict with "Edit manually" without Claude. It is not
+  Notion-specific, but Conflicts reuses it as the other resolution tag.)
 - **`force-push`** (`vault` side) — recorded at the start of a force push,
   right after Notion's about-to-be-overwritten copy is captured as
   `notion-edit`. Marks "this vault copy is the one that won."

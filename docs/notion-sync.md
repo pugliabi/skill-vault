@@ -20,7 +20,10 @@ an initial pass) and records the match on the skill. A link can be:
   [Known limitations](#known-notion-limitations)). Legacy links are frozen:
   no push, pull, force, or merge ever touches them.
 - **unlinked** — you disconnected the skill from Notion; it's excluded from
-  auto-matching until relinked.
+  auto-matching until relinked. **Settings → Notion** lists unlinked skills
+  with a **Relink** button: it forgets the old link, and the next **Link
+  skills** run matches the skill to a Notion page again (by name, like a
+  skill that was never linked).
 - **vault-only** — you marked the skill as intentionally not represented in
   Notion.
 
@@ -44,32 +47,49 @@ those rows.
 - **Conflict** rows can't be run from here — they link out to the
   [Conflicts page](#conflicts-and-merge-with-claude).
 - **Deleted** rows offer **Unlink** (always available), plus a direction-
-  appropriate action: recreate the missing side, or remove/trash the
-  side that's gone. Notion pages can't be moved to trash by the app itself
-  (a Notion API limitation) — trashing has to be done in Notion, then
-  Unlink here.
-- **Rename** rows appear when a skill's vault folder name no longer matches
-  what it was named at the last link/sync; running one renames the other
-  side to match and keeps `SKILL.md`'s `name` field in sync.
+  appropriate action: re-create the Notion page, or (pull, page gone from
+  Notion) delete the skill from the vault — it stays in history. A skill
+  deleted from the vault can only be unlinked: Notion pages can't be moved
+  to trash by the app itself (a Notion API limitation), so trash the page
+  in Notion yourself.
+- **Rename** rows come from either side. On **Push**, the vault folder was
+  renamed since the last link/sync: running the row renames the Notion
+  skill to match. On **Pull**, the skill was renamed in Notion (its title is
+  a valid skill name and differs from the vault name): running the row
+  renames the vault folder to the Notion title. Either way `SKILL.md`'s
+  `name` field follows the new name, and a skill that was in sync before
+  the rename stays in sync afterwards.
 
 Nothing is written until you click **Run**, and only the rows you selected
 are touched.
+
+## Push selected skills
+
+The bulk **Push to Notion** action on the Skills page pushes just the
+skills you selected — a normal push, not a force. It uploads each selected
+skill's vault changes and creates a Notion page for any selected skill that
+doesn't have one yet. It never overwrites a Notion edit: a skill whose
+Notion copy changed since the last sync (or that has never synced) is
+reported as "Changed in Notion — resolve in Conflicts" and left alone.
+Legacy, unlinked and folder-less skills are skipped with a reason, and a
+skill with no vault changes is left as is. Each skill's outcome is shown
+when the run finishes.
 
 ## Force push / force pull
 
 Force actions skip the normal update flow and overwrite one side outright —
 useful when you know which copy should win and don't want to review a diff.
-Available from the Notion menu (**Force push…** / **Force pull…**, applies
-to every linked, non-legacy skill) and, for a specific selection, from the
-bulk **Push to Notion** action on the Skills page. Every force action:
+They're available only from the Notion menu (**Force push…** / **Force
+pull…**) and apply to every linked, non-legacy skill whose folder exists.
+Every force action:
 
-- Shows a confirmation with the exact number of skills affected before
-  running.
+- Shows a confirmation with the number of linked skills it will touch
+  before running.
 - Saves the copy being overwritten to that skill's version history first —
   **nothing is ever lost**, even on a force overwrite.
-- Never deletes a skill on either side; skills without a folder, without a
-  page, or with a legacy/unlinked link are skipped with a reason shown in
-  the confirmation, not silently dropped.
+- Never deletes a skill on either side. Skills without a folder, and legacy
+  or unlinked links, aren't touched; a force pull also skips skills that
+  are already in sync.
 
 ## Conflicts page and Merge with Claude
 
@@ -86,33 +106,44 @@ Three ways to resolve a conflict:
 - **Merge with Claude** — asks the local Claude CLI to help merge, file by
   file, section by section.
 
+When Claude isn't available on this machine, or the change is too large for
+a single Claude call, **Edit manually** opens the same review with each
+differing file pre-filled with the vault copy for you to edit (compare it
+with Notion's copy side by side), then **Apply** it the same way.
+
 ### Merge with Claude
 
 This option only appears when a local `claude` CLI is available on the
 machine running Skill Vault (checked automatically, cached briefly). If
 Claude isn't installed or can't be launched, the button is hidden rather
-than shown and failing.
+than shown and failing, and **Edit manually** is offered instead.
 
 **What's sent to Claude:** only the sections that actually differ between
 the vault and Notion copies of a file — never a whole file, and never a
 file that's identical on both sides. Sections that differ only in
 formatting (whitespace, list markers, code-fence language tags, table
-separator rows, smart quotes vs. plain, emphasis style) are resolved
+separator rows, emphasis style, HTML vs. Markdown emphasis, backslash
+escapes) are resolved
 automatically in the vault's favor and aren't sent to Claude at all, since
 Notion is known to rewrite formatting on its own copies (see
 [Known limitations](#known-notion-limitations)). Binary files and any file
 too large to compare are excluded and must be resolved by picking a side.
 If the combined size of what needs merging is too large for a single
-Claude call, you'll be told to pick a side or edit manually instead.
+Claude call, you'll be told to pick a side or use **Edit manually** instead.
 
 **Nothing is written until you click Apply.** The merge is a preview: an
 explanation of what changed on each side, a per-section recommendation, and
-a running cost estimate. You can flip any individual recommendation between
-"keep vault" and "keep Notion" before applying — nothing round-trips to
-Claude again for that. Clicking **Apply** writes the merged result to the
-vault (recorded in history as a Claude-assisted merge, or as a regular edit
-if you changed a recommendation yourself) and force-pushes it to Notion in
-the same action.
+what the Claude call cost. You can flip any overlapping recommendation
+between "keep vault" and "keep Notion", or edit a merged file by hand,
+before applying — nothing round-trips to Claude again for that. Clicking
+**Apply** writes the merged result to the vault (recorded in history as a
+Claude-assisted merge, or as a regular vault edit if you flipped a
+recommendation, edited by hand, or used Edit manually) and force-pushes it
+to Notion in the same action.
+
+Only one Notion action runs at a time: while a push, pull, force, link or
+another resolution is running, Apply (and the Keep buttons) are refused
+with "Another Notion job is running" — try again when it finishes.
 
 If either side changed again while you were reviewing, Apply is rejected
 and you're asked to refresh — the resolution is validated against the exact
@@ -123,10 +154,12 @@ vault and Notion versions you were looking at.
 While the app is open with Notion connected, it periodically re-checks
 Notion in the background (starting shortly after launch, then at a regular
 interval) so status pills and the Conflicts count stay current without you
-having to push or pull first. The check never runs while you're actively
-running a push, pull, or force action, and it never writes to the vault —
-it only updates what a skill's status is compared against. You can also
-trigger a check on demand from **Notion ▾ → Check Notion now**.
+having to push or pull first. The check never runs while a push, pull,
+force, link or conflict resolution is running, and it never writes to the
+vault — it only updates what a skill's status is compared against. You can
+also trigger a check on demand from **Notion ▾ → Check Notion now** (it
+waits for any running job; opening a review page meanwhile uses the last
+check's results).
 
 ## Multi-device guard
 
@@ -157,4 +190,4 @@ as an informational note but never blocks anything on its own.
 - **Legacy pages are frozen.** A Notion page that looks like a converted
   summary of a vault skill (see `docs/vault-format.md` for the exact
   detection rule) is never pushed to, pulled from, force-synced, or offered
-  for merge — only unlink/relink touches it.
+  for merge — only Unlink (and then Relink) touches it.
