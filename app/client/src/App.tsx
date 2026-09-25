@@ -14,6 +14,8 @@ import Graph from "./pages/Graph";
 import Settings from "./pages/Settings";
 import NotionConflicts from "./pages/NotionConflicts";
 import NotionReview from "./pages/NotionReview";
+import NotionLegacy from "./pages/NotionLegacy";
+import SkillNames from "./pages/SkillNames";
 
 export default function App() {
   const { data: config, isLoading } = useQuery({
@@ -46,6 +48,8 @@ export default function App() {
             <Route path="/graph" component={Graph} />
             <Route path="/settings" component={Settings} />
             <Route path="/notion/conflicts" component={NotionConflicts} />
+            <Route path="/notion/legacy" component={NotionLegacy} />
+            <Route path="/skill-names" component={SkillNames} />
             <Route path="/notion/push">{() => <NotionReview key="push" direction="push" />}</Route>
             <Route path="/notion/pull">{() => <NotionReview key="pull" direction="pull" />}</Route>
             <Route>

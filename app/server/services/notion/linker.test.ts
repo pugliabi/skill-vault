@@ -6,6 +6,8 @@ import path from "node:path";
 
 let vault: string;
 let notionDirs: Record<string, string>;
+/** Pages notion-fetch reports as blank. */
+let blankPages: Set<string>;
 
 function mkSkill(root: string, files: Record<string, string>) {
   for (const [rel, content] of Object.entries(files)) {
@@ -20,6 +22,7 @@ beforeEach(() => {
   process.env.USERPROFILE = home;
   process.env.HOME = home;
   vault = fs.mkdtempSync(path.join(os.tmpdir(), "sv-lvault-"));
+  blankPages = new Set();
   fs.writeFileSync(
     path.join(vault, "skills.json"),
     JSON.stringify({ skills: { same: { targets: [] }, diff: { targets: [] }, axelrod: { targets: [] }, mine: { targets: [] } } }),
@@ -51,6 +54,7 @@ function fakeApi() {
   return {
     listRows: async () => rows,
     downloadSkill: async (id: string) => ({ versionId: `v-${id}`, url: id }),
+    isBlankPage: async (id: string) => blankPages.has(id),
   } as any;
 }
 
@@ -138,4 +142,82 @@ test("per-skill failures are collected and the rest still link", async () => {
   const m = JSON.parse(fs.readFileSync(path.join(vault, "skills.json"), "utf8")).skills;
   assert.equal(m.diff.notion, undefined);
   assert.ok(JSON.parse(fs.readFileSync(path.join(vault, "notion.json"), "utf8")).linked_at);
+});
+
+/** Adds a vault skill named `name` and a matching Notion row `page` (no files). */
+function addPair(name: string, page: string, notionMd?: string) {
+  mkSkill(path.join(vault, "skills", name), { "SKILL.md": `---\nname: ${name}\ndescription: d\n---\nx\n` });
+  const m = JSON.parse(fs.readFileSync(path.join(vault, "skills.json"), "utf8"));
+  m.skills[name] = { targets: [] };
+  fs.writeFileSync(path.join(vault, "skills.json"), JSON.stringify(m));
+  notionDirs[page] = fs.mkdtempSync(path.join(os.tmpdir(), "sv-lpage-"));
+  mkSkill(notionDirs[page], { "SKILL.md": notionMd ?? `---\nname: ${name}\ndescription: d\n---\nsummary only\n` });
+  return { page_id: page, title: name, description: "", tags: [], has_files: false, edited_at: "2026-02-01T00:00:00.000Z" };
+}
+
+test("a new pair whose page Notion reports blank (no files) is linked awaiting its first upload", async () => {
+  const { runFirstLink } = await import("./linker.ts");
+  const { computeNotionStatus } = await import("./matching.ts");
+  const api = fakeApi();
+  const rows = await api.listRows();
+  // download-skill succeeds on a blank page (as Notion does); only the fetch marker says it's blank.
+  rows.push(addPair("helper-kit", "p-blank"));
+  blankPages.add("p-blank");
+  api.listRows = async () => rows;
+
+  const s = await runFirstLink({ api, extract }, vault);
+  assert.deepEqual(s.empty_pages, ["helper-kit"]);
+  assert.ok(!s.conflicts.includes("helper-kit"));
+  const l = JSON.parse(fs.readFileSync(path.join(vault, "skills.json"), "utf8")).skills["helper-kit"].notion;
+  assert.equal(l.page_id, "p-blank");
+  assert.equal(l.state, "linked");
+  assert.equal(l.synced_at, undefined);
+  assert.equal(l.notion_version_id, undefined);
+  assert.equal(l.notion_edited_at, "2026-02-01T00:00:00.000Z");
+  const cacheRow = rows.find((r: any) => r.page_id === "p-blank");
+  assert.equal(computeNotionStatus({ link: l, connected: true, vaultHash: "h", cacheRow, cacheValid: true }), "changed-vault");
+});
+
+test("a page with content but no files is NOT empty; download errors are ordinary per-skill errors", async () => {
+  const { runFirstLink } = await import("./linker.ts");
+  const api = fakeApi();
+  const rows = await api.listRows();
+  rows.push(addPair("notes-kit", "p-notes"));
+  rows.push(addPair("broken-kit", "p-broken"));
+  api.listRows = async () => rows;
+  const real = api.downloadSkill;
+  api.downloadSkill = async (id: string) => {
+    if (id === "p-broken") throw new Error(`download-skill returned no archive for ${id}`);
+    return real(id);
+  };
+  const s = await runFirstLink({ api, extract }, vault);
+  assert.deepEqual(s.empty_pages, []);
+  assert.ok(s.conflicts.includes("notes-kit"), "linked through the normal flow");
+  assert.deepEqual(s.errors.map((e) => e.skill), ["broken-kit"]);
+  const m = JSON.parse(fs.readFileSync(path.join(vault, "skills.json"), "utf8")).skills;
+  assert.equal(m["notes-kit"].notion.notion_version_id, "v-p-notes");
+  assert.equal(m["broken-kit"].notion, undefined);
+});
+
+test("existing links (legacy, conflict, unlinked, synced) are never re-classified as empty pages", async () => {
+  const { runFirstLink } = await import("./linker.ts");
+  const m0 = JSON.parse(fs.readFileSync(path.join(vault, "skills.json"), "utf8"));
+  m0.skills.axelrod.notion = { page_id: "p-axel", state: "legacy", linked_at: "t", notion_version_id: "old", notion_title: "Axelrod" };
+  m0.skills.diff.notion = { page_id: "p-diff", state: "linked", linked_at: "t", notion_version_id: "old", notion_title: "diff" };
+  m0.skills.same.notion = { page_id: "p-same", state: "linked", linked_at: "t", synced_at: "t", notion_version_id: "old", vault_hash: "x" };
+  fs.writeFileSync(path.join(vault, "skills.json"), JSON.stringify(m0));
+  for (const p of ["p-axel", "p-diff", "p-same"]) blankPages.add(p);
+  const api = fakeApi();
+  let fetched = 0;
+  api.isBlankPage = async () => {
+    fetched++;
+    return true;
+  };
+  const s = await runFirstLink({ api, extract }, vault);
+  assert.equal(fetched, 0, "blank checks are only made for new pairs");
+  assert.deepEqual(s.empty_pages, []);
+  const m = JSON.parse(fs.readFileSync(path.join(vault, "skills.json"), "utf8")).skills;
+  assert.equal(m.axelrod.notion.state, "legacy");
+  assert.ok(m.diff.notion.notion_version_id);
+  assert.ok(m.same.notion.notion_version_id);
 });

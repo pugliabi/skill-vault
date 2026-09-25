@@ -10,6 +10,8 @@ let vault: string;
 let notionDir: string;
 let state: { version: number };
 let calls: Array<[string, ...unknown[]]>;
+/** Pages notion-fetch reports as blank. */
+let blankPages: Set<string>;
 let uploads: Array<{ pageId: string; dir: string; name: string; files: Record<string, string> }>;
 
 const NOW = "2026-09-25T12:00:00.000Z";
@@ -78,6 +80,7 @@ beforeEach(() => {
   state = { version: 1 };
   calls = [];
   uploads = [];
+  blankPages = new Set();
 });
 
 function deps() {
@@ -88,6 +91,10 @@ function deps() {
     },
     setTitle: async (id: string, title: string) => {
       calls.push(["setTitle", id, title]);
+    },
+    isBlankPage: async (id: string) => {
+      calls.push(["isBlankPage", id]);
+      return blankPages.has(id);
     },
     createSkillPage: async (ds: string, name: string, description: string) => {
       calls.push(["createSkillPage", ds, name, description]);
@@ -142,26 +149,41 @@ test("pushSkill uploads the vault folder and updates the link bookkeeping", asyn
   assert.equal(manifest().skills.alpha.targets[0], "claude");
 });
 
-test("pushSkill restores the Notion title when it differs from the skill name", async () => {
+test("pushSkill sets the Notion title to the skill name when it differs (names must agree)", async () => {
   const { pushSkill } = await import("./sync.ts");
   seedLinked({ notion_title: "Alpha Skill" });
   await pushSkill(deps(), vault, "alpha", { force: true });
-  assert.deepEqual(calls.find((c) => c[0] === "setTitle"), ["setTitle", "p-alpha", "Alpha Skill"]);
-  assert.equal(link().notion_title, "Alpha Skill");
+  assert.deepEqual(calls.filter((c) => c[0] === "setTitle"), [["setTitle", "p-alpha", "alpha"]]);
+  assert.equal(link().notion_title, "alpha");
 });
 
-test("pushSkill restores the title against the uploaded frontmatter name, not the folder name", async () => {
+test("pushSkill refuses a folder / SKILL.md name mismatch before any Notion write", async () => {
   const { pushSkill } = await import("./sync.ts");
-  seedLinked(); // notion_title "alpha" == folder name
-  fs.writeFileSync(path.join(skillPath(), "SKILL.md"), VAULT_MD.replace("name: alpha", "name: alpha-renamed"));
-  await pushSkill(deps(), vault, "alpha", { force: true });
-  assert.deepEqual(calls.find((c) => c[0] === "setTitle"), ["setTitle", "p-alpha", "alpha"]);
+  const { NameMismatchError } = await import("../skillNames.ts");
+  seedLinked();
+  const bad = VAULT_MD.replace("name: alpha", "name: alpha-renamed");
+  fs.writeFileSync(path.join(skillPath(), "SKILL.md"), bad);
+  await assert.rejects(pushSkill(deps(), vault, "alpha", { force: true }), (err: unknown) => {
+    assert.ok(err instanceof NameMismatchError);
+    assert.equal(
+      (err as Error).message,
+      "Name mismatch: folder 'alpha' vs SKILL.md name 'alpha-renamed' — fix it in Names",
+    );
+    return true;
+  });
+  assert.equal(uploads.length, 0);
+  assert.deepEqual(calls, [], "nothing downloaded, titled or uploaded");
+  assert.equal(fs.readFileSync(path.join(skillPath(), "SKILL.md"), "utf8"), bad, "the vault copy is never rewritten");
+  assert.equal(link().synced_at, "2026-01-01T00:00:00.000Z");
 
-  calls = [];
-  seedLinked({ notion_title: "alpha-renamed" });
-  fs.writeFileSync(path.join(skillPath(), "SKILL.md"), VAULT_MD.replace("name: alpha", "name: alpha-renamed"));
-  await pushSkill(deps(), vault, "alpha", { force: true });
-  assert.equal(calls.filter((c) => c[0] === "setTitle").length, 0, "title already matches the uploaded name");
+  // create: no Notion page is made for a mismatched skill.
+  writeTree(skillPath("beta"), { "SKILL.md": "---\nname: gamma\ndescription: d\n---\nbody\n" });
+  const m = manifest();
+  m.skills.beta = { targets: [] };
+  fs.writeFileSync(path.join(vault, "skills.json"), JSON.stringify(m));
+  await assert.rejects(pushSkill(deps(), vault, "beta", { create: true }), NameMismatchError);
+  assert.ok(!calls.some((c) => c[0] === "createSkillPage"));
+  assert.equal(manifest().skills.beta.notion, undefined);
 });
 
 test("pushSkill without force refuses when Notion changed since the last sync", async () => {
@@ -208,34 +230,27 @@ test("pushSkill create: a failed upload unlinks again and names the orphan page"
   await assert.rejects(pushSkill(d, vault, "alpha", { create: true }), (err: Error) => {
     assert.match(err.message, /p-new/);
     assert.match(err.message, /PUT 500/);
-    assert.match(err.message, /delete that empty page in Notion/);
+    assert.match(err.message, /push again/);
     return true;
   });
   assert.equal(manifest().skills.alpha.notion, undefined, "no link to the empty page is left behind");
 });
 
-test("pushSkill retries the upload for a created-but-never-uploaded page (no archive yet)", async () => {
+test("pushSkill never swallows a download error for a link awaiting its first upload", async () => {
   const { pushSkill } = await import("./sync.ts");
   writeTree(skillPath(), { "SKILL.md": VAULT_MD });
+  const m = manifest();
+  m.skills.alpha.notion = { page_id: "p-new", state: "linked", linked_at: NOW, notion_title: "alpha" };
+  fs.writeFileSync(path.join(vault, "skills.json"), JSON.stringify(m));
+  blankPages.add("p-new");
+  const d = deps();
+  d.api.downloadSkill = async (id: string) => {
+    throw new Error(`download-skill returned no archive for ${id}`);
+  };
   for (const opts of [{}, { force: true }]) {
-    const d = deps();
-    let first = true;
-    const real = d.api.downloadSkill;
-    d.api.downloadSkill = async (id: string) => {
-      if (first) {
-        first = false;
-        throw new Error(`download-skill returned no archive for ${id}`);
-      }
-      return real(id);
-    };
-    uploads = [];
-    const before = manifest();
-    before.skills.alpha.notion = { page_id: "p-new", state: "linked", linked_at: NOW, notion_title: "alpha" };
-    fs.writeFileSync(path.join(vault, "skills.json"), JSON.stringify(before));
-    await pushSkill(d, vault, "alpha", opts);
-    assert.deepEqual(uploads.map((u) => u.pageId), ["p-new"], JSON.stringify(opts));
-    assert.equal(link().synced_at, NOW);
+    await assert.rejects(pushSkill(d, vault, "alpha", opts), /no archive/);
   }
+  assert.equal(uploads.length, 0);
 });
 
 test("pushSkill does not retry blind when a synced/versioned link's download fails", async () => {
@@ -448,9 +463,161 @@ test("every primitive refuses a legacy link", async () => {
   assert.deepEqual(calls, []);
 });
 
+test("applyResolution refuses a resolved SKILL.md whose name is not the folder name, before writing", async () => {
+  const { applyResolution } = await import("./sync.ts");
+  const { NameMismatchError } = await import("../skillNames.ts");
+  seedLinked();
+  const files = new Map([["SKILL.md", Buffer.from("---\nname: other\n---\nx\n")]]);
+  await assert.rejects(applyResolution(deps(), vault, "alpha", files, "claude-merge"), NameMismatchError);
+  assert.equal(fs.readFileSync(path.join(skillPath(), "SKILL.md"), "utf8"), VAULT_MD);
+  assert.equal(uploads.length, 0);
+});
+
+// ── upgradeLegacySkill ──────────────────────────────────────────
+
+const SUMMARY_MD = "---\nname: |-\n  Alpha\ndescription: |-\n  d\nnotion_page_id: p-alpha\n---\n## What Claude automates\nsummary\n";
+
+/** A vault skill with supporting files linked (legacy) to a summary page with none. */
+function seedLegacy(linkExtra: Record<string, unknown> = {}) {
+  writeTree(skillPath(), { "SKILL.md": VAULT_MD, "references/r.md": "vault ref\n", "scripts/run.py": "print(1)\n" });
+  writeTree(notionDir, { "SKILL.md": SUMMARY_MD });
+  recordVersion(vault, "alpha", { side: "notion", source: "legacy-snapshot", dir: notionDir, always: true });
+  const m = manifest();
+  m.skills.alpha.notion = {
+    page_id: "p-alpha",
+    state: "legacy",
+    linked_at: "2026-01-01T00:00:00.000Z",
+    notion_title: "Alpha",
+    custom_field: "keep me",
+    ...linkExtra,
+  };
+  fs.writeFileSync(path.join(vault, "skills.json"), JSON.stringify(m));
+}
+
+test("upgradeLegacySkill snapshots the summary, uploads the full folder, titles it by name, links + syncs", async () => {
+  const { upgradeLegacySkill } = await import("./sync.ts");
+  seedLegacy();
+  const r = await upgradeLegacySkill(deps(), vault, "alpha");
+  assert.equal(r.versionId, "v2");
+
+  // Notion's summary was recorded first, always, as a legacy snapshot.
+  const notionSide = listVersions(vault, "alpha").filter((v) => v.side === "notion");
+  assert.deepEqual(notionSide.map((v) => [v.source, v.note]), [
+    ["push-notion-copy", undefined],
+    ["legacy-snapshot", "before upgrade"],
+    ["legacy-snapshot", undefined],
+  ]);
+  // The whole vault folder went to the same page.
+  assert.equal(uploads.length, 1);
+  assert.equal(uploads[0].pageId, "p-alpha");
+  assert.equal(uploads[0].name, "alpha");
+  assert.deepEqual(Object.keys(uploads[0].files).sort(), ["SKILL.md", "references/r.md", "scripts/run.py"]);
+  // Title = skill name, after the upload.
+  const order = calls.map((c) => c[0]);
+  assert.deepEqual(calls.filter((c) => c[0] === "setTitle"), [["setTitle", "p-alpha", "alpha"]]);
+  assert.ok(order.indexOf("setTitle") > order.indexOf("downloadSkill"));
+
+  const l = link();
+  assert.equal(l.state, "linked");
+  assert.equal(l.page_id, "p-alpha");
+  assert.equal(l.synced_at, NOW);
+  assert.equal(l.notion_version_id, "v2");
+  assert.equal(l.notion_title, "alpha");
+  assert.equal(l.vault_name, "alpha");
+  assert.equal(l.vault_hash, hashSkillDirNormalized(skillPath()));
+  assert.equal(l.custom_field, "keep me");
+  assert.equal(l.base_notion_version, notionSide[0].id);
+  assert.ok(l.base_vault_version);
+  // The vault copy is untouched.
+  assert.equal(fs.readFileSync(path.join(skillPath(), "SKILL.md"), "utf8"), VAULT_MD);
+});
+
+test("upgradeLegacySkill refuses a name mismatch before downloading or uploading anything", async () => {
+  const { upgradeLegacySkill } = await import("./sync.ts");
+  const { NameMismatchError } = await import("../skillNames.ts");
+  seedLegacy();
+  fs.writeFileSync(path.join(skillPath(), "SKILL.md"), VAULT_MD.replace("name: alpha", "name: alpha-skill"));
+  await assert.rejects(upgradeLegacySkill(deps(), vault, "alpha"), NameMismatchError);
+  assert.deepEqual(calls, []);
+  assert.equal(uploads.length, 0);
+  assert.equal(link().state, "legacy");
+});
+
+test("upgradeLegacySkill rejects a link that is not legacy", async () => {
+  const { upgradeLegacySkill, NotLegacyError } = await import("./sync.ts");
+  seedLinked();
+  await assert.rejects(upgradeLegacySkill(deps(), vault, "alpha"), NotLegacyError);
+  const m = manifest();
+  delete m.skills.alpha.notion;
+  fs.writeFileSync(path.join(vault, "skills.json"), JSON.stringify(m));
+  await assert.rejects(upgradeLegacySkill(deps(), vault, "alpha"), NotLegacyError);
+  assert.deepEqual(calls, []);
+  assert.equal(uploads.length, 0);
+});
+
 test("adoptFromNotion refuses Notion-native rows", async () => {
   const { adoptFromNotion } = await import("./sync.ts");
   const row = { page_id: "p-n", title: "Reformat with headers", description: "", tags: [], has_files: false };
   await assert.rejects(adoptFromNotion(deps(), vault, row), /Notion-native/);
   assert.deepEqual(calls, []);
+});
+
+// ── empty pages ─────────────────────────────────────────────────
+
+function writeCacheRows(rows: Array<Record<string, unknown>>) {
+  const dir = path.join(process.env.HOME!, ".skill-vault");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "notion-cache.json"),
+    JSON.stringify({ checked_at: NOW, data_source_id: "ds", rows }),
+  );
+}
+
+const cacheRow = (page_id: string, title: string, has_files = false) => ({ page_id, title, description: "", tags: [], has_files });
+
+test("pushSkill create reuses a blank, file-less, unlinked page titled with the skill name", async () => {
+  const { pushSkill } = await import("./sync.ts");
+  writeTree(skillPath(), { "SKILL.md": VAULT_MD });
+  writeCacheRows([cacheRow("p-full", "alpha", true), cacheRow("p-empty", "alpha")]);
+  blankPages.add("p-empty").add("p-full");
+  await pushSkill(deps(), vault, "alpha", { create: true });
+  assert.ok(!calls.some((c) => c[0] === "createSkillPage"), "no duplicate page is created");
+  assert.ok(!calls.some((c) => c[0] === "isBlankPage" && c[1] === "p-full"), "a page with files is never a candidate");
+  assert.deepEqual(uploads.map((u) => u.pageId), ["p-empty"]);
+  const l = link();
+  assert.equal(l.page_id, "p-empty");
+  assert.equal(l.synced_at, NOW);
+  assert.equal(l.notion_title, "alpha");
+});
+
+test("pushSkill create does not reuse a same-named page Notion doesn't report blank", async () => {
+  const { pushSkill } = await import("./sync.ts");
+  writeTree(skillPath(), { "SKILL.md": VAULT_MD });
+  writeCacheRows([cacheRow("p-other", "alpha")]);
+  await pushSkill(deps(), vault, "alpha", { create: true });
+  assert.ok(calls.some((c) => c[0] === "isBlankPage" && c[1] === "p-other"));
+  assert.ok(calls.some((c) => c[0] === "createSkillPage"));
+  assert.equal(link().page_id, "p-new");
+});
+
+test("a link awaiting its first upload is filled only while Notion reports the page blank", async () => {
+  const { pushSkill, NotionChangedError } = await import("./sync.ts");
+  writeTree(skillPath(), { "SKILL.md": VAULT_MD });
+  const seed = () => {
+    const m = manifest();
+    m.skills.alpha.notion = { page_id: "p-empty", state: "linked", linked_at: NOW, notion_title: "alpha" };
+    fs.writeFileSync(path.join(vault, "skills.json"), JSON.stringify(m));
+  };
+  writeCacheRows([cacheRow("p-empty", "alpha")]);
+
+  // Not blank any more (someone wrote into it): a never-synced link → Conflicts, nothing uploaded.
+  seed();
+  await assert.rejects(pushSkill(deps(), vault, "alpha"), NotionChangedError);
+  assert.equal(uploads.length, 0);
+
+  // Blank: filled.
+  blankPages.add("p-empty");
+  await pushSkill(deps(), vault, "alpha");
+  assert.deepEqual(uploads.map((u) => u.pageId), ["p-empty"]);
+  assert.equal(link().synced_at, NOW);
 });

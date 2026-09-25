@@ -57,6 +57,9 @@ const PAGE_SIZE = 100;
 /** Hard stop for listRows: 100 pages × 100 rows. */
 const MAX_PAGES = 100;
 
+/** notion-fetch marks a page with no content with this tag (verified against a real blank page). */
+export const BLANK_PAGE_MARKER = "<blank-page>";
+
 export class NotionApi {
   constructor(private readonly call: ToolCaller) {}
 
@@ -68,6 +71,16 @@ export class NotionApi {
   async fetch(idOrUrl: string): Promise<{ text: string; page_last_edited_at?: string; title?: string }> {
     const r = await this.call("notion-fetch", { id: idOrUrl });
     return { text: String(r?.text ?? ""), page_last_edited_at: r?.page_last_edited_at, title: r?.title };
+  }
+
+  /**
+   * True when Notion reports the page as blank (no content at all). Note that
+   * download-skill still succeeds on such a page, so this is the only
+   * reliable "empty page" signal; callers also require the row's has_files
+   * to be false.
+   */
+  async isBlankPage(pageId: string): Promise<boolean> {
+    return (await this.fetch(pageId)).text.includes(BLANK_PAGE_MARKER);
   }
 
   async detectSkillsDataSources(): Promise<Array<{ id: string; name: string }>> {

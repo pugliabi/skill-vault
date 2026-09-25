@@ -6,6 +6,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { recordActivity } from "./activity.ts";
+import { readAppConfig } from "./appConfig.ts";
+import { getActiveWatcher, rebuildWatcher } from "./watcher.ts";
+import { relinkProviders, unlinkProviders, type ProviderOutcome } from "./providerLinks.ts";
+import type { Provider } from "../types/vault.ts";
 import { moveHistory, recordVersion, withHistory } from "./history.ts";
 import { validateSkillName } from "./skillName.ts";
 import { readManifest, removeSkill, renameSkill, skillDir } from "./vault.ts";
@@ -15,8 +19,82 @@ export class SkillOpError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** Machine-readable code sent as `error` (with `message`) when set, e.g. "in_use". */
+    readonly code?: string,
   ) {
     super(message);
+  }
+}
+
+export const IN_USE_MESSAGE =
+  "The skill folder is in use by another program (an editor, an agent session or antivirus). Close it and try again. " +
+  "If another Skill Vault window is open, close it and try again.";
+
+/** Injection points for the folder rename (tests); defaults are the real ones. */
+export interface RenameHooks {
+  /**
+   * Stop the app's own vault watcher: on Windows it holds handles on skill
+   * subfolders, which makes renaming a folder with subfolders fail (EPERM).
+   * Returns whether a watcher was paused.
+   */
+  pauseWatcher: () => Promise<boolean>;
+  /** Re-create the watcher (always called after a pause, even if the rename failed). */
+  resumeWatcher: () => void;
+  /** The folder + manifest rename itself. */
+  renameDir: (vaultPath: string, oldName: string, newName: string) => void;
+  sleep: (ms: number) => Promise<void>;
+}
+
+export const defaultRenameHooks: RenameHooks = {
+  pauseWatcher: async () => {
+    const w = getActiveWatcher();
+    if (!w) return false;
+    await w.close();
+    return true;
+  },
+  resumeWatcher: () => rebuildWatcher(),
+  renameDir: (vaultPath, oldName, newName) => renameSkill(vaultPath, oldName, newName),
+  sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+};
+
+/** Attempts for a folder rename that fails with EPERM/EBUSY (transient locks), ~200ms apart. */
+export const RENAME_ATTEMPTS = 5;
+const RENAME_BACKOFF_MS = 200;
+
+const isLockError = (err: unknown) => {
+  const code = (err as NodeJS.ErrnoException)?.code;
+  return code === "EPERM" || code === "EBUSY";
+};
+
+/** Pause the watcher, rename (retrying transient locks), and always rebuild the watcher. */
+async function renameFolderPaused(hooks: RenameHooks, vaultPath: string, oldName: string, newName: string): Promise<void> {
+  const paused = await hooks.pauseWatcher();
+  try {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        hooks.renameDir(vaultPath, oldName, newName);
+        return;
+      } catch (err) {
+        if (!isLockError(err) || attempt >= RENAME_ATTEMPTS) throw err;
+        await hooks.sleep(RENAME_BACKOFF_MS);
+      }
+    }
+  } finally {
+    if (paused) hooks.resumeWatcher();
+  }
+}
+
+function configuredProviders(): Provider[] {
+  try {
+    return readAppConfig().providers;
+  } catch {
+    return [];
+  }
+}
+
+function logProviderOutcomes(kind: "rename" | "remove", skill: string, outcomes: ProviderOutcome[]): void {
+  for (const o of outcomes) {
+    recordActivity({ kind, skill, provider_id: o.provider_id, ok: o.outcome !== "error", message: o.message });
   }
 }
 
@@ -26,7 +104,13 @@ export class SkillOpError extends Error {
  * failures after the rename are logged, never thrown (the rename happened).
  * Throws SkillOpError for validation failures (nothing changed).
  */
-export function renameVaultSkill(vaultPath: string, oldName: string, rawNewName: string): void {
+export async function renameVaultSkill(
+  vaultPath: string,
+  oldName: string,
+  rawNewName: string,
+  providers: Provider[] = configuredProviders(),
+  hooks: RenameHooks = defaultRenameHooks,
+): Promise<ProviderOutcome[]> {
   const newName = rawNewName.trim();
   if (!newName) throw new SkillOpError(400, "new_name is required");
   if (newName === oldName) throw new SkillOpError(400, "new_name is the same as the current name");
@@ -50,10 +134,21 @@ export function renameVaultSkill(vaultPath: string, oldName: string, rawNewName:
   }
 
   try {
-    renameSkill(vaultPath, oldName, newName);
+    await renameFolderPaused(hooks, vaultPath, oldName, newName);
   } catch (err) {
     recordActivity({ kind: "rename", skill: oldName, ok: false, message: (err as Error).message });
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "EPERM" || code === "EBUSY" || code === "EACCES") throw new SkillOpError(409, IN_USE_MESSAGE, "in_use");
     throw err;
+  }
+
+  // Provider links named after the old folder now dangle: move them.
+  let outcomes: ProviderOutcome[] = [];
+  try {
+    outcomes = relinkProviders(providers, skillDir(vaultPath, oldName), skillDir(vaultPath, newName), oldName, newName);
+    logProviderOutcomes("rename", newName, outcomes);
+  } catch (err) {
+    console.error(`[rename] provider links ${oldName} -> ${newName}: ${(err as Error).message}`);
   }
 
   try {
@@ -64,13 +159,18 @@ export function renameVaultSkill(vaultPath: string, oldName: string, rawNewName:
   }
 
   recordActivity({ kind: "rename", skill: newName, ok: true, message: `${oldName} → ${newName}` });
+  return outcomes;
 }
 
 /**
  * Remove a skill from the manifest and disk after recording its final state
  * (with the manifest entry) in history, so it can be restored. Idempotent.
  */
-export function deleteVaultSkill(vaultPath: string, name: string): void {
+export function deleteVaultSkill(
+  vaultPath: string,
+  name: string,
+  providers: Provider[] = configuredProviders(),
+): ProviderOutcome[] {
   const manifestEntry = readManifest(vaultPath).skills[name];
   recordActivity({ kind: "remove", skill: name, ok: true, message: "starting" });
   try {
@@ -81,12 +181,17 @@ export function deleteVaultSkill(vaultPath: string, name: string): void {
       manifest_entry: manifestEntry,
     });
     removeSkill(vaultPath, name);
+    // Links in providers to the deleted folder now dangle: remove them
+    // (only links — real folders are never deleted).
+    const outcomes = unlinkProviders(providers, skillDir(vaultPath, name), name);
+    logProviderOutcomes("remove", name, outcomes);
     recordActivity({
       kind: "remove",
       skill: name,
       ok: true,
       message: manifestEntry ? "removed" : "no-op (not in manifest)",
     });
+    return outcomes;
   } catch (err) {
     recordActivity({ kind: "remove", skill: name, ok: false, message: (err as Error).message });
     throw err;

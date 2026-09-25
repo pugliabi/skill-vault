@@ -26,6 +26,8 @@ export interface LinkSummary {
   linked_in_sync: string[];
   conflicts: string[];
   legacy: string[];
+  /** Linked to an empty Notion page (no skill uploaded yet) — filled by the next push. */
+  empty_pages: string[];
   notion_only_compatible: Array<{ page_id: string; title: string }>;
   notion_only_native: Array<{ page_id: string; title: string }>;
   vault_only: string[];
@@ -174,6 +176,7 @@ export async function runFirstLink(
     linked_in_sync: [],
     conflicts: [],
     legacy: [],
+    empty_pages: [],
     ...splitNotionOnly(notionOnly),
     vault_only: [...vaultOnly].sort(),
     errors: [],
@@ -206,6 +209,25 @@ export async function runFirstLink(
     }
 
     try {
+      // A NEW pair (the skill has no link at all) whose page Notion reports
+      // as blank, with no files, is an empty page (e.g. left by a failed
+      // first upload, then named by the user): link it without synced_at /
+      // notion_version_id — the shape of a freshly created page — so the
+      // next push fills it. Existing links (legacy, conflict, unlinked,
+      // vault-only, synced) are never re-classified this way.
+      if (!existing && row.has_files === false && (await deps.api.isBlankPage(row.page_id))) {
+        setNotionLink(vaultPath, name, {
+          page_id: row.page_id,
+          state: "linked",
+          linked_at: new Date().toISOString(),
+          ...(row.edited_at ? { notion_edited_at: row.edited_at } : {}),
+          notion_title: row.title,
+          vault_name: name,
+        });
+        summary.empty_pages.push(name);
+        continue;
+      }
+
       const dl = await deps.api.downloadSkill(row.page_id);
       const ex = await deps.extract(dl.url);
       try {
@@ -269,6 +291,7 @@ export async function runFirstLink(
   summary.linked_in_sync.sort();
   summary.conflicts.sort();
   summary.legacy.sort();
+  summary.empty_pages.sort();
   writeNotionSettings(vaultPath, { linked_at: new Date().toISOString() });
   return summary;
 }

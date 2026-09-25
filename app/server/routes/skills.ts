@@ -19,6 +19,8 @@ import {
 import { validateSkillName } from "../services/skillName.ts";
 import { withHistory, recordVersion } from "../services/history.ts";
 import { SkillOpError, deleteVaultSkill, renameVaultSkill } from "../services/skillLifecycle.ts";
+import { fixSkillName, listNameMismatches } from "../services/skillNames.ts";
+import type { ProviderOutcome } from "../services/providerLinks.ts";
 
 /**
  * `:name` must be a plain path segment before it reaches the filesystem
@@ -42,11 +44,17 @@ export function isSafeNameSegment(name: unknown): name is string {
  *   GET    /api/skills/:name     — single skill + file tree + per-target status
  *   PATCH  /api/skills/:name     — partial manifest update (stage, targets, source)
  *   DELETE /api/skills/:name     — remove from manifest AND filesystem
+ *   GET    /api/skills/name-mismatches      — folders whose SKILL.md `name` differs
+ *   POST   /api/skills/:name/fix-name {use: "name"|"folder"} — make the two agree
  *
  * All routes require a configured vault and 409 with "vault not
  * configured" otherwise so the client can redirect to /setup.
  */
-export function skillsRouter(): Router {
+/** 409 {error:"busy"} text for renames while a Notion job runs (it may be reading or moving the same folders). */
+const BUSY_TEXT = "Another Notion job is running — try again when it finishes.";
+
+export function skillsRouter(opts: { isBusy?: () => boolean } = {}): Router {
+  const isBusy = opts.isBusy ?? (() => false);
   const router = Router();
 
   router.get("/", (req, res) => {
@@ -93,6 +101,15 @@ export function skillsRouter(): Router {
    * "search" isn't captured as a skill name. Returns matching skill names
    * with a snippet; the client unions these with its name/description filter.
    */
+  router.get("/name-mismatches", (_req, res) => {
+    const cfg = readAppConfig();
+    if (!cfg.vault_path) {
+      res.status(409).json({ error: "vault not configured" });
+      return;
+    }
+    res.json({ skills: listNameMismatches(cfg.vault_path) });
+  });
+
   router.get("/search", (req, res) => {
     const cfg = readAppConfig();
     if (!cfg.vault_path) {
@@ -248,6 +265,41 @@ export function skillsRouter(): Router {
   });
 
   /**
+   * POST /:name/fix-name — make the folder name and SKILL.md's `name` agree.
+   *   use "name":   rename the folder to SKILL.md's name (409 if that skill exists — a duplicate)
+   *   use "folder": set SKILL.md's name to the folder name
+   */
+  router.post("/:name/fix-name", async (req, res) => {
+    if (!isSafeNameSegment(req.params.name)) {
+      res.status(400).json({ error: "invalid skill name" });
+      return;
+    }
+    const cfg = readAppConfig();
+    if (!cfg.vault_path) {
+      res.status(409).json({ error: "vault not configured" });
+      return;
+    }
+    if (isBusy()) {
+      res.status(409).json({ error: "busy", message: BUSY_TEXT });
+      return;
+    }
+    const use = (req.body as { use?: unknown } | undefined)?.use;
+    if (use !== "name" && use !== "folder") {
+      res.status(400).json({ error: 'use must be "name" or "folder"' });
+      return;
+    }
+    try {
+      res.json(await fixSkillName(cfg.vault_path, req.params.name, use));
+    } catch (err) {
+      if (err instanceof SkillOpError) {
+        res.status(err.status).json(err.code ? { error: err.code, message: err.message } : { error: err.message });
+        return;
+      }
+      throw err;
+    }
+  });
+
+  /**
    * POST /:name/rename — atomic folder + manifest-key rename.
    *
    * Body: { new_name: string }
@@ -258,9 +310,13 @@ export function skillsRouter(): Router {
    *
    * Activity: kind: "rename", message: "<old> → <new>".
    */
-  router.post("/:name/rename", (req, res) => {
+  router.post("/:name/rename", async (req, res) => {
     if (!isSafeNameSegment(req.params.name)) {
       res.status(400).json({ error: "invalid skill name" });
+      return;
+    }
+    if (isBusy()) {
+      res.status(409).json({ error: "busy", message: BUSY_TEXT });
       return;
     }
     const cfg = readAppConfig();
@@ -271,18 +327,19 @@ export function skillsRouter(): Router {
     const body = req.body as { new_name?: unknown };
     const newName =
       typeof body.new_name === "string" ? body.new_name.trim() : "";
+    let providerLinks: ProviderOutcome[] = [];
     try {
-      renameVaultSkill(cfg.vault_path, req.params.name, newName);
+      providerLinks = await renameVaultSkill(cfg.vault_path, req.params.name, newName);
     } catch (err) {
       if (err instanceof SkillOpError) {
-        res.status(err.status).json({ error: err.message });
+        res.status(err.status).json(err.code ? { error: err.code, message: err.message } : { error: err.message });
         return;
       }
       throw err;
     }
 
     const detail = getSkillDetail(cfg.vault_path, newName, cfg.providers);
-    res.json(detail);
+    res.json({ ...detail, provider_links: providerLinks });
   });
 
   /**

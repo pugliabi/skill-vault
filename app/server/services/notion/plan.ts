@@ -61,6 +61,21 @@ function titleTaken(rows: NotionCacheRow[], title: string, exceptPageId: string)
   return rows.some((r) => r.title === title && r.page_id !== exceptPageId);
 }
 
+/**
+ * A Notion-side rename: the page title is a valid skill name that changed
+ * in Notion since the last link/sync. Pulled into the vault as a folder
+ * rename; any other title that differs from the skill name is fixed from
+ * the vault side ("Fix name in Notion").
+ */
+function isNotionRename(cacheRow: NotionCacheRow, link: NotionLink, name: string): boolean {
+  return (
+    cacheRow.title !== name &&
+    isValidSkillName(cacheRow.title) &&
+    !!link.notion_title &&
+    cacheRow.title !== link.notion_title
+  );
+}
+
 function buildPushRow(skill: PlanSkillInput, rows: NotionCacheRow[]): PlanRow | undefined {
   const { name, link } = skill;
   if (!link) {
@@ -147,8 +162,32 @@ function buildPushRow(skill: PlanSkillInput, rows: NotionCacheRow[]): PlanRow | 
       title: name,
       direction: "push",
       default_selected: false,
-      detail: `Renamed in vault from "${link.vault_name}" to "${name}" — update the Notion skill name`,
+      detail:
+        `Renamed in vault from "${link.vault_name}" to "${name}" — update the Notion skill name ` +
+        `(and SKILL.md's name, if it still says "${link.vault_name}")`,
       warnings: [],
+    };
+  }
+
+  // Names must agree: Notion title == folder name == SKILL.md name. A
+  // title that differs (a display title kept at link time, or a non-slug
+  // rename made in Notion) is set back to the skill name by pushing.
+  if (cacheRow && cacheRow.title !== name && status !== "changed-notion" && !isNotionRename(cacheRow, link, name)) {
+    const taken = titleTaken(rows, name, link.page_id);
+    return {
+      id: rowId("push", "rename", name),
+      kind: "rename",
+      skill: name,
+      page_id: link.page_id,
+      title: name,
+      direction: "push",
+      // Opt-in: renaming a page in Notion is the user's call.
+      default_selected: false,
+      detail:
+        `Fix name in Notion: "${cacheRow.title}" → "${name}". Sets the Notion title to '${name}'` +
+        (status === "changed-vault" ? " and pushes the vault changes" : "") +
+        ".",
+      warnings: taken ? [`Another Notion page is already titled "${name}"`] : [],
     };
   }
 
@@ -216,13 +255,7 @@ function buildPullLinkedRow(skill: PlanSkillInput, rows: NotionCacheRow[]): Plan
       warnings: [],
     };
   }
-  if (
-    cacheRow &&
-    cacheRow.title !== name &&
-    isValidSkillName(cacheRow.title) &&
-    link.notion_title &&
-    cacheRow.title !== link.notion_title
-  ) {
+  if (cacheRow && isNotionRename(cacheRow, link, name)) {
     return {
       id: rowId("pull", "rename", name),
       kind: "rename",

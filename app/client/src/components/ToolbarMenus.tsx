@@ -269,6 +269,7 @@ function invalidateAfterForce(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ["notion-conflicts"] });
   qc.invalidateQueries({ queryKey: ["notion-status"] });
   qc.invalidateQueries({ queryKey: ["notion-plan"] });
+  qc.invalidateQueries({ queryKey: ["notion-legacy"] });
 }
 
 /**
@@ -295,6 +296,22 @@ export function NotionMenu({ navigate }: { navigate: (to: string) => void }) {
     retry: false,
   });
   const conflictCount = conflicts?.skills.length ?? 0;
+
+  const { data: legacy } = useQuery({
+    queryKey: ["notion-legacy"],
+    queryFn: () => api.notionLegacy(),
+    enabled: configured,
+    retry: false,
+  });
+  const legacyCount = legacy?.skills.length ?? 0;
+
+  const { data: mismatches } = useQuery({
+    queryKey: ["skill-name-mismatches"],
+    queryFn: () => api.skillNameMismatches(),
+    enabled: configured,
+    retry: false,
+  });
+  const mismatchCount = mismatches?.skills.length ?? 0;
 
   const toastIdRef = useRef<string | number | null>(null);
   const { start, job } = useNotionRunJob((finished, lost) => {
@@ -389,6 +406,12 @@ export function NotionMenu({ navigate }: { navigate: (to: string) => void }) {
       label: `Conflicts (${conflictCount})`,
       onSelect: () => navigate("/notion/conflicts"),
     },
+    ...(legacyCount > 0
+      ? [{ id: "legacy", label: `Upgrade legacy pages (${legacyCount})`, onSelect: () => navigate("/notion/legacy") }]
+      : []),
+    ...(mismatchCount > 0
+      ? [{ id: "names", label: `Name mismatches (${mismatchCount})`, onSelect: () => navigate("/skill-names") }]
+      : []),
     { id: "sep1", separator: true },
     { id: "force-push", label: "Force push…", onSelect: () => void confirmForce("push") },
     { id: "force-pull", label: "Force pull…", onSelect: () => void confirmForce("pull") },
@@ -475,7 +498,8 @@ export function useBulkPushToNotion(names: string[]): { run: () => void; banner:
     const ok = window.confirm(
       `Push ${names.length} skill${names.length === 1 ? "" : "s"} to Notion?\n\n${list}\n\n` +
         `Pushes vault changes; creates a Notion page for any selected skill that has none. ` +
-        `Skills changed in Notion (or never synced) are skipped — resolve them in Conflicts. Nothing is deleted.`,
+        `Skills changed in Notion (or never synced) are skipped — resolve them in Conflicts. ` +
+        `Legacy summary pages are skipped — use Notion ▾ → Upgrade legacy pages. Nothing is deleted.`,
     );
     if (!ok) return;
     push.mutate({ skills: names });

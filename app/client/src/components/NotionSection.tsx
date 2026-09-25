@@ -293,6 +293,7 @@ const SUMMARY_ROWS: Array<{ key: keyof NotionLinkSummary; label: string }> = [
   { key: "linked_in_sync", label: "In sync" },
   { key: "conflicts", label: "Conflicts" },
   { key: "legacy", label: "Legacy" },
+  { key: "empty_pages", label: "Empty Notion pages (filled by the next push)" },
   { key: "notion_only_compatible", label: "Notion-only compatible" },
   { key: "notion_only_native", label: "Notion-native (not compatible)" },
   { key: "vault_only", label: "Vault-only" },
@@ -300,11 +301,11 @@ const SUMMARY_ROWS: Array<{ key: keyof NotionLinkSummary; label: string }> = [
 ];
 
 function summaryCount(summary: NotionLinkSummary, key: keyof NotionLinkSummary): number {
-  return (summary[key] as unknown[]).length;
+  return (summary[key] as unknown[] | undefined)?.length ?? 0;
 }
 
 function summaryNames(summary: NotionLinkSummary, key: keyof NotionLinkSummary): string[] {
-  const value = summary[key];
+  const value = summary[key] ?? [];
   return (value as Array<string | { title?: string; skill?: string; page_id?: string }>).map((v) =>
     typeof v === "string" ? v : v.title ?? v.skill ?? v.page_id ?? "?",
   );

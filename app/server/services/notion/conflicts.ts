@@ -104,6 +104,8 @@ export function listConflicts(vaultPath: string): ConflictListItem[] {
     const link = entry.notion;
     if (!link || link.state !== "linked" || !link.page_id) continue;
     if (link.synced_at && !statusConflict.has(name)) continue;
+    // An empty page awaiting its first upload has nothing to compare (it is a push row).
+    if (!link.synced_at && !link.notion_version_id) continue;
     const vEdited = vaultEditedAt(vaultPath, name);
     const nEdited = notionEditedAt(link);
     out.push({

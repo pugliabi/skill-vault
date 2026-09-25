@@ -57,6 +57,11 @@ function errorText(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
 }
 
+/** A per-row error / warning about a folder vs SKILL.md name mismatch (fixed on the Names page). */
+export function isNameMismatch(text: string | undefined): boolean {
+  return !!text && text.startsWith("Name mismatch");
+}
+
 function rowLabel(r: NotionPlanRow): string {
   return r.skill ?? r.title ?? r.id;
 }
@@ -427,6 +432,15 @@ function PlanRowItem({
           <span style={{ fontSize: 11, color: result.ok ? "var(--ok)" : "var(--bad)" }}>
             {result.ok ? `✓ ${result.message ?? "done"}` : `✕ ${result.error ?? "failed"}`}
           </span>
+        )}
+        {row.skill && (isNameMismatch(result?.error) || row.warnings.some((w) => isNameMismatch(w))) && (
+          <Link
+            href={`/skill-names?skill=${encodeURIComponent(row.skill)}`}
+            onClick={(e: MouseEvent) => e.stopPropagation()}
+            style={{ fontSize: 11.5, color: "var(--accent)", textDecoration: "none", fontWeight: 500 }}
+          >
+            Fix in Names →
+          </Link>
         )}
       </div>
     </div>

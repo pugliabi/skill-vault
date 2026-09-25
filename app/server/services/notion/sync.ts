@@ -5,19 +5,28 @@
  * Notion copy seen is recorded as a notion-side history version, and every
  * successful action rewrites the link bookkeeping (synced_at, vault_hash,
  * notion_version_id, bases) while carrying over fields it doesn't know.
- * Legacy links are frozen: every primitive throws LegacyLinkError.
+ * Legacy links are frozen: every primitive throws LegacyLinkError — the
+ * only way out is `upgradeLegacySkill`, which replaces the summary page with
+ * the full skill.
+ *
+ * Name agreement: an upload is refused (NameMismatchError, before any
+ * Notion write — no page created, nothing uploaded) unless SKILL.md's
+ * frontmatter `name` equals the folder name; after an upload the Notion
+ * title is set to that same name.
  */
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { getVersion, listVersions, readObject, recordVersion, withHistory, type HistorySide } from "../history.ts";
 import { hashSkillDirNormalized } from "../skillHash.ts";
+import { setSkillMdName } from "../skillLifecycle.ts";
+import { NameMismatchError, assertNameAgreement, frontmatterValueOf, skillMdName } from "../skillNames.ts";
 import { readManifest, skillDir, skillsDir, upsertManifestSkill } from "../vault.ts";
 import type { NotionLink } from "../../types/vault.ts";
 import type { NotionApi } from "./api.ts";
 import { readSkillFiles } from "./linker.ts";
 import { isNotionNative, isValidSkillName, normalizeName } from "./matching.ts";
-import { mergeSkillMd, overlayNotionSkillMd, readFrontmatterValue, stripNotionPageId } from "./patch.ts";
+import { mergeSkillMd, overlayNotionSkillMd, stripNotionPageId } from "./patch.ts";
 import { readNotionCache, readNotionSettings, setNotionLink, type NotionCacheRow } from "./store.ts";
 import { uploadSkill } from "./transfer.ts";
 
@@ -35,6 +44,12 @@ export class LegacyLinkError extends Error {
   }
 }
 
+export class NotLegacyError extends Error {
+  constructor(skill: string) {
+    super(`"${skill}" is not linked to a legacy Notion page — nothing to upgrade`);
+  }
+}
+
 export class NotionChangedError extends Error {
   constructor(skill: string) {
     super(`"${skill}" is not in sync with Notion (never synced, or Notion changed since the last sync) — pull or resolve it first`);
@@ -43,7 +58,6 @@ export class NotionChangedError extends Error {
 
 export type HistoryResolutionSource = "claude-merge" | "vault-edit";
 
-const FRONTMATTER_RE = /^﻿?---\r?\n([\s\S]*?)\r?\n---/;
 
 const SKIP = new Set(["node_modules", "__pycache__", ".git", ".DS_Store", "Thumbs.db"]);
 
@@ -198,18 +212,18 @@ function replaceSkillDir(vaultPath: string, skill: string, files: Map<string, Bu
 
 // ── Push ────────────────────────────────────────────────────────
 
-function frontmatterName(skillMdPath: string): string | undefined {
-  const md = fs.readFileSync(skillMdPath, "utf8");
-  const fm = FRONTMATTER_RE.exec(md)?.[1].split(/\r?\n/) ?? null;
-  const name = readFrontmatterValue(fm, "name")?.trim();
-  return name ? name : undefined;
-}
-
 export interface PushOptions {
   /** Overwrite Notion even if it changed since the last sync (its copy is recorded first). */
   force?: boolean;
   /** Create the Notion page when the skill has no link yet. */
   create?: boolean;
+  /**
+   * A reviewed vault folder rename: when SKILL.md still carries this (old
+   * folder) name, it is set to the folder name — only after the Notion
+   * pre-checks pass, so a refused push leaves the vault untouched. Any other
+   * name mismatch is refused (NameMismatchError).
+   */
+  carryNameFrom?: string;
 }
 
 /**
@@ -228,35 +242,37 @@ export async function pushSkill(
   if (existing?.state === "legacy") throw new LegacyLinkError(skill);
   const dir = skillDir(vaultPath, skill);
   if (!fs.existsSync(path.join(dir, "SKILL.md"))) throw new Error(`"${skill}" has no SKILL.md in the vault`);
+  const carryName = !!opts.carryNameFrom && skillMdName(vaultPath, skill) === opts.carryNameFrom;
+  if (!carryName) assertNameAgreement(vaultPath, skill);
 
   let pageId: string;
-  let createdPage = false;
+  /** Set when this push linked the page (created, or an empty one reused): undone if the upload fails. */
+  let newLink: "created" | "reused" | null = null;
   if (!existing && opts.create) {
     const dsId = readNotionSettings(vaultPath).data_source_id;
     if (!dsId) throw new Error("No Notion Skills data source selected — choose one in Settings");
-    const md = fs.readFileSync(path.join(dir, "SKILL.md"), "utf8");
-    const fm = FRONTMATTER_RE.exec(md)?.[1].split(/\r?\n/) ?? null;
-    const description = readFrontmatterValue(fm, "description") ?? "";
-    pageId = await deps.api.createSkillPage(dsId, skill, description);
+    const reusable = await findEmptyPageNamed(deps, vaultPath, skill);
+    if (reusable) {
+      pageId = reusable;
+      newLink = "reused";
+    } else {
+      const md = fs.readFileSync(path.join(dir, "SKILL.md"), "utf8");
+      const description = frontmatterValueOf(md, "description") ?? "";
+      pageId = await deps.api.createSkillPage(dsId, skill, description);
+      newLink = "created";
+    }
     setNotionLink(vaultPath, skill, { page_id: pageId, state: "linked", linked_at: nowOf(deps), notion_title: skill });
-    createdPage = true;
   } else {
     const link = requireLinked(vaultPath, skill);
     pageId = link.page_id;
-    let current: { versionId: string; url: string } | null;
-    try {
-      current = await deps.api.downloadSkill(pageId);
-    } catch (err) {
-      // A page this app created whose first upload never landed has no
-      // archive yet (and its link no synced_at / notion_version_id): there
-      // is no Notion copy to protect, so upload again. Any other link must
-      // not be overwritten blind.
-      if (link.synced_at || link.notion_version_id) throw err;
-      current = null;
-    }
-    if (!current) {
-      /* never-uploaded page created by this app — nothing to record or check */
-    } else if (opts.force) {
+    // A link awaiting its first upload (no synced_at / notion_version_id:
+    // an empty page linked by the linker, or created here) is filled blind
+    // only while Notion still reports the page blank; otherwise it is
+    // treated like any never-synced link (Conflicts). Download errors are
+    // always errors.
+    const awaitingFirstUpload = !link.synced_at && !link.notion_version_id;
+    const current = await deps.api.downloadSkill(pageId);
+    if (opts.force) {
       const ex = await deps.extract(current.url);
       try {
         recordVersion(vaultPath, skill, {
@@ -268,34 +284,96 @@ export async function pushSkill(
       } finally {
         ex.cleanup();
       }
+    } else if (awaitingFirstUpload) {
+      if (!(await isEmptyNotionPage(deps, pageId))) throw new NotionChangedError(skill);
     } else if (!link.synced_at || (link.notion_version_id && current.versionId !== link.notion_version_id)) {
       throw new NotionChangedError(skill);
     }
   }
 
+  if (carryName) setSkillMdName(vaultPath, skill, skill);
+
   recordVersion(vaultPath, skill, opts.force
     ? { source: "force-push", note: "kept vault copy" }
     : { source: "external-edit", note: "pushed" });
 
-  // The upload sets the page title to the frontmatter `name` being uploaded
-  // (not the folder name) — restore the linked title when they differ.
-  const uploadedName = frontmatterName(path.join(dir, "SKILL.md")) ?? skill;
   try {
-    await (deps.upload ?? ((api, id, d, n) => uploadSkill(api, id, d, n)))(deps.api, pageId, dir, skill);
+    await uploadWith(deps, pageId, dir, skill);
   } catch (err) {
-    if (!createdPage) throw err;
-    // Undo the link to the empty page just created (there was none before),
-    // so the skill is back to "not in Notion"; the page itself stays in
-    // Notion (this app never trashes pages) — name it so the user can.
+    if (!newLink) throw err;
+    // Undo the link to the empty page (there was none before), so the skill
+    // is back to "not in Notion"; the page itself stays in Notion (this app
+    // never trashes pages) — a later push reuses it while it stays empty.
     setNotionLink(vaultPath, skill, existing);
     throw new Error(
-      `created Notion page ${pageId} for "${skill}" but the upload failed (${(err as Error).message}) — ` +
-        `delete that empty page in Notion, then push again`,
+      `${newLink === "created" ? "created" : "reused the empty"} Notion page ${pageId} for "${skill}" but the upload failed ` +
+        `(${(err as Error).message}) — push again (the empty page is reused while it keeps the name "${skill}")`,
     );
   }
-  const title = currentLink(vaultPath, skill)?.notion_title;
-  if (title && title !== uploadedName) await deps.api.setTitle(pageId, title);
+  await fixNotionTitle(deps, vaultPath, skill, pageId);
+  return finishUpload(deps, vaultPath, skill, pageId);
+}
 
+// ── Empty pages ─────────────────────────────────────────────────
+
+/**
+ * An EMPTY page: Notion reports it blank (notion-fetch's `<blank-page>`
+ * marker) and its cached row has no files. download-skill succeeds even on
+ * such a page, so its result says nothing about emptiness.
+ */
+export async function isEmptyNotionPage(deps: SyncDeps, pageId: string): Promise<boolean> {
+  const row = readNotionCache().rows.find((r) => r.page_id === pageId);
+  if (!row || row.has_files !== false) return false;
+  return deps.api.isBlankPage(pageId);
+}
+
+/**
+ * An existing empty page titled exactly `skill` (no files, not linked to any
+ * skill, reported blank by Notion) — e.g. left behind by a failed first
+ * upload and named by the user — to reuse instead of creating a duplicate.
+ */
+async function findEmptyPageNamed(deps: SyncDeps, vaultPath: string, skill: string): Promise<string | null> {
+  const linked = new Set(
+    Object.values(readManifest(vaultPath).skills)
+      .map((e) => e.notion?.page_id)
+      .filter((id): id is string => !!id),
+  );
+  for (const row of readNotionCache().rows) {
+    if (row.title !== skill || row.has_files !== false || linked.has(row.page_id)) continue;
+    try {
+      if (await deps.api.isBlankPage(row.page_id)) return row.page_id;
+    } catch (err) {
+      console.error(`[notion] could not check page ${row.page_id}: ${(err as Error).message}`);
+    }
+  }
+  return null;
+}
+
+// ── Shared upload bookkeeping ───────────────────────────────────
+
+function uploadWith(deps: SyncDeps, pageId: string, dir: string, skill: string): Promise<void> {
+  return (deps.upload ?? ((api, id, d, n) => uploadSkill(api, id, d, n)))(deps.api, pageId, dir, skill);
+}
+
+/**
+ * After an upload: the Notion title must be the skill name. The upload sets
+ * the title from the uploaded frontmatter name (== the folder name, checked
+ * before uploading), so this only writes when the last known title (cache,
+ * else link) differs — e.g. a display title "My Skill" becomes "my-skill".
+ */
+async function fixNotionTitle(deps: SyncDeps, vaultPath: string, skill: string, pageId: string): Promise<void> {
+  const cached = readNotionCache().rows.find((r) => r.page_id === pageId)?.title;
+  const known = cached ?? currentLink(vaultPath, skill)?.notion_title;
+  if (known !== skill) await deps.api.setTitle(pageId, skill);
+}
+
+/** Record the Notion copy just uploaded and mark the link linked + synced under the skill name. */
+async function finishUpload(
+  deps: SyncDeps,
+  vaultPath: string,
+  skill: string,
+  pageId: string,
+): Promise<{ versionId: string }> {
   const dl = await deps.api.downloadSkill(pageId);
   const ex = await deps.extract(dl.url);
   try {
@@ -303,8 +381,51 @@ export async function pushSkill(
   } finally {
     ex.cleanup();
   }
-  markSynced(deps, vaultPath, skill, { notion_version_id: dl.versionId });
+  markSynced(deps, vaultPath, skill, { notion_version_id: dl.versionId, notion_title: skill });
   return { versionId: dl.versionId };
+}
+
+// ── Legacy upgrade ──────────────────────────────────────────────
+
+/**
+ * Replace a legacy summary page with the full vault skill, in the same
+ * Notion page. Notion's current (summary) copy is recorded in history first
+ * ("legacy-snapshot", always), every file is uploaded, the title becomes
+ * the skill name, and the link becomes linked + synced exactly as after a
+ * push. The vault copy is never changed; a folder / SKILL.md name mismatch
+ * is refused up front (NameMismatchError) before anything is downloaded.
+ */
+export async function upgradeLegacySkill(
+  deps: SyncDeps,
+  vaultPath: string,
+  skill: string,
+): Promise<{ versionId: string }> {
+  const link = currentLink(vaultPath, skill);
+  if (link?.state !== "legacy") throw new NotLegacyError(skill);
+  if (!link.page_id) throw new Error(`"${skill}" has no Notion page id`);
+  const dir = skillDir(vaultPath, skill);
+  if (!fs.existsSync(path.join(dir, "SKILL.md"))) throw new Error(`"${skill}" has no SKILL.md in the vault`);
+  assertNameAgreement(vaultPath, skill);
+  const pageId = link.page_id;
+
+  const current = await deps.api.downloadSkill(pageId);
+  const ex = await deps.extract(current.url);
+  try {
+    recordVersion(vaultPath, skill, {
+      side: "notion",
+      source: "legacy-snapshot",
+      note: "before upgrade",
+      dir: ex.skillRoot,
+      always: true,
+    });
+  } finally {
+    ex.cleanup();
+  }
+
+  recordVersion(vaultPath, skill, { source: "external-edit", note: "upgraded legacy Notion page" });
+  await uploadWith(deps, pageId, dir, skill);
+  await deps.api.setTitle(pageId, skill);
+  return finishUpload(deps, vaultPath, skill, pageId);
 }
 
 // ── Pull ────────────────────────────────────────────────────────
@@ -405,8 +526,7 @@ export async function adoptFromNotion(deps: SyncDeps, vaultPath: string, row: No
     const md = files.get("SKILL.md");
     if (!md) throw new Error(`Notion's copy of "${row.title}" has no SKILL.md`);
     const stripped = stripNotionPageId(md.toString("utf8"));
-    const fm = FRONTMATTER_RE.exec(stripped)?.[1].split(/\r?\n/) ?? null;
-    const fmName = readFrontmatterValue(fm, "name") ?? "";
+    const fmName = frontmatterValueOf(stripped, "name") ?? "";
     name = isValidSkillName(fmName) ? fmName : normalizeName(row.title);
     if (!isValidSkillName(name)) throw new Error(`cannot derive a skill name from "${row.title}"`);
     if (readManifest(vaultPath).skills[name] || fs.existsSync(skillDir(vaultPath, name))) {
@@ -448,6 +568,9 @@ export async function applyResolution(
 ): Promise<void> {
   requireLinked(vaultPath, skill);
   validateFiles(files);
+  // Refuse before writing anything when the result would not upload.
+  const resolvedName = frontmatterValueOf(files.get("SKILL.md")!.toString("utf8"), "name");
+  if (resolvedName !== skill) throw new NameMismatchError(skill, resolvedName);
   withHistory(vaultPath, skill, source, () => replaceSkillDir(vaultPath, skill, files));
   await pushSkill(deps, vaultPath, skill, { force: true });
 }

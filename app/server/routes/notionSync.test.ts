@@ -23,6 +23,10 @@ let created: number;
 /** When set, uploads wait for it — keeps a job running. */
 let uploadGate: Promise<void> | null = null;
 /** Fake multi-device guard status for /plan, /run and /force — see notionRouter({ gitGuard }) below. */
+/** Pages notion-fetch reports as blank. */
+let blankPages: Set<string>;
+/** Makes the skills router report a running Notion job. */
+let skillsBusy = false;
 let guardStatus: { is_repo: boolean; behind: number; ahead: number; error?: string };
 
 function writeTree(root: string, files: Record<string, string>) {
@@ -119,6 +123,7 @@ before(async () => {
       const row = notionRows.find((r) => r.page_id === id);
       if (row) row.title = title;
     },
+    isBlankPage: async (id: string) => blankPages.has(id),
     listRows: async () => {
       calls.push(["listRows"]);
       return notionRows.map((r) => ({ ...r }));
@@ -153,7 +158,7 @@ before(async () => {
       },
     }),
   );
-  app.use("/api/skills", skillsRouter());
+  app.use("/api/skills", skillsRouter({ isBusy: () => skillsBusy }));
   app.use((err: Error, _req: any, res: any, _next: any) => res.status(500).json({ error: err.message }));
   server = app.listen(0);
   await new Promise<void>((resolve) => server.once("listening", () => resolve()));
@@ -181,6 +186,8 @@ beforeEach(() => {
   failDownload = new Set();
   created = 0;
   guardStatus = { is_repo: false, behind: 0, ahead: 0 };
+  blankPages = new Set();
+  skillsBusy = false;
 });
 
 const post = (url: string, body: unknown) =>
@@ -693,4 +700,221 @@ test("skills rename and delete routes still work through the shared helpers", as
   assert.ok(!fs.existsSync(skillPath("uno")));
   const { listVersions } = await import("../services/history.ts");
   assert.ok(listVersions(vault, "uno").some((v) => v.source === "delete"));
+});
+
+// ── Legacy upgrade ──────────────────────────────────────────────
+
+/** A vault skill with a supporting file, linked (legacy) to a summary page with only SKILL.md. */
+async function seedLegacy(name: string, page: string, opts: { mdName?: string } = {}) {
+  const { recordVersion } = await import("../services/history.ts");
+  writeTree(skillPath(name), { "SKILL.md": md(opts.mdName ?? name), "references/r.md": "ref\n" });
+  writeTree(notionPath(page), { "SKILL.md": md(name, "## What Claude automates") });
+  versions.set(page, 1);
+  recordVersion(vault, name, { side: "notion", source: "legacy-snapshot", dir: notionPath(page), always: true });
+  const title = name.replace(/(^|-)([a-z])/g, (_m, dash, c) => (dash ? " " : "") + c.toUpperCase());
+  const m = readManifest();
+  m.skills[name] = {
+    targets: [],
+    notion: { page_id: page, state: "legacy", linked_at: "2026-01-01T00:00:00.000Z", notion_title: title, vault_name: name },
+  };
+  writeManifest(m);
+  notionRows.push({ page_id: page, title, description: "d", tags: [], has_files: false });
+}
+
+async function upgrade(skills: string[], extra: Record<string, unknown> = {}) {
+  const res = await post("/notion/legacy/upgrade", { skills, ...extra });
+  assert.equal(res.status, 200, await res.clone().text());
+  return waitJob(((await res.json()) as any).job_id);
+}
+
+test("GET /legacy lists legacy links; GET /legacy/:name diffs the full skill against the summary", async () => {
+  await seedLegacy("big-skill", "p-big");
+  await seedLinked("alpha", "p-alpha");
+  writeCache();
+  let res = await fetch(`${base}/notion/legacy`);
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { skills: [{ name: "big-skill", notion_title: "Big Skill", page_id: "p-big" }] });
+
+  res = await fetch(`${base}/notion/legacy/big-skill`);
+  assert.equal(res.status, 200, await res.clone().text());
+  const d = (await res.json()) as any;
+  assert.deepEqual(d.labels, { left: "vault (full skill)", right: "notion (summary)" });
+  assert.deepEqual(d.vault_files, ["SKILL.md", "references/r.md"]);
+  assert.deepEqual(d.notion_files, ["SKILL.md"]);
+  assert.deepEqual(d.diff.files.map((f: any) => [f.path, f.change]), [["SKILL.md", "modified"], ["references/r.md", "removed"]]);
+  assert.equal(d.notion_version_id, "p-big@1");
+  assert.equal(uploads.length, 0, "read-only");
+
+  assert.equal((await fetch(`${base}/notion/legacy/alpha`)).status, 409);
+  assert.equal((await fetch(`${base}/notion/legacy/ghost`)).status, 404);
+});
+
+test("legacy upgrade: per-skill results, failures isolated, upgraded skills end linked + synced", async () => {
+  await seedLegacy("big-skill", "p-big");
+  await seedLegacy("broken", "p-broken");
+  await seedLegacy("wrong-name", "p-wrong", { mdName: "other-name" });
+  await seedLinked("alpha", "p-alpha");
+  writeCache();
+  failDownload.add("p-broken");
+
+  const job = await upgrade(["big-skill", "broken", "wrong-name", "alpha"]);
+  assert.equal(job.kind, "upgrade");
+  assert.equal(job.done, 4);
+  const byId = Object.fromEntries(job.results.map((r: any) => [r.id, r]));
+  assert.equal(byId["upgrade:big-skill"].ok, true, byId["upgrade:big-skill"].error);
+  assert.match(byId["upgrade:broken"].error, /not found/);
+  assert.match(byId["upgrade:wrong-name"].error, /^Name mismatch: folder 'wrong-name' vs SKILL.md name 'other-name'/);
+  assert.match(byId["upgrade:alpha"].error, /not linked to a legacy Notion page/);
+
+  // Only the good one was uploaded + retitled; the mismatch never reached Notion.
+  assert.deepEqual(uploads.map((u) => u.pageId), ["p-big"]);
+  assert.deepEqual(calls.filter((c) => c[0] === "setTitle"), [["setTitle", "p-big", "big-skill"]]);
+  assert.ok(!calls.some((c) => c[0] === "extract" && c[1] === "p-wrong"), "the summary was never fetched");
+
+  const l = link("big-skill");
+  assert.equal(l.state, "linked");
+  assert.ok(l.synced_at);
+  assert.equal(l.notion_version_id, "p-big@2");
+  assert.equal(l.notion_title, "big-skill");
+  assert.equal(link("broken").state, "legacy");
+  assert.equal(link("wrong-name").state, "legacy");
+  const { listVersions } = await import("../services/history.ts");
+  assert.ok(listVersions(vault, "big-skill").some((v) => v.source === "legacy-snapshot" && v.note === "before upgrade"));
+
+  // The upgraded skill is synced: no push row, and it left the legacy list.
+  assert.deepEqual((await plan("push")).rows.map((r) => r.id), []);
+  const list = (await (await fetch(`${base}/notion/legacy`)).json()) as any;
+  assert.deepEqual(list.skills.map((s: any) => s.name), ["broken", "wrong-name"]);
+});
+
+test("legacy upgrade honours the multi-device guard and validates input", async () => {
+  await seedLegacy("big-skill", "p-big");
+  writeCache();
+  assert.equal((await post("/notion/legacy/upgrade", { skills: [] })).status, 400);
+  assert.equal((await post("/notion/legacy/upgrade", { skills: ["../x"] })).status, 400);
+  guardStatus = { is_repo: true, behind: 2, ahead: 0 };
+  const res = await post("/notion/legacy/upgrade", { skills: ["big-skill"] });
+  assert.equal(res.status, 409);
+  assert.deepEqual(await res.json(), { error: "vault_behind", behind: 2 });
+  assert.equal(uploads.length, 0);
+  const job = await upgrade(["big-skill"], { override_guard: true });
+  assert.equal(job.results[0].ok, true, job.results[0].error);
+});
+
+test("bulk push skip reasons for legacy links point to Upgrade legacy pages", async () => {
+  await seedLegacy("big-skill", "p-big");
+  writeCache();
+  const res = await post("/notion/push-selected", { skills: ["big-skill"] });
+  const job = await waitJob(((await res.json()) as any).job_id);
+  assert.match(job.results[0].error, /Upgrade legacy pages/);
+  assert.equal(uploads.length, 0);
+});
+
+// ── Name agreement ──────────────────────────────────────────────
+
+test("a folder / SKILL.md name mismatch fails the row before any Notion page is created or uploaded", async () => {
+  seedUnlinked("fresh");
+  fs.writeFileSync(path.join(skillPath("fresh"), "SKILL.md"), md("fresh-skill"));
+  await seedLinked("alpha", "p-alpha", { vaultEdit: true });
+  fs.writeFileSync(path.join(skillPath("alpha"), "SKILL.md"), md("alpha-two", "vault edit"));
+  writeCache();
+  const p = await plan("push");
+  const upd = p.rows.find((r) => r.id === "push:update:alpha")!;
+  assert.ok(upd.warnings.some((w: string) => /^Name mismatch/.test(w)));
+  const job = await run("push", [{ id: "push:update:alpha" }, { id: "push:new:fresh" }]);
+  assert.deepEqual(job.results.map((r: any) => r.ok), [false, false]);
+  for (const r of job.results) assert.match(r.error, /Name mismatch: .* fix it in Names/);
+  assert.equal(uploads.length, 0);
+  assert.ok(!calls.some((c) => c[0] === "createSkillPage"), "no empty page is left behind");
+  assert.equal(link("fresh"), undefined);
+});
+
+test("fix-name row: opt-in; title-only when synced, a normal push when the vault changed", async () => {
+  await seedLinked("alpha", "p-alpha", { title: "Alpha Skill" });
+  await seedLinked("beta", "p-beta", { title: "Beta Skill", vaultEdit: true });
+  writeCache();
+  const p = await plan("push");
+  assert.deepEqual(p.rows.map((r) => [r.id, r.default_selected, r.detail]), [
+    ["push:rename:alpha", false, `Fix name in Notion: "Alpha Skill" → "alpha". Sets the Notion title to 'alpha'.`],
+    ["push:rename:beta", false, `Fix name in Notion: "Beta Skill" → "beta". Sets the Notion title to 'beta' and pushes the vault changes.`],
+  ]);
+  const job = await run("push", [{ id: "push:rename:alpha" }, { id: "push:rename:beta" }]);
+  assert.deepEqual(job.results.map((r: any) => [r.ok, r.message]), [
+    [true, 'Notion title set to "alpha"'],
+    [true, 'renamed in Notion from "Beta Skill" to "beta"'],
+  ]);
+  assert.deepEqual(uploads.map((u) => u.pageId), ["p-beta"], "the synced skill is not re-uploaded");
+  assert.deepEqual(calls.filter((c) => c[0] === "setTitle").map((c) => c.slice(1)), [["p-alpha", "alpha"], ["p-beta", "beta"]]);
+  assert.equal(link("alpha").notion_title, "alpha");
+  assert.equal(link("alpha").notion_version_id, "p-alpha@1");
+  assert.equal(link("beta").notion_title, "beta");
+  assert.deepEqual((await plan("push")).rows, []);
+});
+
+test("push rename: when Notion changed since the review, the vault's SKILL.md is left untouched", async () => {
+  await seedLinked("renamed", "p-alpha", { linkExtra: { vault_name: "alpha", notion_title: "alpha" }, title: "alpha" });
+  fs.writeFileSync(path.join(skillPath("renamed"), "SKILL.md"), md("alpha"));
+  writeCache();
+  assert.deepEqual((await plan("push")).rows.map((r) => r.id), ["push:rename:renamed"]);
+  versions.set("p-alpha", 2); // Notion edited after the review (cache not refreshed)
+  const job = await run("push", [{ id: "push:rename:renamed" }]);
+  assert.equal(job.results[0].ok, false);
+  assert.match(job.results[0].error, /not in sync with Notion/);
+  assert.equal(fs.readFileSync(path.join(skillPath("renamed"), "SKILL.md"), "utf8"), md("alpha"));
+  assert.equal(uploads.length, 0);
+});
+
+test("name mismatches: list, fix by renaming the folder or the SKILL.md name, duplicates refused", async () => {
+  seedUnlinked("widget");
+  fs.writeFileSync(path.join(skillPath("widget"), "SKILL.md"), md("widget-maker"));
+  seedUnlinked("widget-maker");
+  seedUnlinked("report-tool");
+  fs.writeFileSync(path.join(skillPath("report-tool"), "SKILL.md"), md("report-tool-advanced"));
+  await seedLinked("helper-agent", "p-helper");
+  fs.writeFileSync(path.join(skillPath("helper-agent"), "SKILL.md"), md("helper-kit"));
+  seedUnlinked("ok-skill");
+
+  const res = await fetch(`${base}/skills/name-mismatches`);
+  assert.equal(res.status, 200);
+  const list = ((await res.json()) as any).skills;
+  assert.deepEqual(list.map((m: any) => [m.folder, m.name, m.folder_exists_for_name]), [
+    ["helper-agent", "helper-kit", false],
+    ["report-tool", "report-tool-advanced", false],
+    ["widget", "widget-maker", true],
+  ]);
+  assert.equal(list[0].notion_title, "helper-agent");
+
+  // Duplicate: renaming "widget" onto the existing "widget-maker" is refused, nothing changes.
+  let r = await post("/skills/widget/fix-name", { use: "name" });
+  assert.equal(r.status, 409);
+  assert.match(((await r.json()) as any).error, /already exists — compare the two and remove the duplicate/);
+  assert.ok(fs.existsSync(skillPath("widget")));
+
+  // use "name": the folder (and its manifest entry, history and Notion link) moves.
+  r = await post("/skills/helper-agent/fix-name", { use: "name" });
+  assert.equal(r.status, 200, await r.clone().text());
+  assert.deepEqual(await r.json(), { name: "helper-kit", providers: [] });
+  assert.ok(!fs.existsSync(skillPath("helper-agent")));
+  assert.equal(link("helper-kit").page_id, "p-helper");
+  const { listVersions } = await import("../services/history.ts");
+  assert.ok(listVersions(vault, "helper-kit").some((v) => v.source === "rename"));
+
+  // use "folder": SKILL.md's name becomes the folder name, recorded in history.
+  r = await post("/skills/report-tool/fix-name", { use: "folder" });
+  assert.equal(r.status, 200, await r.clone().text());
+  assert.equal(fs.readFileSync(path.join(skillPath("report-tool"), "SKILL.md"), "utf8"), md("report-tool"));
+  assert.ok(listVersions(vault, "report-tool").some((v) => v.source === "rename"));
+
+  assert.equal((await post("/skills/ok-skill/fix-name", { use: "folder" })).status, 409);
+
+  // Refused while a Notion job runs (fix-name and rename alike).
+  skillsBusy = true;
+  r = await post("/skills/widget/fix-name", { use: "folder" });
+  assert.equal(r.status, 409);
+  assert.equal(((await r.json()) as any).error, "busy");
+  assert.equal((await post("/skills/widget/rename", { new_name: "widget-two" })).status, 409);
+  skillsBusy = false;
+  assert.equal((await post("/skills/widget/fix-name", { use: "sideways" })).status, 400);
+  const after = ((await (await fetch(`${base}/skills/name-mismatches`)).json()) as any).skills;
+  assert.deepEqual(after.map((m: any) => m.folder), ["widget"]);
 });

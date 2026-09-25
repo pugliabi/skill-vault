@@ -91,21 +91,52 @@ test("push: vault renamed (recorded vault_name differs from current folder name)
   assert.equal(rs[0].id, "push:rename:new-name");
 });
 
-test("push: rename skipped when the target title already exists elsewhere", () => {
+test("push: vault rename onto a title another page has -> fix-name row, unselected, with a warning", () => {
   const l = link({ notion_title: "old-name", vault_name: "old-name", vault_hash: "h1", notion_version_id: "v1", page_id: "p1" });
   const rows = [row("old-name", { page_id: "p1", version_id: "v1" }), row("new-name", { page_id: "p2" })];
   const rs = plan("push", [skill("new-name", { link: l, vaultHash: "h1" })], rows);
-  // Falls through to normal status evaluation instead: vault unchanged, notion unchanged -> no row.
-  assert.deepEqual(rs, []);
+  assert.equal(rs.length, 1);
+  assert.equal(rs[0].id, "push:rename:new-name");
+  assert.equal(rs[0].default_selected, false);
+  assert.match(rs[0].detail, /^Fix name in Notion: "old-name" → "new-name"\. Sets the Notion title to 'new-name'/);
+  assert.deepEqual(rs[0].warnings, ['Another Notion page is already titled "new-name"']);
 });
 
-test("push: display-title link (notion_title differs from name, no vault_name) + nothing changed -> no row", () => {
-  // Persisted normal state: pushSkill restores a display title like "No AI Slop" over "no-ai-slop".
-  // notion_title differing from the folder name must never, on its own, look like a rename.
+test("push: display-title link (Notion title differs from the skill name) -> Fix name row, opt-in", () => {
+  // Names must agree: a display title like "No AI Slop" is set back to "no-ai-slop".
   const l = link({ notion_title: "No AI Slop", vault_hash: "h1", notion_version_id: "v1" });
   const rows = [row("No AI Slop", { page_id: "p1", version_id: "v1" })];
   const rs = plan("push", [skill("no-ai-slop", { link: l, vaultHash: "h1" })], rows);
-  assert.deepEqual(rs, []);
+  assert.deepEqual(rs, [
+    {
+      id: "push:rename:no-ai-slop",
+      kind: "rename",
+      skill: "no-ai-slop",
+      page_id: "p1",
+      title: "no-ai-slop",
+      direction: "push",
+      default_selected: false,
+      detail: `Fix name in Notion: "No AI Slop" → "no-ai-slop". Sets the Notion title to 'no-ai-slop'.`,
+      warnings: [],
+    },
+  ]);
+  // The same row id when the vault also changed; the push carries the changes.
+  const changed = plan("push", [skill("no-ai-slop", { link: l, vaultHash: "h2" })], rows);
+  assert.equal(changed[0].id, "push:rename:no-ai-slop");
+  assert.match(changed[0].detail, /and pushes the vault changes\.$/);
+});
+
+test("push: display-title link + Notion changed -> no fix-name row (pull first)", () => {
+  const l = link({ notion_title: "No AI Slop", vault_hash: "h1", notion_version_id: "v1" });
+  const rows = [row("No AI Slop", { page_id: "p1", version_id: "v2" })];
+  assert.deepEqual(plan("push", [skill("no-ai-slop", { link: l, vaultHash: "h1" })], rows), []);
+});
+
+test("push: a genuine Notion-side rename (valid slug, changed since sync) is left to pull", () => {
+  const l = link({ notion_title: "demo", vault_hash: "h1", notion_version_id: "v1" });
+  const rows = [row("demo-two", { page_id: "p1", version_id: "v1" })];
+  assert.deepEqual(plan("push", [skill("demo", { link: l, vaultHash: "h1" })], rows), []);
+  assert.deepEqual(plan("pull", [skill("demo", { link: l, vaultHash: "h1" })], rows).map((r) => r.id), ["pull:rename:demo"]);
 });
 
 test("push: display-title link + both sides changed -> conflict (never hidden behind rename)", () => {
@@ -116,11 +147,12 @@ test("push: display-title link + both sides changed -> conflict (never hidden be
   assert.equal(rs[0].kind, "conflict");
 });
 
-test("push: old link without a recorded vault_name never produces a rename row", () => {
+test("push: old link without a recorded vault_name -> no folder-rename row, but the name is fixed", () => {
   const l = link({ notion_title: "old-name", vault_hash: "h1", notion_version_id: "v1" }); // no vault_name
   const rows = [row("old-name", { page_id: "p1", version_id: "v1" })];
   const rs = plan("push", [skill("new-name", { link: l, vaultHash: "h1" })], rows);
-  assert.deepEqual(rs, []);
+  assert.equal(rs.length, 1);
+  assert.match(rs[0].detail, /^Fix name in Notion/);
 });
 
 test("push: notion side changed too -> no rename (falls through, no push row since vault unchanged)", () => {

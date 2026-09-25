@@ -11,6 +11,9 @@ import type {
   NotionPlan,
   NotionPlanDiff,
   NotionRunJob,
+  NotionLegacyDetail,
+  NotionLegacyItem,
+  SkillNameMismatch,
   AdoptScanResult,
   AppConfig,
   ApplyUpdatesResult,
@@ -97,7 +100,7 @@ async function request<T>(
     const d = data as { error?: string; message?: string } | null;
     // "busy" is a code; its message is the readable text.
     const msg =
-      (d?.error === "busy" && d.message) || (d?.error ?? `Request failed (${res.status})`);
+      ((d?.error === "busy" || d?.error === "in_use") && d.message) || (d?.error ?? `Request failed (${res.status})`);
     throw new ApiError(msg, res.status, data);
   }
 
@@ -440,6 +443,22 @@ export const api = {
     request<{ job_id: string }>("POST", "/api/notion/push-selected", body),
   notionRunJob: (id: string) =>
     request<NotionRunJob>("GET", `/api/notion/run/${encodeURIComponent(id)}`),
+
+  // ── legacy summary pages → full skills ──────────────────────────
+  notionLegacy: () => request<{ skills: NotionLegacyItem[] }>("GET", "/api/notion/legacy"),
+  notionLegacyDetail: (name: string) =>
+    request<NotionLegacyDetail>("GET", `/api/notion/legacy/${encodeURIComponent(name)}`),
+  /** Replace each skill's legacy summary page with the full skill (job; progress via notionRunJob). */
+  notionUpgradeLegacy: (body: { skills: string[]; override_guard?: boolean }) =>
+    request<{ job_id: string }>("POST", "/api/notion/legacy/upgrade", body),
+
+  // ── name agreement (folder == SKILL.md name) ────────────────────
+  skillNameMismatches: () =>
+    request<{ skills: SkillNameMismatch[] }>("GET", "/api/skills/name-mismatches"),
+  fixSkillName: (folder: string, use: "name" | "folder") =>
+    request<{ name: string; providers: Array<{ provider_id: string; outcome: string; message: string }> }>(
+      "POST", `/api/skills/${encodeURIComponent(folder)}/fix-name`, { use },
+    ),
   notionGuard: () => request<NotionGuardStatus>("GET", "/api/notion/guard"),
   diffText: (a: string, b: string) =>
     request<{ hunks: DiffLine[] | null; reason?: string }>("POST", "/api/diff/text", { a, b }),

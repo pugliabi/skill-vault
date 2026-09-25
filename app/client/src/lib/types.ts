@@ -398,6 +398,8 @@ export interface NotionLinkSummary {
   linked_in_sync: string[];
   conflicts: string[];
   legacy: string[];
+  /** Linked to an empty Notion page — filled by the next push. */
+  empty_pages?: string[];
   notion_only_compatible: Array<{ page_id: string; title: string }>;
   notion_only_native: Array<{ page_id: string; title: string }>;
   vault_only: string[];
@@ -532,7 +534,7 @@ export interface NotionPlanDiff extends SkillDiff {
 
 export interface NotionRunJob {
   id: string;
-  kind: "run" | "force" | "push-selected";
+  kind: "run" | "force" | "push-selected" | "upgrade";
   direction: NotionDirection;
   done: number;
   total: number;
@@ -540,4 +542,37 @@ export interface NotionRunJob {
   running: boolean;
   results: Array<{ id: string; ok: boolean; error?: string; message?: string }>;
   error?: string;
+}
+
+// ── Legacy Notion pages + name agreement ────────────────────────
+
+/** GET /api/notion/legacy row: a skill linked to a legacy summary page. */
+export interface NotionLegacyItem {
+  name: string;
+  notion_title: string | null;
+  page_id: string;
+}
+
+/** GET /api/notion/legacy/:name — the full vault skill vs Notion's summary page. */
+export interface NotionLegacyDetail {
+  name: string;
+  notion_title: string | null;
+  page_id: string;
+  vault_files: string[];
+  notion_files: string[];
+  diff: SkillDiff;
+  labels: { left: string; right: string };
+  notion_version_id: string;
+}
+
+/** GET /api/skills/name-mismatches row: folder name vs SKILL.md frontmatter name. */
+export interface SkillNameMismatch {
+  folder: string;
+  /** SKILL.md's name ("" when missing). */
+  name: string;
+  name_is_valid: boolean;
+  /** Another folder already has `name` — usually a duplicate copy. */
+  folder_exists_for_name: boolean;
+  folder_is_valid: boolean;
+  notion_title?: string;
 }

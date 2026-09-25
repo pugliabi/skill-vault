@@ -7,6 +7,9 @@
  *   POST /force  {direction, skills?, override_guard?}                  → {job_id}
  *   POST /push-selected {skills, override_guard?}                      → {job_id}  (non-force push; Notion edits are never overwritten)
  *   GET  /run/:id                             job progress + per-row results
+ *   GET  /legacy                              legacy-linked skills [{name, notion_title, page_id}]
+ *   GET  /legacy/:name                        full vault skill vs Notion's summary page (downloaded, read-only)
+ *   POST /legacy/upgrade {skills, override_guard?}  → {job_id}  (replace each summary page with the full skill)
  */
 import type { Request, Response, Router } from "express";
 import crypto from "node:crypto";
@@ -31,8 +34,8 @@ import {
 } from "../services/notion/run.ts";
 import { readNotionAuth, readNotionCache } from "../services/notion/store.ts";
 import type { NotionApi } from "../services/notion/api.ts";
-import type { SyncDeps } from "../services/notion/sync.ts";
-import { skillDir } from "../services/vault.ts";
+import { upgradeLegacySkill, type SyncDeps } from "../services/notion/sync.ts";
+import { readManifest, skillDir } from "../services/vault.ts";
 import { isSafeNameSegment } from "./skills.ts";
 
 type ApiConn = { api: NotionApi; close(): Promise<void> };
@@ -70,7 +73,7 @@ export class GuardBlockedError extends Error {
 
 interface SyncJob {
   id: string;
-  kind: "run" | "force" | "push-selected";
+  kind: "run" | "force" | "push-selected" | "upgrade";
   direction: Direction;
   done: number;
   total: number;
@@ -417,6 +420,97 @@ export function mountSyncRoutes(router: Router, ctx: SyncRouteCtx): void {
           job.results.push({ id: t.id, ok: true, message });
         } catch (err) {
           job.results.push({ id: t.id, ok: false, error: (err as Error).message });
+        }
+        job.done++;
+      }
+    });
+  });
+
+  // ── Legacy summary pages → full skills ─────────────────────────
+
+  router.get("/legacy", (_req, res) => {
+    const vp = ctx.vaultPathOr409(res);
+    if (!vp) return;
+    const skills = Object.entries(readManifest(vp).skills)
+      .filter(([, e]) => e.notion?.state === "legacy")
+      .map(([name, e]) => ({ name, notion_title: e.notion!.notion_title ?? null, page_id: e.notion!.page_id }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    res.json({ skills });
+  });
+
+  router.get("/legacy/:name", async (req, res) => {
+    const vp = ctx.vaultPathOr409(res);
+    if (!vp) return;
+    const name = req.params.name;
+    if (!isSafeNameSegment(name)) {
+      res.status(400).json({ error: "invalid skill name" });
+      return;
+    }
+    const entry = readManifest(vp).skills[name];
+    if (!entry) {
+      res.status(404).json({ error: `skill "${name}" not found` });
+      return;
+    }
+    const link = entry.notion;
+    if (link?.state !== "legacy" || !link.page_id) {
+      res.status(409).json({ error: `"${name}" is not linked to a legacy Notion page` });
+      return;
+    }
+    if (notConnected401(res)) return;
+    try {
+      const vaultFiles = readSkillFiles(skillDir(vp, name));
+      let notionFiles = new Map<string, Buffer>();
+      let notionVersion = "";
+      await ctx.withApi(req, async (api) => {
+        const dl = await api.downloadSkill(link.page_id);
+        const ex = await ctx.extract(dl.url);
+        try {
+          notionFiles = readSkillFiles(ex.skillRoot);
+        } finally {
+          ex.cleanup();
+        }
+        notionVersion = dl.versionId;
+      });
+      const md = notionFiles.get("SKILL.md");
+      if (md) notionFiles.set("SKILL.md", Buffer.from(stripNotionPageId(md.toString("utf8")), "utf8"));
+      res.json({
+        name,
+        notion_title: link.notion_title ?? null,
+        page_id: link.page_id,
+        vault_files: [...vaultFiles.keys()].sort(),
+        notion_files: [...notionFiles.keys()].sort(),
+        diff: computeFilesDiff(vaultFiles, notionFiles),
+        labels: { left: "vault (full skill)", right: "notion (summary)" },
+        notion_version_id: notionVersion,
+      });
+    } catch (err) {
+      ctx.sendError(res, err);
+    }
+  });
+
+  router.post("/legacy/upgrade", async (req, res) => {
+    const vp = ctx.vaultPathOr409(res);
+    if (!vp) return;
+    const body = (req.body ?? {}) as { skills?: unknown; override_guard?: unknown };
+    if (!Array.isArray(body.skills) || body.skills.length === 0 || !body.skills.every(isSafeNameSegment)) {
+      res.status(400).json({ error: "skills must be a non-empty array of skill names" });
+      return;
+    }
+    const skills = [...new Set(body.skills as string[])];
+    if (notConnected401(res)) return;
+
+    await startJob(req, res, vp, "upgrade", "push", body.override_guard === true, async (job, api) => {
+      const d = ctx.syncDeps(api);
+      job.total = skills.length;
+      for (const skill of skills) {
+        job.current = skill;
+        const id = `upgrade:${skill}`;
+        try {
+          await upgradeLegacySkill(d, vp, skill);
+          safeSyncCacheRow(vp, skill);
+          job.results.push({ id, ok: true, message: `upgraded — Notion title is now "${skill}"` });
+        } catch (err) {
+          job.results.push({ id, ok: false, error: (err as Error).message });
         }
         job.done++;
       }

@@ -182,9 +182,12 @@ export function computeNotionStatus(a: {
   if (link.state === "legacy") return "legacy";
   if (link.state === "vault-only") return "vault-only";
   if (link.state === "unlinked") return "unlinked";
-  if (!link.synced_at) return "conflict";
+  // Never synced but a Notion copy was seen (linked in conflict): review it.
+  if (!link.synced_at && link.notion_version_id) return "conflict";
   if (!a.cacheValid) return "unchecked";
   if (!a.cacheRow) return "missing-in-notion";
+  // Linked to an empty page (no Notion copy yet): the next push fills it.
+  if (!link.synced_at) return "changed-vault";
   const vaultChanged = !!link.vault_hash && a.vaultHash !== link.vault_hash;
   if (!a.cacheRow.version_id) return vaultChanged ? "changed-vault" : "unchecked";
   const notionChanged = !!link.notion_version_id && a.cacheRow.version_id !== link.notion_version_id;

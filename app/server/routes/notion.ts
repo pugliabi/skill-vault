@@ -44,6 +44,7 @@ import { syncCacheRow } from "../services/notion/run.ts";
 import { BUSY_MESSAGE, mountSyncRoutes, syncJobRunning } from "./notionSync.ts";
 import { ClaudeError, claudeAvailable, type ClaudeRunner } from "../services/claude/cli.ts";
 import { TooLargeError, mergeWithClaude } from "../services/claude/merge.ts";
+import { NameMismatchError } from "../services/skillNames.ts";
 import type { NotionLink } from "../types/vault.ts";
 
 type ApiConn = { api: NotionApi; close(): Promise<void> };
@@ -336,7 +337,7 @@ export function notionRouter(deps: NotionRouterDeps = {}): Router {
           kind: "notion-link",
           skill: "*",
           ok: s.errors.length === 0,
-          message: `${s.linked_in_sync.length} in sync, ${s.conflicts.length} conflicts, ${s.legacy.length} legacy, ${s.errors.length} errors`,
+          message: `${s.linked_in_sync.length} in sync, ${s.conflicts.length} conflicts, ${s.legacy.length} legacy, ${s.empty_pages.length} empty pages, ${s.errors.length} errors`,
         });
       } catch (err) {
         job.error = (err as Error).message;
@@ -472,6 +473,8 @@ function sendConflictError(res: Response, err: unknown): void {
     res.status(400).json({ error: err.message });
   } else if (err instanceof LegacyLinkError) {
     res.status(409).json({ error: err.message });
+  } else if (err instanceof NameMismatchError) {
+    res.status(409).json({ error: err.message, code: "name_mismatch" });
   } else {
     sendError(res, err);
   }

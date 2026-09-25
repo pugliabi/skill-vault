@@ -7,6 +7,27 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
 ## [Unreleased]
 
 ### Added
+- **Upgrade legacy Notion pages** (Notion ▾ → Upgrade legacy pages (N), or
+  click a skill's `legacy` badge): compare the full vault skill with the
+  Notion summary page, then replace the summary with the full skill in the
+  same page (title set to the skill name, summary kept in history). The
+  link becomes an ordinary in-sync link. Bulk push / force still skip
+  legacy links and now say where to upgrade them.
+- **Name agreement** — Notion title, folder name and `SKILL.md` `name` must
+  match. A push, page creation, upgrade or resolution for a skill whose
+  folder and `SKILL.md` name differ fails up front ("Name mismatch … — fix
+  it in Names") without touching Notion. New **Name mismatches** page
+  (Notion ▾ → Name mismatches (N)) fixes a skill by renaming its folder or
+  its `SKILL.md` name; renaming onto an existing skill is refused as a
+  duplicate (also under Import ▾). Uploads now set the Notion title to the
+  skill name (no more display-title restore), and push review offers opt-in
+  **Fix name in Notion** rows for titles that differ (title-only when the
+  skill is otherwise in sync).
+- **Blank Notion pages are reused** — a newly matched page that Notion
+  reports blank (and has no files) is linked awaiting its first upload (the
+  next push fills it, re-checking it's still blank), and creating a page
+  reuses a blank page already titled with the skill name instead of making
+  a duplicate.
 - **Connect Notion** (Settings → Notion): sign in, pick your Skills database,
   link skills by page ID, legacy and Notion-native detection, Notion status
   filter on the Skills page.

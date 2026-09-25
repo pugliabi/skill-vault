@@ -13,9 +13,11 @@ import path from "node:path";
 import { getVersion, listVersions } from "../history.ts";
 import { hashSkillDirNormalized } from "../skillHash.ts";
 import { deleteVaultSkill, renameVaultSkill, setSkillMdName } from "../skillLifecycle.ts";
+import { assertNameAgreement, skillMdName } from "../skillNames.ts";
 import { readManifest, skillDir } from "../vault.ts";
 import type { NotionLink } from "../../types/vault.ts";
 import { readSkillFiles } from "./linker.ts";
+import { computeNotionStatus } from "./matching.ts";
 import { buildPlan, type PlanRow, type PlanSkillInput } from "./plan.ts";
 import {
   readNotionCache,
@@ -116,6 +118,17 @@ export function currentPlan(vaultPath: string, direction: Direction): ReviewRow[
           : ["unlink", "delete-vault", "recreate"];
       out.default_action = "unlink";
     }
+    if (direction === "push" && row.skill && exists && row.kind !== "deleted" && row.kind !== "conflict") {
+      const mdName = skillMdName(vaultPath, row.skill);
+      const link = manifest.skills[row.skill]?.notion;
+      // A reviewed folder-rename row carries the new name into SKILL.md itself (see pushRename).
+      const renameFixes = row.kind === "rename" && !!link?.vault_name && link.vault_name !== row.skill && mdName === link.vault_name;
+      if (mdName !== row.skill && !renameFixes) {
+        out.warnings.push(
+          `Name mismatch: folder '${row.skill}' vs SKILL.md name '${mdName ?? "(none)"}' — fix it in Names first (this row will fail)`,
+        );
+      }
+    }
     if (direction === "push" && row.skill && exists && (row.kind === "update" || row.kind === "rename")) {
       const gone = removedSupportingFiles(vaultPath, row.skill, manifest.skills[row.skill]?.notion);
       if (gone.length > 0) {
@@ -206,18 +219,44 @@ async function runDeleted(d: SyncDeps, vaultPath: string, row: PlanRow, action: 
   }
 }
 
-/** Vault-side rename pushed to Notion: title first, then content, then the link's names. */
+/**
+ * Push rename row.
+ * - Vault folder rename (link.vault_name differs): a normal push; SKILL.md's
+ *   name is carried over from the old folder name only after Notion's
+ *   pre-checks pass (pushSkill carryNameFrom). pushSkill then sets the title.
+ * - "Fix name in Notion" (title differs from the skill name): when the skill
+ *   is otherwise synced, only the Notion title is set (no upload); else a
+ *   normal (non-force) push, which also sets the title.
+ */
 async function pushRename(d: SyncDeps, vaultPath: string, skill: string): Promise<string> {
   const link = linkOf(vaultPath, skill);
-  await d.api.setTitle(link.page_id, skill);
-  // The upload sets the page title from the frontmatter name, so the vault
-  // SKILL.md carries the new name first; pushSkill restores
-  // link.notion_title afterwards — so record the new title first too.
-  setSkillMdName(vaultPath, skill, skill);
-  setNotionLink(vaultPath, skill, { ...linkOf(vaultPath, skill), notion_title: skill });
+  const before = link.notion_title;
+  const renamed = (from?: string) =>
+    from && from !== skill ? `renamed in Notion from "${from}" to "${skill}"` : `renamed in Notion to "${skill}"`;
+  if (link.vault_name && link.vault_name !== skill) {
+    await pushSkill(d, vaultPath, skill, { carryNameFrom: link.vault_name });
+    return renamed(before);
+  }
+  assertNameAgreement(vaultPath, skill);
+  if (linkStatus(vaultPath, skill, link) === "synced") {
+    await d.api.setTitle(link.page_id, skill);
+    setNotionLink(vaultPath, skill, { ...linkOf(vaultPath, skill), notion_title: skill, vault_name: skill });
+    return `Notion title set to "${skill}"`;
+  }
   await pushSkill(d, vaultPath, skill);
-  setNotionLink(vaultPath, skill, { ...linkOf(vaultPath, skill), notion_title: skill, vault_name: skill });
-  return `renamed in Notion to "${skill}"`;
+  return renamed(before);
+}
+
+/** The skill's Notion status from the current cache (same computation as the badges). */
+function linkStatus(vaultPath: string, skill: string, link: NotionLink) {
+  const cache = readNotionCache();
+  return computeNotionStatus({
+    link,
+    connected: true,
+    vaultHash: hashSkillDirNormalized(skillDir(vaultPath, skill)),
+    cacheRow: cache.rows.find((r) => r.page_id === link.page_id),
+    cacheValid: cacheIsValid(vaultPath, cache),
+  });
 }
 
 /**
@@ -227,10 +266,10 @@ async function pushRename(d: SyncDeps, vaultPath: string, skill: string): Promis
  * and newest vault-side version become the baseline, so the skill stays
  * "synced" (a vault edit made before the rename still shows as a change).
  */
-function pullRename(vaultPath: string, skill: string, title: string): string {
+async function pullRename(vaultPath: string, skill: string, title: string): Promise<string> {
   const before = linkOf(vaultPath, skill);
   const inSync = !!before.vault_hash && hashSkillDirNormalized(skillDir(vaultPath, skill)) === before.vault_hash;
-  renameVaultSkill(vaultPath, skill, title);
+  await renameVaultSkill(vaultPath, skill, title);
   setSkillMdName(vaultPath, title, title);
   const next: NotionLink = { ...linkOf(vaultPath, title), notion_title: title, vault_name: title };
   if (inSync) {
@@ -287,7 +326,7 @@ export async function executeRow(
     return { message: `adopted as "${name}"`, skill: name };
   }
   const skill = row.skill!;
-  if (row.kind === "rename") return { message: pullRename(vaultPath, skill, row.title!), skill: row.title! };
+  if (row.kind === "rename") return { message: await pullRename(vaultPath, skill, row.title!), skill: row.title! };
   const r = await pullSkill(d, vaultPath, skill);
   if (r.result === "conflict") {
     throw new Error(`both sides changed the same lines (${r.reason ?? "no base"}) — resolve it in Conflicts`);
@@ -296,6 +335,9 @@ export async function executeRow(
 }
 
 // ── Force ───────────────────────────────────────────────────────
+
+/** Skip reason for legacy links in force / bulk push runs. */
+export const LEGACY_SKIP = "legacy Notion summary page — skipped; use Notion ▾ → Upgrade legacy pages";
 
 export interface ForceTarget {
   id: string;
@@ -329,7 +371,7 @@ export function forceTargets(vaultPath: string, direction: Direction, skills?: s
     if (!entry) return { ...t, skip: `skill "${skill}" not found` };
     if (!fs.existsSync(skillDir(vaultPath, skill))) return { ...t, skip: "no vault folder — nothing to sync" };
     const link = entry.notion;
-    if (link?.state === "legacy") return { ...t, skip: "legacy Notion link — skipped" };
+    if (link?.state === "legacy") return { ...t, skip: LEGACY_SKIP };
     if (!link) {
       return direction === "push" ? { ...t, create: true } : { ...t, skip: "not linked to Notion" };
     }

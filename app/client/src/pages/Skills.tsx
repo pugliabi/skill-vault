@@ -71,6 +71,14 @@ export default function Skills() {
     queryFn: () => api.getConfig(),
   });
 
+  // Folder vs SKILL.md name mismatches — offered under Import ▾ whether or not Notion is connected.
+  const { data: nameMismatches } = useQuery({
+    queryKey: ["skill-name-mismatches"],
+    queryFn: () => api.skillNameMismatches(),
+    retry: false,
+  });
+  const mismatchCount = nameMismatches?.skills.length ?? 0;
+
   // OpenClaw (WSL) availability — gates the bulk "Export to OpenClaw" action.
   const { data: openclaw } = useQuery({
     queryKey: ["openclaw-status"],
@@ -716,6 +724,9 @@ export default function Skills() {
                     label: "Updates",
                     onSelect: () => setUpdateScope([]),
                   },
+                  ...(mismatchCount > 0
+                    ? [{ id: "names", label: `Name mismatches (${mismatchCount})`, onSelect: () => navigate("/skill-names") }]
+                    : []),
                 ]}
               />
               <NotionMenu navigate={navigate} />
@@ -1345,6 +1356,13 @@ function SkillRow({
   const [hovered, setHovered] = useState(false);
   const [, navigate] = useLocation();
   const status = s.status;
+  // Clickable notion badges: a conflict opens Conflicts, a legacy page opens the upgrade page.
+  const badgeTarget =
+    s.notion_status === "conflict"
+      ? { href: `/notion/conflicts?skill=${encodeURIComponent(s.name)}`, title: "Review this conflict" }
+      : s.notion_status === "legacy"
+        ? { href: `/notion/legacy?skill=${encodeURIComponent(s.name)}`, title: "Upgrade this legacy Notion page to the full skill" }
+        : null;
   return (
     <div
       onClick={onSelect}
@@ -1466,24 +1484,24 @@ function SkillRow({
         <DesktopBadge status={s.desktop_status} />
         {s.notion_status && s.notion_status !== "synced" && (
           <span
-            {...(s.notion_status === "conflict"
+            {...(badgeTarget
               ? {
                   role: "link",
                   tabIndex: 0,
-                  title: "Review this conflict",
+                  title: badgeTarget.title,
                   onClick: (e: React.MouseEvent) => {
                     e.stopPropagation();
-                    navigate(`/notion/conflicts?skill=${encodeURIComponent(s.name)}`);
+                    navigate(badgeTarget.href);
                   },
                   onKeyDown: (e: React.KeyboardEvent) => {
                     if (e.key !== "Enter") return;
                     e.stopPropagation();
-                    navigate(`/notion/conflicts?skill=${encodeURIComponent(s.name)}`);
+                    navigate(badgeTarget.href);
                   },
                 }
               : {})}
             style={{
-              cursor: s.notion_status === "conflict" ? "pointer" : undefined,
+              cursor: badgeTarget ? "pointer" : undefined,
               fontFamily: "var(--mono)",
               fontSize: 10,
               fontWeight: 500,

@@ -165,3 +165,18 @@ test("downloadSkill and addLastEditedProperty call the right tools", async () =>
     args: { data_source_id: "ds", statements: 'ADD COLUMN "Last edited" LAST_EDITED_TIME' },
   });
 });
+
+test("isBlankPage is true only when notion-fetch reports the blank-page marker", async () => {
+  const texts: Record<string, string> = {
+    "p-blank": "<page><blank-page>This page is blank and has no content.</blank-page></page>",
+    "p-text": "<page><content>Some notes, no files</content></page>",
+  };
+  const seen: string[] = [];
+  const api = new NotionApi(async (name, args) => {
+    seen.push(name);
+    return { text: texts[String(args.id)] };
+  });
+  assert.equal(await api.isBlankPage("p-blank"), true);
+  assert.equal(await api.isBlankPage("p-text"), false);
+  assert.deepEqual(seen, ["notion-fetch", "notion-fetch"]);
+});

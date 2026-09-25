@@ -162,7 +162,7 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
   };
 
   app.use("/api/config", configRouter());
-  app.use("/api/skills", skillsRouter());
+  app.use("/api/skills", skillsRouter({ isBusy: anyNotionJobRunning }));
   app.use("/api/history", historyRouter());
   app.use("/api/adopt", adoptRouter());
   app.use("/api/push", pushRouter());
