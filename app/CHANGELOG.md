@@ -59,6 +59,34 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
   vault (if a git repo) is fetched and compared against its remote; a vault
   that's behind is blocked with a banner and an explicit "run anyway"
   override, so a stale device can't sync over a newer one.
+- **AI auto-tag.** Auto-tag can now classify skills with Claude through
+  your local Claude Code CLI (`claude -p`, no API key): it reads each
+  skill's name, description and a SKILL.md excerpt, prefers your existing
+  tags, and gives a one-line reason per skill. AI mode covers all skills in
+  scope (not only untagged ones), or the selected skills when a selection
+  exists. It can also suggest removing tags that don't fit (e.g. a stray
+  `cli` on a Fabric skill), but removals are opt-in: they start unchecked
+  until you turn on **Include removals**, custom tags are only removed when
+  Claude gives a reason, and over-tagged skills are only trimmed to 5. Runs
+  in batches with progress and Stop; nothing is written until you apply.
+  Falls back to the keyword rules when `claude` isn't available (with a
+  **Re-check** link) or a batch fails. Uses the shared headless Claude
+  launcher with structured (`--json-schema`) output. Optional env:
+  `SKILL_VAULT_AUTOTAG_MODEL` (default `sonnet`), `SKILL_VAULT_AI_TAGS=0`
+  to disable.
+  - New API: `GET /api/tags/ai-status` (`?refresh=1` re-checks the CLI),
+    `POST /api/tags/suggest` (`{ skills }` → per-skill `tags`, `reason`,
+    `new_tags`, `remove`, `remove_reasons`, plus `failed`), and
+    `POST /api/tags/bulk` accepts `prune_known: false` to keep removed
+    tags in `known_tags`.
+
+### Changed
+- Keyword auto-tag rules: new `fabric` tag (lakehouse, warehouse, OneLake,
+  dataflows, eventhouse/eventstream, Spark, medallion, Databricks/Synapse
+  migrations), no longer lumped into `powerbi`; `cli` is only suggested for
+  skills that are about a command-line tool, not ones that merely use one;
+  `sqldb-*` skills and "… in Fabric" descriptions get `fabric`; at most 5
+  suggestions per skill.
 
 ### Fixed
 - Notion file uploads no longer send a duplicate/conflicting
@@ -75,6 +103,8 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
   configurable from Settings.
 - Skills search gains a **scope selector** (`Name` is the default), so you
   can widen a search to file contents when you need to.
+- Skill descriptions written as YAML block scalars (`description: >`)
+  showed as `>` in the skill list; they are now read in full.
 
 ## [0.2.0] — 2026-07-02
 

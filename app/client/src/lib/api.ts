@@ -77,11 +77,13 @@ async function request<T>(
   method: string,
   path: string,
   body?: unknown,
+  signal?: AbortSignal,
 ): Promise<T> {
   const res = await fetch(path, {
     method,
     headers: body ? { "content-type": "application/json" } : undefined,
     body: body ? JSON.stringify(body) : undefined,
+    signal,
   });
 
   if (res.status === 204) return null as T;
@@ -290,10 +292,28 @@ export const api = {
 
   // ── tags ────────────────────────────────────────────────────
   listTags: () => request<{ tags: string[] }>("GET", "/api/tags"),
-  bulkTag: (body: { skills: string[]; add?: string[]; remove?: string[] }) =>
+  bulkTag: (body: { skills: string[]; add?: string[]; remove?: string[]; prune_known?: boolean }) =>
     request<{ ok: boolean; updated: number }>("POST", "/api/tags/bulk", body),
   createTag: (tag: string) =>
     request<{ ok: boolean; tag: string }>("POST", "/api/tags", { tag }),
+  aiTagStatus: (refresh = false) =>
+    request<{ available: boolean; version?: string; reason?: string; model: string }>(
+      "GET", `/api/tags/ai-status${refresh ? "?refresh=1" : ""}`,
+    ),
+  suggestTagsAI: (skills: string[], signal?: AbortSignal) =>
+    request<{
+      results: Record<
+        string,
+        {
+          tags: string[];
+          reason: string;
+          new_tags: string[];
+          remove: string[];
+          remove_reasons: Record<string, string>;
+        }
+      >;
+      failed: { names: string[]; error: string }[];
+    }>("POST", "/api/tags/suggest", { skills }, signal),
   zipSkills: (skills: string[]) =>
     request<{ zips: Array<{ skill: string; path: string }>; failed: Array<{ skill: string; error: string }> }>(
       "POST", "/api/skills/zip", { skills },

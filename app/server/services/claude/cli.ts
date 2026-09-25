@@ -29,7 +29,12 @@ import path from "node:path";
 export type ClaudeRunner = (
   args: string[],
   stdin: string,
-  opts: { cwd: string; timeoutMs: number },
+  opts: {
+    cwd: string;
+    timeoutMs: number;
+    /** Aborting kills the whole process tree and rejects, like a timeout. */
+    signal?: AbortSignal;
+  },
 ) => Promise<{ stdout: string; stderr: string; code: number | null }>;
 
 /** Thrown when the CLI reports `is_error`, its output can't be trusted, or it can't be launched at all. */
@@ -292,6 +297,10 @@ export function createRunner(
 
   return (args, stdin, opts) => {
     return new Promise((resolve, reject) => {
+      if (opts.signal?.aborted) {
+        reject(new ClaudeError("claude CLI call aborted"));
+        return;
+      }
       let invocation: SpawnInvocation;
       try {
         invocation = buildSpawnInvocation(args, opts.cwd, resolveExe, platform);
@@ -310,14 +319,22 @@ export function createRunner(
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        opts.signal?.removeEventListener("abort", onAbort);
         resolve(value);
       };
       const settleReject = (err: Error) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        opts.signal?.removeEventListener("abort", onAbort);
         reject(err);
       };
+      const onAbort = () => {
+        if (settled) return;
+        killTreeFn(child);
+        settleReject(new ClaudeError("claude CLI call aborted"));
+      };
+      opts.signal?.addEventListener("abort", onAbort, { once: true });
 
       const timer = setTimeout(() => {
         killTreeFn(child);
@@ -417,7 +434,13 @@ export async function runClaudeJson<T>(
   systemPrompt: string,
   schema: object,
   runner: ClaudeRunner = defaultRunner,
-  opts: { timeoutMs?: number } = {},
+  opts: {
+    timeoutMs?: number;
+    /** `--model` alias or id; omitted → the CLI's default model. */
+    model?: string;
+    /** Abort → the CLI's process tree is killed and this rejects. */
+    signal?: AbortSignal;
+  } = {},
 ): Promise<{ output: T; costUsd?: number }> {
   const args = [
     "-p",
@@ -433,11 +456,16 @@ export async function runClaudeJson<T>(
     systemPrompt,
     "--json-schema",
     JSON.stringify(schema),
+    ...(opts.model ? ["--model", opts.model] : []),
   ];
 
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "skill-vault-claude-"));
   try {
-    const { stdout, stderr } = await runner(args, prompt, { cwd, timeoutMs: opts.timeoutMs ?? RUN_TIMEOUT_MS });
+    const { stdout, stderr } = await runner(args, prompt, {
+      cwd,
+      timeoutMs: opts.timeoutMs ?? RUN_TIMEOUT_MS,
+      signal: opts.signal,
+    });
 
     let parsed: ClaudeCliJson;
     try {

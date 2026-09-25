@@ -1258,7 +1258,7 @@ export default function Skills() {
       {newOpen && <NewSkillDrawer onClose={() => setNewOpen(false)} />}
 
       {autoTagOpen && (
-        <AutoTagDialog skills={skills} onClose={() => setAutoTagOpen(false)} />
+        <AutoTagDialog skills={skills} selected={selectedSkills} onClose={() => setAutoTagOpen(false)} />
       )}
 
       {healthOpen && (

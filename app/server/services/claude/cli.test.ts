@@ -401,3 +401,54 @@ test("createRunner survives a stdin EPIPE (child exits before reading) and still
   assert.equal(result.code, 1);
   assert.match(result.stderr, /EPIPE/);
 });
+
+test("createRunner kills the whole tree and rejects when the caller aborts", async () => {
+  const child = makeFakeChild(404);
+  const killCalls: ChildProcessLike[] = [];
+  const runner = createRunner(() => child, (c) => killCalls.push(c), {
+    resolveExe: () => "C:\fake\claude.exe",
+    platform: "win32",
+  });
+  const ac = new AbortController();
+  const promise = runner(["-p"], "hi", { cwd: "C:\tmp", timeoutMs: 60_000, signal: ac.signal });
+  ac.abort();
+  await assert.rejects(promise, (err) => {
+    assert.ok(err instanceof ClaudeError);
+    assert.match(err.message, /aborted/);
+    return true;
+  });
+  assert.deepEqual(killCalls, [child]);
+  assert.doesNotThrow(() => child.emit("close", null));
+});
+
+test("createRunner never spawns when the signal is already aborted", async () => {
+  let spawned = 0;
+  const runner = createRunner(
+    () => {
+      spawned++;
+      return makeFakeChild();
+    },
+    () => {},
+    { resolveExe: () => "C:\fake\claude.exe", platform: "win32" },
+  );
+  const ac = new AbortController();
+  ac.abort();
+  await assert.rejects(runner(["-p"], "", { cwd: "C:\tmp", timeoutMs: 1000, signal: ac.signal }), /aborted/);
+  assert.equal(spawned, 0);
+});
+
+test("runClaudeJson appends --model only when asked and forwards the abort signal", async () => {
+  let seenSignal: AbortSignal | undefined;
+  const calls: string[][] = [];
+  const runner: ClaudeRunner = async (args, _stdin, opts) => {
+    calls.push(args);
+    seenSignal = opts.signal;
+    return { stdout: JSON.stringify({ structured_output: {} }), stderr: "", code: 0 };
+  };
+  const ac = new AbortController();
+  await runClaudeJson("p", "s", {}, runner, { model: "sonnet", signal: ac.signal });
+  assert.deepEqual(calls[0].slice(-2), ["--model", "sonnet"]);
+  assert.equal(seenSignal, ac.signal);
+  await runClaudeJson("p", "s", {}, runner);
+  assert.ok(!calls[1].includes("--model"));
+});

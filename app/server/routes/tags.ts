@@ -1,10 +1,37 @@
+import fs from "node:fs";
+import path from "node:path";
 import { Router } from "express";
 import { readAppConfig } from "../services/appConfig.ts";
 import {
   readManifest,
   patchManifestSkill,
   writeManifest,
+  skillDir,
 } from "../services/vault.ts";
+import {
+  aiTaggingAvailability,
+  buildVocabulary,
+  claudeModel,
+  readSkillInput,
+  suggestAll,
+  type ClaudeAvailability,
+  type ClaudeRunner,
+} from "../services/aiTagging.ts";
+import type { SkillsManifest } from "../types/vault.ts";
+
+/** Max skills per /suggest request; the client sends one batch at a time. */
+const SUGGEST_MAX_SKILLS = 50;
+
+/** Every tag used in the vault plus `known_tags`. */
+function vaultTags(manifest: SkillsManifest): Set<string> {
+  const tags = new Set<string>(
+    Array.isArray(manifest.known_tags) ? manifest.known_tags : [],
+  );
+  for (const entry of Object.values(manifest.skills)) {
+    if (Array.isArray(entry.tags)) for (const t of entry.tags) tags.add(t);
+  }
+  return tags;
+}
 
 /**
  * Tag is a "real" tag if non-empty, lowercased (no uppercase chars), and
@@ -21,8 +48,85 @@ function isValidTag(s: unknown): s is string {
   );
 }
 
-export function tagsRouter(): Router {
+export interface TagsRouterDeps {
+  /** Low-level CLI runner (services/claude/cli.ts); omitted → the real CLI. */
+  runner?: ClaudeRunner;
+  /** Defaults to the shared launcher's real `claude`; tests inject a fake. */
+  detect?: (force?: boolean) => Promise<ClaudeAvailability>;
+}
+
+export function tagsRouter(deps: TagsRouterDeps = {}): Router {
   const router = Router();
+  const runner = deps.runner;
+  const detect = deps.detect ?? aiTaggingAvailability;
+
+  /** Is AI auto-tagging available (Claude Code CLI on PATH)? */
+  router.get("/ai-status", async (req, res) => {
+    res.json({ ...(await detect(req.query.refresh === "1")), model: claudeModel() });
+  });
+
+  /**
+   * AI tag suggestions for the named skills. Returns the full recommended
+   * tag set per skill (not a diff) plus a one-line reason; skills that
+   * could not be classified are listed in `failed` so the client can fall
+   * back to the keyword heuristic. Read-only — nothing is written.
+   */
+  router.post("/suggest", async (req, res) => {
+    const cfg = readAppConfig();
+    if (!cfg.vault_path) {
+      res.status(409).json({ error: "vault not configured" });
+      return;
+    }
+    const body = req.body as { skills?: unknown };
+    const names = Array.isArray(body.skills)
+      ? [...new Set(body.skills.filter((s): s is string => typeof s === "string" && s.length > 0))]
+      : [];
+    if (!names.length) {
+      res.status(400).json({ error: "skills array is required" });
+      return;
+    }
+    if (names.length > SUGGEST_MAX_SKILLS) {
+      res.status(400).json({ error: `at most ${SUGGEST_MAX_SKILLS} skills per request` });
+      return;
+    }
+    const status = await detect();
+    if (!status.available) {
+      res.status(503).json({ error: status.reason ?? "AI tagging unavailable" });
+      return;
+    }
+
+    const vaultPath = cfg.vault_path;
+    const manifest = readManifest(vaultPath);
+    // Only real skills: a manifest entry or a folder directly under skills/.
+    const unknown = names.filter(
+      (n) =>
+        path.basename(n) !== n ||
+        n === "." ||
+        n === ".." ||
+        !(manifest.skills[n] || fs.existsSync(skillDir(vaultPath, n))),
+    );
+    if (unknown.length) {
+      res.status(404).json({ error: `unknown skill(s): ${unknown.slice(0, 5).join(", ")}` });
+      return;
+    }
+    const tagsInVault = vaultTags(manifest);
+    const vocab = buildVocabulary(tagsInVault);
+    const inputs = names.map((n) => ({
+      ...readSkillInput(skillDir(vaultPath, n), n),
+      current: Array.isArray(manifest.skills[n]?.tags) ? manifest.skills[n].tags : [],
+    }));
+
+    // Kill the CLI if the client goes away (dialog closed / cancelled).
+    const ac = new AbortController();
+    res.on("close", () => { if (!res.writableEnded) ac.abort(); });
+
+    const { results, failed } = await suggestAll(inputs, vocab, runner, {
+      signal: ac.signal,
+      vaultTags: tagsInVault,
+    });
+    if (ac.signal.aborted) return;
+    res.json({ results, failed });
+  });
 
   router.get("/", (req, res) => {
     const cfg = readAppConfig();
@@ -98,6 +202,8 @@ export function tagsRouter(): Router {
       skills?: string[];
       add?: string[];
       remove?: string[];
+      /** Also drop removed tags from known_tags (default true). */
+      prune_known?: boolean;
     };
     const skills = Array.isArray(body.skills) ? body.skills : [];
     const add = Array.isArray(body.add) ? body.add : [];
@@ -120,7 +226,7 @@ export function tagsRouter(): Router {
       updated++;
     }
 
-    if (remove.length) {
+    if (remove.length && body.prune_known !== false) {
       const fresh = readManifest(cfg.vault_path);
       const known = Array.isArray(fresh.known_tags) ? fresh.known_tags : [];
       const removeSet = new Set(remove);

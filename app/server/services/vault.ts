@@ -11,6 +11,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { frontmatterDescription } from "./skillText.ts";
 import type {
   DesktopStatus,
   FileNode,
@@ -174,14 +175,9 @@ function readDescription(skillPath: string): string {
   if (!fs.existsSync(md)) return "";
   try {
     const text = fs.readFileSync(md, "utf-8");
-    // YAML frontmatter
-    const fmMatch = text.match(/^---\s*\n([\s\S]*?)\n---/);
-    if (fmMatch) {
-      const descMatch = fmMatch[1].match(/^description:\s*(.+)$/m);
-      if (descMatch) {
-        return descMatch[1].trim().replace(/^["']|["']$/g, "");
-      }
-    }
+    // YAML frontmatter (incl. `description: >` block scalars)
+    const fmDesc = frontmatterDescription(text);
+    if (fmDesc) return fmDesc;
     // First non-blank non-heading line
     const body = text.replace(/^---[\s\S]*?---\s*/, "").trim();
     const firstPara = body
