@@ -29,8 +29,13 @@ archives, etc. alongside the managed entries without confusing either tool.
 │   └── ...
 ├── staging/                    # work-in-progress skills (optional)
 │   └── <skill-name>/
-└── snapshots/                  # per-device state snapshots (optional)
-    └── <machine-id>.json
+├── snapshots/                  # per-device state snapshots (optional)
+│   └── <machine-id>.json
+└── .history/                   # version history (optional, written by the app)
+    ├── .gitattributes          # "* -text"
+    ├── config.json             # { "max_versions": 50 }
+    ├── objects/<aa>/<sha256>   # raw file contents, stored once
+    └── skills/<name>/versions.json
 ```
 
 ## `skills.json` — the manifest
@@ -258,6 +263,121 @@ Conventions:
   are not part of the skill.
 - `staging/` is identical in structure to `skills/`. Skills in `staging/`
   are hidden from normal browsing and are not pushed to providers.
+
+## `.history/` — version history
+
+Optional directory at `<vault>/.history/`, written by the web app to keep a
+version history of each skill's files. The Python `sv` CLI does not write
+or read it: it only reads `skills.json` and `skills/`, so `.history/`
+living outside `skills/` means it is invisible to any tool that just scans
+skill folders. **Readers other than the app that manages this directory
+MUST ignore `.history/` entirely** — it is not part of the portable vault
+contract in the way `skills.json` and `skills/` are.
+
+```jsonc
+// .history/config.json
+{
+  "max_versions": 50   // per-skill cap; oldest versions are dropped once exceeded
+}
+```
+
+`.history/.gitattributes` contains the single line `* -text`, so git never
+rewrites line endings inside `.history/` — object filenames are content
+hashes, and EOL conversion would silently corrupt them.
+
+### Objects
+
+`.history/objects/<sha256[0:2]>/<sha256>` holds the **raw, uncompressed**
+bytes of one file version, named by the SHA-256 of its content. Storing
+objects raw (not gzipped) is deliberate: git already deduplicates identical
+blobs against the vault's working-tree copies, so an unchanged file costs
+the repository nothing extra. Objects are content-addressed and shared
+across skills and versions; the same file contents anywhere in history
+resolve to the same object. Objects are **not reference-counted on write**
+— an object with no version left pointing to it (e.g. after old versions
+age out past `max_versions`) is simply unreferenced and MAY be removed by
+a garbage-collection pass that walks every `versions.json` and deletes any
+object not mentioned in a `files` map.
+
+### `skills/<name>/versions.json` — per-skill version list
+
+```jsonc
+{
+  "skill": "my-skill",
+  "versions": [
+    {
+      "id": "m5x2ab-1a2b3c",              // <base36 timestamp>-<6 hex chars>
+      "at": "2026-07-23T15:04:00.000Z",   // ISO 8601 UTC
+      "side": "vault",                    // "vault" | "notion"
+      "source": "vault-edit",             // see source list below
+      "note": "restored version from …",  // optional, free-form
+      "files": {                          // "/"-separated relative path → sha256
+        "SKILL.md": "3f2c9a…",
+        "scripts/run.py": "9be0d1…"
+      },
+      "normalized_hash": "8ac41e…"        // or null if the dir was missing/empty at snapshot time
+      // "manifest_entry": { ... }        // optional, see below
+    }
+  ]
+}
+```
+
+Versions are stored **oldest first on disk** (append-only); readers that
+want newest-first reverse the array. `id` values are lexically sortable by
+creation order within the same process clock resolution but MUST NOT be
+assumed globally unique across vaults — treat them as opaque within one
+`versions.json`.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `id` | `string` | Opaque version id, `<base36 ms timestamp>-<6 hex chars>`. |
+| `at` | `string` | ISO 8601 UTC timestamp of the snapshot. |
+| `side` | `"vault"` \| `"notion"` | Which copy this version snapshots. Phase 1 only records `"vault"`. |
+| `source` | `string` | What triggered the snapshot; see the source list below. |
+| `note` | `string` | Optional free-form annotation (e.g. why a snapshot was taken). |
+| `files` | `Record<string,string>` | `/`-separated relative path → SHA-256 of that file's raw bytes at snapshot time. |
+| `normalized_hash` | `string \| null` | The normalized content hash (see "Content hash algorithm" above) of the snapshotted directory, or `null` if it couldn't be computed. |
+| `manifest_entry` | *(opaque)* | Optional. The skill's `skills.json` entry, captured at record time. Currently only recorded on the version taken immediately before a skill is deleted. |
+
+Recognized `source` values: `vault-edit`, `external-edit`, `pull`,
+`push-notion-copy`, `notion-edit`, `claude-merge`, `force-push`,
+`force-pull`, `restore`, `rename`, `delete`, `adopt`, `update`,
+`legacy-snapshot`. Phase 1 of the app only emits `vault`-side sources;
+`notion`/`push-notion-copy`/`notion-edit`/`claude-merge` are reserved for a
+later phase that syncs against a Notion copy.
+
+**Deduplication:** a new version is only appended when its `files` map
+differs from the most recent version on the *same* `side`; recording an
+identical state is a no-op (unless the caller explicitly forces it, e.g.
+`restore` always appends so the restore itself is visible in history).
+External edits are recorded after the app observes **60 seconds** of
+filesystem quiet on a skill folder, and the app also scans for
+out-of-band changes at startup.
+
+**Deletion:** when a skill is deleted, a marker version is appended with
+`source: "delete"`. A deletion marker repeats the previous version's
+`files` map unchanged (it marks *that* state as the last one before
+deletion, it does not snapshot new content) and, unlike other versions,
+may also carry `manifest_entry` — a copy of the skill's `skills.json`
+entry (`targets`, `stage`, `source`, etc.) at the moment of deletion. Since
+deleting a skill removes both its folder and its manifest entry, this is
+the only place that entry survives. Restoring a deleted skill re-creates
+the folder from the chosen version and, if the manifest has no entry for
+that skill name, re-creates the manifest entry too: from the newest
+recorded `manifest_entry` in that skill's history if one exists, otherwise
+from `{ "targets": [] }`. An existing manifest entry is never overwritten
+by a restore.
+
+**Rename:** renaming a skill moves `.history/skills/<old-name>/` to
+`.history/skills/<new-name>/`. If history already exists under the new
+name (e.g. a previously deleted skill is being replaced by that name),
+the two timelines are merged: all versions from both are combined and
+sorted by `at` ascending, so the merged file's version order stays
+chronological even though the two histories were recorded independently.
+
+**Cap:** each skill keeps at most `max_versions` versions (default **50**,
+configurable via `.history/config.json`); once the count is exceeded, the
+oldest versions are dropped from the front of the array.
 
 ## Schema versioning
 
