@@ -28,10 +28,14 @@ an initial pass) and records the match on the skill. A link can be:
 - **vault-only** — you marked the skill as intentionally not represented in
   Notion.
 
-If a name-matched Notion page is **empty** — no skill was ever uploaded to
-it (for example a page left behind by a failed first upload, then renamed
-to the skill's name) — the skill is linked to it without being marked
-synced, and the next push fills the page instead of creating a duplicate.
+If a newly matched Notion page is **empty** — Notion reports the page as
+blank and it has no files (for example a page left behind by a failed first
+upload, then renamed to the skill's name) — the skill is linked to it
+without being marked synced, and the next push fills the page instead of
+creating a duplicate. Creating a Notion page for a skill likewise reuses
+such a blank page when one already carries the skill's name. A page that
+stops being blank before that push is treated as a conflict, never
+overwritten blind.
 
 Every skill's sync status is one of: **synced**, **vault changed**, **Notion
 changed**, **conflict**, **not in Notion**, **missing in Notion** (linked,
@@ -65,11 +69,13 @@ those rows.
   renames the vault folder to the Notion title. Either way `SKILL.md`'s
   `name` field follows the new name, and a skill that was in sync before
   the rename stays in sync afterwards.
-- **Fix name in Notion** rows (Push, selected by default) appear when a
-  linked skill's Notion title isn't the skill name — typically a display
+- **Fix name in Notion** rows (Push, not selected by default) appear when
+  a linked skill's Notion title isn't the skill name — typically a display
   title such as `My Skill` for `my-skill` — and it isn't a rename made in
-  Notion (see above). Running the row pushes the skill and sets the Notion
-  title to the skill name. See [Name agreement](#name-agreement).
+  Notion (see above). Running the row sets the Notion title to the skill
+  name; if the skill is otherwise in sync that's all it does, otherwise it
+  also pushes the vault changes (a normal push). See
+  [Name agreement](#name-agreement).
 
 Nothing is written until you click **Run**, and only the rows you selected
 are touched.
@@ -104,7 +110,10 @@ its `SKILL.md` frontmatter, and the **Notion "Skill name" title**.
   with two fixes: **Rename folder** to the `SKILL.md` name (history and the Notion
   link move with it) or **Change SKILL.md name** to the folder name (the old
   file is kept in history). Renaming onto a name another skill already has
-  is refused — compare the two and remove the duplicate.
+  is refused — compare the two and remove the duplicate. Name fixes and
+  renames are refused while a Notion job is running. The list is also
+  reachable from **Import ▾ → Name mismatches (N)**, with or without
+  Notion connected.
 - **Notion title.** After every upload the Notion title is set to the skill
   name, and push review offers a **Fix name in Notion** row for titles that
   still differ.
