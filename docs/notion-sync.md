@@ -18,7 +18,8 @@ an initial pass) and records the match on the skill. A link can be:
 - **legacy** — the Notion page looks like a converted summary copy of the
   vault skill rather than a full Notion-native page (see
   [Known limitations](#known-notion-limitations)). Legacy links are frozen:
-  no push, pull, force, or merge ever touches them.
+  no push, pull, force, or merge ever touches them — the one way forward is
+  [Upgrade legacy pages](#upgrade-legacy-pages).
 - **unlinked** — you disconnected the skill from Notion; it's excluded from
   auto-matching until relinked. **Settings → Notion** lists unlinked skills
   with a **Relink** button: it forgets the old link, and the next **Link
@@ -26,6 +27,11 @@ an initial pass) and records the match on the skill. A link can be:
   skill that was never linked).
 - **vault-only** — you marked the skill as intentionally not represented in
   Notion.
+
+If a name-matched Notion page is **empty** — no skill was ever uploaded to
+it (for example a page left behind by a failed first upload, then renamed
+to the skill's name) — the skill is linked to it without being marked
+synced, and the next push fills the page instead of creating a duplicate.
 
 Every skill's sync status is one of: **synced**, **vault changed**, **Notion
 changed**, **conflict**, **not in Notion**, **missing in Notion** (linked,
@@ -59,6 +65,11 @@ those rows.
   renames the vault folder to the Notion title. Either way `SKILL.md`'s
   `name` field follows the new name, and a skill that was in sync before
   the rename stays in sync afterwards.
+- **Fix name in Notion** rows (Push, selected by default) appear when a
+  linked skill's Notion title isn't the skill name — typically a display
+  title such as `My Skill` for `my-skill` — and it isn't a rename made in
+  Notion (see above). Running the row pushes the skill and sets the Notion
+  title to the skill name. See [Name agreement](#name-agreement).
 
 Nothing is written until you click **Run**, and only the rows you selected
 are touched.
@@ -71,9 +82,54 @@ skill's vault changes and creates a Notion page for any selected skill that
 doesn't have one yet. It never overwrites a Notion edit: a skill whose
 Notion copy changed since the last sync (or that has never synced) is
 reported as "Changed in Notion — resolve in Conflicts" and left alone.
-Legacy, unlinked and folder-less skills are skipped with a reason, and a
+Legacy skills are skipped with a pointer to **Upgrade legacy pages**;
+unlinked and folder-less skills are skipped with a reason, and a
 skill with no vault changes is left as is. Each skill's outcome is shown
 when the run finishes.
+
+## Name agreement
+
+A skill is valid for Claude packages, agents and Notion only when three
+names are the same string: the vault **folder name**, the `name` field in
+its `SKILL.md` frontmatter, and the **Notion "Skill name" title**.
+
+- **Folder vs `SKILL.md`.** Skill Vault never rewrites a `SKILL.md` name
+  behind your back — sometimes the folder is the wrong one (a duplicate
+  copy, or a folder that was renamed by hand). A push, force push, page
+  creation, legacy upgrade or conflict resolution for a skill whose two
+  names differ fails for that skill with "Name mismatch: folder '…' vs
+  SKILL.md name '…' — fix it in Names", before anything is written to
+  Notion (no page is created, nothing is uploaded). **Notion ▾ → Name
+  mismatches (N)** (also linked from the failed row) lists every mismatch
+  with two fixes: **Rename folder** to the `SKILL.md` name (history and the Notion
+  link move with it) or **Change SKILL.md name** to the folder name (the old
+  file is kept in history). Renaming onto a name another skill already has
+  is refused — compare the two and remove the duplicate.
+- **Notion title.** After every upload the Notion title is set to the skill
+  name, and push review offers a **Fix name in Notion** row for titles that
+  still differ.
+
+## Upgrade legacy pages
+
+**Notion ▾ → Upgrade legacy pages (N)** (shown only when there are legacy
+links), or clicking a skill's **legacy** badge on the Skills page, opens a
+two-pane page: the legacy skills on the left (with checkboxes and select
+all), and on the right the full vault skill compared with Notion's summary
+page (downloaded read-only). **Upgrade** (one skill) or **Upgrade selected
+(N)** replaces each summary page with the full skill:
+
+- Notion's current summary is saved to the skill's version history first.
+- Every file of the vault skill is uploaded into the **same** Notion page
+  (its page ID and URL don't change), and the Notion title becomes the
+  skill name.
+- The link becomes an ordinary, in-sync link — from then on it's pushed,
+  pulled and resolved like any other skill.
+- The vault copy is never changed. A skill with a
+  [name mismatch](#name-agreement) is refused before anything is
+  downloaded or uploaded.
+
+Each skill succeeds or fails on its own, and the results are listed when
+the run finishes. The [multi-device guard](#multi-device-guard) applies.
 
 ## Force push / force pull
 
@@ -165,7 +221,7 @@ uses the last check's results).
 ## Multi-device guard
 
 If your vault is a git repository, Skill Vault checks it against its remote
-before any Push/Pull run or force action: it fetches, then compares your
+before any Push/Pull run, force action or legacy upgrade: it fetches, then compares your
 local `HEAD` to the upstream branch. If your vault is behind — meaning
 another device may have pushed changes you don't have yet — the action is
 blocked with a banner explaining how many commits you're behind, so you
@@ -188,7 +244,8 @@ as an informational note but never blocks anything on its own.
   attached to the Notion page after your next push — this is a limitation
   of the upload API, not a bug. Push review flags this so you know to clean
   it up in Notion by hand if needed.
-- **Legacy pages are frozen.** A Notion page that looks like a converted
-  summary of a vault skill (see `docs/vault-format.md` for the exact
-  detection rule) is never pushed to, pulled from, force-synced, or offered
-  for merge — only Unlink (and then Relink) touches it.
+- **Legacy pages are frozen until upgraded.** A Notion page that looks like
+  a converted summary of a vault skill (see `docs/vault-format.md` for the
+  exact detection rule) is never pushed to, pulled from, force-synced, or
+  offered for merge. [Upgrade legacy pages](#upgrade-legacy-pages) replaces
+  it with the full skill; otherwise only Unlink (and then Relink) touches it.
