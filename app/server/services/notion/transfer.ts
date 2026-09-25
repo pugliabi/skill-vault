@@ -8,6 +8,7 @@ import path from "node:path";
 import zlib from "node:zlib";
 import * as tar from "tar";
 import type { NotionApi } from "./api.ts";
+import { isFile } from "../fsUtil.ts";
 
 const SKIP_NAMES = new Set(["node_modules", "__pycache__", ".git", ".DS_Store", "Thumbs.db"]);
 
@@ -28,7 +29,7 @@ export function crc32Base64(bytes: Buffer): string {
  * VCS/build noise. Throws if SKILL.md is not present at the top level of `dir`.
  */
 export async function packSkill(dir: string, name: string): Promise<{ bytes: Buffer; crc32Base64: string }> {
-  if (!fs.existsSync(path.join(dir, "SKILL.md"))) {
+  if (!isFile(path.join(dir, "SKILL.md"))) {
     throw new Error(`packSkill: SKILL.md not found in ${dir}`);
   }
   const staging = fs.mkdtempSync(path.join(os.tmpdir(), "sv-pack-"));

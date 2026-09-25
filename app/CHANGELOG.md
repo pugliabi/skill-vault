@@ -89,6 +89,12 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
   suggestions per skill.
 
 ### Fixed
+- **EISDIR on skills with a folder where `SKILL.md` belongs** — on
+  case-insensitive disks a folder named `skill.md/` answered to `SKILL.md`,
+  so reads crashed with "EISDIR: illegal operation on a directory". Every
+  `SKILL.md` check now requires a regular file.
+- Two flaky tests (Notion checker timer window, archive temp-dir count) no
+  longer fail under a loaded full-suite run on Windows.
 - Notion file uploads no longer send a duplicate/conflicting
   `Content-Length` header when Notion's upload URL already provides one.
 - Renaming a linked skill now updates `SKILL.md`'s `name` field on both

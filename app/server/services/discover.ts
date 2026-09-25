@@ -8,6 +8,7 @@ import path from "node:path";
 import type { Provider } from "../types/vault.ts";
 import { readManifest } from "./vault.ts";
 import { hashSkillFolder } from "./skillHash.ts";
+import { isFile } from "./fsUtil.ts";
 
 export type DiscoverStatus = "new" | "synced" | "diverged";
 
@@ -49,7 +50,7 @@ export function discoverAll(
       if (name.startsWith(".") || name === "node_modules") continue;
 
       const skillPath = path.join(provider.path, name);
-      const hasSkillMd = fs.existsSync(path.join(skillPath, "SKILL.md"));
+      const hasSkillMd = isFile(path.join(skillPath, "SKILL.md"));
 
       let fileCount = 0;
       try {

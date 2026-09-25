@@ -27,6 +27,7 @@ import { hashSkillDirNormalized } from "./skillHash.ts";
 import { statusByTarget } from "./syncStatus.ts";
 import { computeNotionStatus } from "./notion/matching.ts";
 import { readNotionAuth, readNotionCache, readNotionSettings } from "./notion/store.ts";
+import { isFile } from "./fsUtil.ts";
 
 // ── Path helpers ────────────────────────────────────────────────
 
@@ -172,7 +173,7 @@ function countFiles(dir: string): number {
  */
 function readDescription(skillPath: string): string {
   const md = path.join(skillPath, "SKILL.md");
-  if (!fs.existsSync(md)) return "";
+  if (!isFile(md)) return "";
   try {
     const text = fs.readFileSync(md, "utf-8");
     // YAML frontmatter (incl. `description: >` block scalars)
@@ -312,7 +313,7 @@ export function listSkills(vaultPath: string, providers: Provider[] = []): Skill
       stage,
       source: entry.source ?? "",
       file_count: countFiles(sp),
-      has_skill_md: fs.existsSync(path.join(sp, "SKILL.md")),
+      has_skill_md: isFile(path.join(sp, "SKILL.md")),
       description: readDescription(sp),
       modified_at: modifiedAt,
       created_at: createdAt,

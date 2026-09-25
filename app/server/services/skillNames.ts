@@ -12,6 +12,7 @@ import { SkillOpError, renameVaultSkill, setSkillMdName } from "./skillLifecycle
 import type { ProviderOutcome } from "./providerLinks.ts";
 import { SLUG_RE, validateSkillName } from "./skillName.ts";
 import { readManifest, skillDir, skillsDir } from "./vault.ts";
+import { isFile } from "./fsUtil.ts";
 
 /** Opening + closing frontmatter fences; a leading UTF-8 BOM is allowed. */
 const FRONTMATTER_RE = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---/;
@@ -78,7 +79,7 @@ export function listNameMismatches(vaultPath: string): NameMismatch[] {
   const out: NameMismatch[] = [];
   for (const e of entries) {
     if (!e.isDirectory() || e.name.startsWith(".")) continue;
-    if (!fs.existsSync(path.join(skillsDir(vaultPath), e.name, "SKILL.md"))) continue;
+    if (!isFile(path.join(skillsDir(vaultPath), e.name, "SKILL.md"))) continue;
     const name = skillMdName(vaultPath, e.name) ?? "";
     if (name === e.name) continue;
     const title = manifest.skills[e.name]?.notion?.notion_title;
@@ -107,7 +108,7 @@ export async function fixSkillName(
   folder: string,
   use: "name" | "folder",
 ): Promise<{ name: string; providers: ProviderOutcome[] }> {
-  if (!fs.existsSync(path.join(skillDir(vaultPath, folder), "SKILL.md"))) {
+  if (!isFile(path.join(skillDir(vaultPath, folder), "SKILL.md"))) {
     throw new SkillOpError(404, `skill "${folder}" not found`);
   }
   const name = skillMdName(vaultPath, folder);

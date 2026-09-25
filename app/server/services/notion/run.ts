@@ -28,6 +28,7 @@ import {
   type NotionCacheRow,
 } from "./store.ts";
 import { NotionChangedError, adoptFromNotion, pullSkill, pushSkill, type SyncDeps } from "./sync.ts";
+import { isFile } from "../fsUtil.ts";
 
 export type Direction = "push" | "pull";
 export type DeletedAction = "unlink" | "delete-vault" | "trash" | "recreate";
@@ -190,7 +191,7 @@ function unlink(vaultPath: string, skill: string): string {
 /** Create a fresh Notion page for a skill whose page is gone; the old link is restored on failure. */
 async function recreate(d: SyncDeps, vaultPath: string, skill: string): Promise<string> {
   const prev = linkOf(vaultPath, skill);
-  if (!fs.existsSync(path.join(skillDir(vaultPath, skill), "SKILL.md"))) {
+  if (!isFile(path.join(skillDir(vaultPath, skill), "SKILL.md"))) {
     throw new Error(`"${skill}" has no SKILL.md in the vault — restore it first`);
   }
   setNotionLink(vaultPath, skill, undefined);

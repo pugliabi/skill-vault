@@ -13,6 +13,7 @@ import type { Provider } from "../types/vault.ts";
 import { moveHistory, recordVersion, withHistory } from "./history.ts";
 import { validateSkillName } from "./skillName.ts";
 import { readManifest, removeSkill, renameSkill, skillDir } from "./vault.ts";
+import { isFile } from "./fsUtil.ts";
 
 /** A rename/delete refused before anything changed; `status` is the HTTP code the skills route uses. */
 export class SkillOpError extends Error {
@@ -231,7 +232,7 @@ export function withSkillMdName(md: string, newName: string): string | null {
  */
 export function setSkillMdName(vaultPath: string, skill: string, newName: string): boolean {
   const file = path.join(skillDir(vaultPath, skill), "SKILL.md");
-  if (!fs.existsSync(file)) return false;
+  if (!isFile(file)) return false;
   const next = withSkillMdName(fs.readFileSync(file, "utf8"), newName);
   if (next === null) return false;
   withHistory(vaultPath, skill, "rename", () => {

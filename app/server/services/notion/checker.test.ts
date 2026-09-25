@@ -7,6 +7,14 @@ import path from "node:path";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+async function waitFor(cond: () => boolean, timeoutMs = 5000): Promise<void> {
+  const start = Date.now();
+  while (!cond()) {
+    if (Date.now() - start > timeoutMs) throw new Error(`condition not met within ${timeoutMs}ms`);
+    await sleep(5);
+  }
+}
+
 let vault: string;
 let fakeHome: string;
 
@@ -69,24 +77,30 @@ test("first tick fires after firstRunDelayMs, then again after intervalMs; stop(
   };
   const openApi = async () => ({ api: {} as any, close: async () => {} });
 
+  // Windows timers have ~15.6ms granularity and a loaded full-suite run can stall
+  // the event loop further, so the delays leave wide gaps and waits poll for the
+  // condition instead of asserting exact counts at fixed wall-clock points.
+  const t0 = Date.now();
   const checker = startNotionChecker({
     getVaultPath: () => vault,
-    firstRunDelayMs: 20,
-    intervalMs: 40,
+    firstRunDelayMs: 60,
+    intervalMs: 400,
     refresh,
     openApi,
   });
 
   await sleep(10);
   assert.equal(refreshCalls, 0, "too early for the first run");
-  await sleep(25);
-  assert.equal(refreshCalls, 1, "first run fired ~20ms in");
-  await sleep(50);
-  assert.ok(refreshCalls >= 2, "the interval fired at least one more tick");
+  await waitFor(() => refreshCalls >= 1);
+  const firstAt = Date.now() - t0;
+  assert.ok(firstAt >= 55, `first run waited for firstRunDelayMs (fired at ${firstAt}ms)`);
+  assert.equal(refreshCalls, 1, "the interval tick is still far off when the first run fires");
+  await waitFor(() => refreshCalls >= 2);
+  assert.ok(Date.now() - t0 >= 395, "the second tick came from the interval");
 
   checker.stop();
   const afterStop = refreshCalls;
-  await sleep(80);
+  await sleep(500);
   assert.equal(refreshCalls, afterStop, "stop() cleared both timers");
 });
 

@@ -29,6 +29,7 @@ import { isNotionNative, isValidSkillName, normalizeName } from "./matching.ts";
 import { mergeSkillMd, overlayNotionSkillMd, stripNotionPageId } from "./patch.ts";
 import { readNotionCache, readNotionSettings, setNotionLink, type NotionCacheRow } from "./store.ts";
 import { uploadSkill } from "./transfer.ts";
+import { isFile } from "../fsUtil.ts";
 
 export interface SyncDeps {
   api: NotionApi;
@@ -241,7 +242,7 @@ export async function pushSkill(
   const existing = currentLink(vaultPath, skill);
   if (existing?.state === "legacy") throw new LegacyLinkError(skill);
   const dir = skillDir(vaultPath, skill);
-  if (!fs.existsSync(path.join(dir, "SKILL.md"))) throw new Error(`"${skill}" has no SKILL.md in the vault`);
+  if (!isFile(path.join(dir, "SKILL.md"))) throw new Error(`"${skill}" has no SKILL.md in the vault`);
   const carryName = !!opts.carryNameFrom && skillMdName(vaultPath, skill) === opts.carryNameFrom;
   if (!carryName) assertNameAgreement(vaultPath, skill);
 
@@ -404,7 +405,7 @@ export async function upgradeLegacySkill(
   if (link?.state !== "legacy") throw new NotLegacyError(skill);
   if (!link.page_id) throw new Error(`"${skill}" has no Notion page id`);
   const dir = skillDir(vaultPath, skill);
-  if (!fs.existsSync(path.join(dir, "SKILL.md"))) throw new Error(`"${skill}" has no SKILL.md in the vault`);
+  if (!isFile(path.join(dir, "SKILL.md"))) throw new Error(`"${skill}" has no SKILL.md in the vault`);
   assertNameAgreement(vaultPath, skill);
   const pageId = link.page_id;
 
@@ -456,7 +457,7 @@ export async function pullSkill(
     recordVersion(vaultPath, skill, { side: "notion", source: "notion-edit", note: "pulled", dir: ex.skillRoot });
 
     const vaultMdPath = path.join(skillDir(vaultPath, skill), "SKILL.md");
-    const vaultMd = fs.existsSync(vaultMdPath) ? fs.readFileSync(vaultMdPath, "utf8") : null;
+    const vaultMd = isFile(vaultMdPath) ? fs.readFileSync(vaultMdPath, "utf8") : null;
     const files = new Map(notionFiles);
 
     if (opts.force) {

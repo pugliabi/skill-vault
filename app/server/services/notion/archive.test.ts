@@ -88,16 +88,24 @@ test("caps the download size", async () => {
   );
 });
 
-test("caps the total extracted size", async () => {
+test("caps the total extracted size", async (t) => {
   const bytes = rawTar([
     { path: "SKILL.md", type: "File", body: "x".repeat(600) },
     { path: "b.md", type: "File", body: "y".repeat(600) },
   ]);
-  const before = fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith("sv-notion-")).length;
+  // Track the exact temp dir this call creates: counting sv-notion-* entries in the
+  // shared tmpdir races with other test files running in parallel.
+  const created: string[] = [];
+  const realMkdtemp = fs.mkdtempSync;
+  t.mock.method(fs, "mkdtempSync", (...args: Parameters<typeof fs.mkdtempSync>) => {
+    const dir = realMkdtemp(...args) as string;
+    created.push(dir);
+    return dir;
+  });
   await assert.rejects(
     downloadAndExtract("https://x.test/a.tar", serve(bytes), { maxExtractedBytes: 1000 }),
     /expands beyond/,
   );
-  const after = fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith("sv-notion-")).length;
-  assert.equal(after, before, "temp dir cleaned up");
+  assert.equal(created.length, 1, "one temp dir was created");
+  assert.equal(fs.existsSync(created[0]), false, "temp dir cleaned up");
 });

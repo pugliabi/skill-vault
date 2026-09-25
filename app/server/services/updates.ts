@@ -31,6 +31,7 @@ import { copyRecursive } from "./adoption.ts";
 import { hashSkillDirNormalized } from "./skillHash.ts";
 import { patchManifestSkill, readManifest, skillDir } from "./vault.ts";
 import { withHistory } from "./history.ts";
+import { isFile } from "./fsUtil.ts";
 
 /** How one origin's source root got resolved for this request. */
 interface ResolvedSource {
@@ -122,7 +123,7 @@ function recoverMovedSkill(root: string, name: string): string | null {
     for (const e of entries) {
       if (!e.isDirectory() || e.name.startsWith(".") || IGNORE.has(e.name)) continue;
       const full = path.join(dir, e.name);
-      if (e.name === name && fs.existsSync(path.join(full, "SKILL.md"))) {
+      if (e.name === name && isFile(path.join(full, "SKILL.md"))) {
         matches.push(full);
         if (matches.length > 1) return;
       }

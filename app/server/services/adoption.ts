@@ -29,6 +29,7 @@ import {
   upsertManifestSkill,
 } from "./vault.ts";
 import { withHistory } from "./history.ts";
+import { isFile } from "./fsUtil.ts";
 
 /**
  * Scan a directory for skill folders.
@@ -135,7 +136,7 @@ export function scanForSkills(
       }
       if (!isDir) continue;
       const full = path.join(providerPath, entry.name);
-      pushSkillResult(providerPath, full, existing, out, fs.existsSync(path.join(full, "SKILL.md")));
+      pushSkillResult(providerPath, full, existing, out, isFile(path.join(full, "SKILL.md")));
     }
   }
 
