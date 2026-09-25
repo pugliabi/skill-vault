@@ -26,7 +26,7 @@ import { DeletedSkillsDialog } from "../components/DeletedSkillsDialog";
 import { UpdateDialog } from "../components/UpdateDialog";
 import { TagChips } from "../components/TagChips";
 import { loadPrefs, savePrefs, type SavedView, type SkillsPreferences } from "../lib/preferences";
-import type { Skill } from "../lib/types";
+import type { NotionStatus, Skill } from "../lib/types";
 import { matchesSearch, parseSearch, searchRank, SEARCH_SCOPES, type SearchScope } from "../lib/search";
 
 type Filter =
@@ -37,6 +37,19 @@ type Filter =
   | "vault-only"
   | "missing"
   | "desktop-outdated";
+
+const NOTION_STATUS_LABEL: Record<NotionStatus, string> = {
+  synced: "In sync",
+  "changed-vault": "Changed in vault",
+  "changed-notion": "Changed in Notion",
+  conflict: "Conflict",
+  "not-in-notion": "Not in Notion",
+  "vault-only": "Vault-only",
+  legacy: "Legacy conversion",
+  unlinked: "Unlinked",
+  unchecked: "Not checked",
+  "missing-in-notion": "Missing in Notion",
+};
 
 export default function Skills() {
   const params = useParams<{ name?: string }>();
@@ -154,6 +167,13 @@ export default function Skills() {
     [configData],
   );
 
+  // Notion filter/badge only make sense once any skill carries a notion_status
+  // (i.e. Notion is connected and a data source is configured).
+  const anyNotionStatus = useMemo(
+    () => skills.some((s) => s.notion_status != null),
+    [skills],
+  );
+
   // Full-text search over SKILL.md bodies — debounced, unioned into the
   // name/description filter so "the skill that mentions ffmpeg" is findable.
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -205,6 +225,17 @@ export default function Skills() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [configData, providerIds]);
 
+  // Self-heal a persisted Notion filter once the skill list has loaded and no
+  // skill carries a notion_status (Notion disconnected / no data source), so
+  // an invisible filter can't hide every skill.
+  useEffect(() => {
+    if (!data) return;
+    if (activeFilters.notion && !anyNotionStatus) {
+      setActiveFilters({ ...activeFilters, notion: undefined });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, anyNotionStatus]);
+
   const filtered = useMemo(() => {
     return skills.filter((s) => {
       if (filter === "production" && s.stage !== "production") return false;
@@ -240,6 +271,7 @@ export default function Skills() {
           return false;
         }
       }
+      if (activeFilters.notion && s.notion_status !== activeFilters.notion) return false;
       return true;
     });
   }, [skills, filter, search, activeFilters, providerIds, fullTextNames]);
@@ -1014,6 +1046,38 @@ export default function Skills() {
                 </select>
               )}
 
+              {/* Notion filter — only rendered once any skill carries notion_status */}
+              {(anyNotionStatus || !!activeFilters.notion) && (
+                <select
+                  value={activeFilters.notion ?? ""}
+                  onChange={(e) =>
+                    setActiveFilters({
+                      ...activeFilters,
+                      notion: (e.target.value || undefined) as NotionStatus | undefined,
+                    })
+                  }
+                  title="Filter by Notion sync status"
+                  style={{
+                    height: 26,
+                    padding: "0 6px",
+                    fontSize: 11,
+                    fontFamily: "var(--mono)",
+                    color: activeFilters.notion ? "var(--accent)" : "var(--ink-2)",
+                    background: "var(--surface)",
+                    border: `0.5px solid ${activeFilters.notion ? "var(--accent)" : "var(--border-2)"}`,
+                    borderRadius: 5,
+                    cursor: "pointer",
+                  }}
+                >
+                  <option value="">Notion: any</option>
+                  {(Object.keys(NOTION_STATUS_LABEL) as NotionStatus[]).map((s) => (
+                    <option key={s} value={s}>
+                      Notion: {NOTION_STATUS_LABEL[s]}
+                    </option>
+                  ))}
+                </select>
+              )}
+
               <span style={{ flex: 1 }} />
 
               <ViewsMenu
@@ -1392,6 +1456,24 @@ function SkillRow({
       <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
         <StatusBadge status={status} />
         <DesktopBadge status={s.desktop_status} />
+        {s.notion_status && s.notion_status !== "synced" && (
+          <span
+            style={{
+              fontFamily: "var(--mono)",
+              fontSize: 10,
+              fontWeight: 500,
+              color: "var(--ink-3)",
+              background: "var(--surface-2)",
+              padding: "2px 7px",
+              borderRadius: 4,
+              letterSpacing: "0.01em",
+              whiteSpace: "nowrap",
+              border: "0.5px solid var(--border-2)",
+            }}
+          >
+            notion: {NOTION_STATUS_LABEL[s.notion_status]}
+          </span>
+        )}
       </span>
       {/* Preview button */}
       <button

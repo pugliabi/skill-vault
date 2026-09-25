@@ -7,6 +7,9 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
 ## [Unreleased]
 
 ### Added
+- **Connect Notion** (Settings → Notion): sign in, pick your Skills database,
+  link skills by page ID, legacy and Notion-native detection, Notion status
+  filter on the Skills page.
 - **Version history.** Every skill change — in-app edits, pulls, updates,
   adopts, renames, deletes, and edits made outside the app — is now saved
   to `.history/` in the vault. New **History** tab on a skill's detail page

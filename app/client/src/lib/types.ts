@@ -68,6 +68,8 @@ export interface Skill {
   desktop_package?: DesktopPackageInfo;
   /** Structured provenance when the skill was adopted from a trackable source. */
   origin?: SkillOrigin;
+  /** Notion sync status — present only when Notion is connected and configured. */
+  notion_status?: NotionStatus;
 }
 
 export interface FileNode {
@@ -245,7 +247,10 @@ export type ActivityKind =
   | "promote"
   | "demote"
   | "remove"
-  | "rename";
+  | "rename"
+  | "restore"
+  | "notion-link"
+  | "notion-check";
 
 /**
  * One entry in the in-memory activity ring buffer. Recorded by route
@@ -344,4 +349,55 @@ export interface DeletedSkill {
   name: string;
   deleted_at: string;
   versions: number;
+}
+
+// ── Phase 2: Notion connect + link ─────────────────────────────
+
+/** Per-skill Notion sync status (mirrors server/types/vault.ts NotionStatus). */
+export type NotionStatus =
+  | "synced"
+  | "changed-vault"
+  | "changed-notion"
+  | "conflict"
+  | "not-in-notion"
+  | "vault-only"
+  | "legacy"
+  | "unlinked"
+  | "unchecked"
+  | "missing-in-notion";
+
+/** GET /api/notion/status response. */
+export interface NotionStatusResponse {
+  connected: boolean;
+  data_source?: { id: string; name: string };
+  last_edited_property?: string | null;
+  linked_at?: string;
+  checked_at?: string;
+  missing_tools?: string[];
+}
+
+/** One candidate database returned by GET /api/notion/data-sources. */
+export interface NotionDataSourceCandidate {
+  id: string;
+  name: string;
+}
+
+/** GET/POST /api/notion/link job state. */
+export interface NotionLinkJob {
+  id: string;
+  done: number;
+  total: number;
+  current: string;
+  summary?: NotionLinkSummary;
+  error?: string;
+}
+
+export interface NotionLinkSummary {
+  linked_in_sync: string[];
+  conflicts: string[];
+  legacy: string[];
+  notion_only_compatible: Array<{ page_id: string; title: string }>;
+  notion_only_native: Array<{ page_id: string; title: string }>;
+  vault_only: string[];
+  errors: Array<{ skill: string; error: string }>;
 }

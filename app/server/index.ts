@@ -26,6 +26,7 @@ import { fixRouter } from "./routes/fix.ts";
 import { tagsRouter } from "./routes/tags.ts";
 import { desktopRouter } from "./routes/desktop.ts";
 import { openclawRouter } from "./routes/openclaw.ts";
+import { notionRouter } from "./routes/notion.ts";
 import {
   eventsRouter,
   broadcastSse,
@@ -42,6 +43,7 @@ import {
 } from "./services/watcher.ts";
 import { readAppConfig } from "./services/appConfig.ts";
 import { createHistoryRecorder, scanForUnrecordedChanges } from "./services/historyRecorder.ts";
+import { findFreePort } from "./services/freePort.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, "..");
@@ -162,6 +164,7 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
   app.use("/api/tags", tagsRouter());
   app.use("/api/desktop", desktopRouter());
   app.use("/api/openclaw", openclawRouter());
+  app.use("/api/notion", notionRouter());
   app.use("/api/activity", activityRouter());
   app.use("/api/events", eventsRouter());
 
@@ -195,13 +198,19 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
     // handle HMR, template transforms, etc. The client root lives in
     // `app/client/` (see vite.config.ts).
     const { createServer: createViteServer } = await import("vite");
+    // Vite's HMR websocket server defaults to a hardcoded port (24678).
+    // Running a second instance of this app on the same machine would
+    // otherwise collide on that port ("WebSocket server error: Port is
+    // already in use"), sending the client into an HMR reload loop.
+    // Probe for a free port up front and pin HMR to it instead.
+    const hmrPort = await findFreePort();
     const vite = await createViteServer({
       root: path.join(APP_ROOT, "client"),
       // allowedHosts: true disables the host-header check so the dev
       // server is reachable via LAN IP / hostname when --host 0.0.0.0
       // is used. Without this, Vite rejects non-localhost requests with
       // "Blocked request. This host is not allowed."
-      server: { middlewareMode: true, allowedHosts: true },
+      server: { middlewareMode: true, allowedHosts: true, hmr: { port: hmrPort } },
       appType: "spa",
     });
     app.use(vite.middlewares);
@@ -216,7 +225,11 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
       );
     }
     app.use(express.static(dist));
-    app.get("*", (_req, res) => {
+    // Express 5 (path-to-regexp v8) rejects a bare "*" string route
+    // ("Missing parameter name at index 1: *"), so match every non-API
+    // GET with a RegExp instead. Excluding /api keeps 404s from API
+    // routes from being swallowed by the index.html fallback.
+    app.get(/^(?!\/api\/).*/, (_req, res) => {
       res.sendFile(path.join(dist, "index.html"));
     });
   }

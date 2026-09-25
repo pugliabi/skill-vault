@@ -9,6 +9,9 @@ import type {
   DesktopPackageResult,
   FileContent,
   HistoryVersionSummary,
+  NotionDataSourceCandidate,
+  NotionLinkJob,
+  NotionStatusResponse,
   Provider,
   PullResult,
   PushResult,
@@ -358,4 +361,32 @@ export const api = {
   getHistoryConfig: () => request<{ max_versions: number }>("GET", "/api/history/_config"),
   setHistoryConfig: (max_versions: number) =>
     request<{ max_versions: number }>("PUT", "/api/history/_config", { max_versions }),
+
+  // ── notion (Phase 2: connect + link) ────────────────────────────
+  notionStatus: () => request<NotionStatusResponse>("GET", "/api/notion/status"),
+  notionConnect: () =>
+    request<{ status: "connected" } | { status: "redirect"; url: string }>(
+      "POST", "/api/notion/connect",
+    ),
+  notionDisconnect: () => request<{ ok: boolean }>("POST", "/api/notion/disconnect"),
+  notionDataSources: () =>
+    request<{ data_sources: NotionDataSourceCandidate[] }>("GET", "/api/notion/data-sources"),
+  notionSetDataSource: (body: { id: string; name: string; add_last_edited: boolean }) =>
+    request<{ ok: boolean; last_edited_property: string | null; warning?: string }>(
+      "POST", "/api/notion/data-source", body,
+    ),
+  notionCheck: () =>
+    request<{ checked_at: string; rows: number }>("POST", "/api/notion/check"),
+  notionStartLink: () => request<{ job_id: string }>("POST", "/api/notion/link"),
+  notionLinkJob: (id: string) =>
+    request<NotionLinkJob>("GET", `/api/notion/link/${encodeURIComponent(id)}`),
+  notionSummary: () =>
+    request<{
+      notion_only_compatible: Array<{ page_id: string; title: string }>;
+      notion_only_native: Array<{ page_id: string; title: string }>;
+    }>("GET", "/api/notion/summary"),
+  notionUnlink: (name: string) =>
+    request<{ ok: boolean }>("POST", `/api/notion/skills/${encodeURIComponent(name)}/unlink`),
+  notionVaultOnly: (name: string) =>
+    request<{ ok: boolean }>("POST", `/api/notion/skills/${encodeURIComponent(name)}/vault-only`),
 };

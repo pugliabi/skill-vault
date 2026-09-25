@@ -6,6 +6,7 @@ import { Layout } from "../components/Layout";
 import { Icon } from "../components/ui/icons";
 import { Button, ProviderChip, Rule } from "../components/ui/primitives";
 import ImportVaultDialog from "../components/ImportVaultDialog";
+import { NotionSection } from "../components/NotionSection";
 import type { AppConfig, Provider } from "../lib/types";
 
 /**
@@ -57,6 +58,10 @@ export default function Settings() {
         <div style={{ height: 22 }} />
 
         <HistorySection qc={qc} />
+
+        <div style={{ height: 22 }} />
+
+        <NotionSection qc={qc} />
 
         <div style={{ height: 22 }} />
 

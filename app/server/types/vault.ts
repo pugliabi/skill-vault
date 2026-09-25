@@ -47,6 +47,33 @@ export interface DesktopPackageInfo {
   content_hash: string;
 }
 
+/** Link between a vault skill and a native Notion Skill page. See docs/vault-format.md "SkillEntry.notion". */
+export interface NotionLink {
+  page_id: string;
+  state: "linked" | "legacy" | "unlinked" | "vault-only";
+  linked_at: string;
+  /** Set when both sides were known to be equivalent (first link or a completed sync). Absent = never synced (conflict). */
+  synced_at?: string;
+  /** Normalized hash of the vault copy at synced_at. */
+  vault_hash?: string;
+  /** Notion's version_id for the skill at synced_at (or at link time for conflicts). */
+  notion_version_id?: string;
+  /** Notion "Last edited" value at the same moment. */
+  notion_edited_at?: string;
+  base_vault_version?: string;
+  base_notion_version?: string;
+  /** Notion Skill name at link time (display only). */
+  notion_title?: string;
+}
+
+export type NotionStatus =
+  | "synced" | "changed-vault" | "changed-notion" | "conflict"
+  | "not-in-notion" | "vault-only" | "legacy" | "unlinked"
+  /** Linked + synced, but the Notion side has not been checked (no valid cache / no version). */
+  | "unchecked"
+  /** Linked + synced, but the page is no longer in the chosen Skills data source. */
+  | "missing-in-notion";
+
 /** One entry in the `skills` map in `skills.json`. */
 export interface ManifestSkill {
   /** Which providers this skill should be pushed to (e.g. "claude", "cursor"). */
@@ -61,6 +88,8 @@ export interface ManifestSkill {
   origin?: SkillOrigin;
   /** Last Claude Desktop packaging, if the skill was ever packaged. */
   desktop_package?: DesktopPackageInfo;
+  /** Link to a native Notion Skill page. */
+  notion?: NotionLink;
 }
 
 /** Top-level shape of `<vault>/skills.json`. */
@@ -123,6 +152,8 @@ export interface Skill {
   desktop_package?: DesktopPackageInfo;
   /** Structured provenance when the skill was adopted from a trackable source. */
   origin?: SkillOrigin;
+  /** Notion sync status when Notion is connected. */
+  notion_status?: NotionStatus;
 }
 
 /** A single node in the detail-view file tree. */
@@ -349,7 +380,9 @@ export type ActivityKind =
   | "demote"
   | "remove"
   | "rename"
-  | "restore";
+  | "restore"
+  | "notion-link"
+  | "notion-check";
 
 /**
  * One entry in the in-memory activity ring buffer. Recorded by route

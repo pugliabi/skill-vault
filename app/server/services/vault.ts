@@ -24,6 +24,8 @@ import type {
 } from "../types/vault.ts";
 import { hashSkillDirNormalized } from "./skillHash.ts";
 import { statusByTarget } from "./syncStatus.ts";
+import { computeNotionStatus } from "./notion/matching.ts";
+import { readNotionAuth, readNotionCache, readNotionSettings } from "./notion/store.ts";
 
 // ── Path helpers ────────────────────────────────────────────────
 
@@ -245,6 +247,18 @@ export function listSkills(vaultPath: string, providers: Provider[] = []): Skill
     : [];
   const names = new Set<string>([...Object.keys(manifest.skills), ...diskNames]);
 
+  // Notion status inputs are read once per call. Connected = signed in AND a
+  // Skills data source chosen; otherwise notion_status is omitted entirely.
+  // The cache only counts when a check produced it for the chosen data source.
+  const notionDataSource = readNotionSettings(vaultPath).data_source_id;
+  const notionConnected = !!readNotionAuth().tokens && !!notionDataSource;
+  const notionCache = notionConnected ? readNotionCache() : { rows: [] };
+  const notionCacheValid =
+    notionConnected && !!notionCache.checked_at && notionCache.data_source_id === notionDataSource;
+  const notionRows = notionCacheValid
+    ? new Map(notionCache.rows.map((r) => [r.page_id, r] as const))
+    : new Map();
+
   const out: Skill[] = [];
   for (const name of names) {
     const entry = manifest.skills[name] ?? { targets: [] };
@@ -275,12 +289,26 @@ export function listSkills(vaultPath: string, providers: Provider[] = []): Skill
         : Object.fromEntries(targets.map((t) => [t, "synced" as TargetStatus]));
     // Claude Desktop drift: only skills with a desktop_package record pay
     // for the normalized hash — never-packaged skills short-circuit.
+    // The normalized hash is computed at most once per skill, and only for
+    // skills that need it (packaged for Desktop, or linked + synced to Notion).
+    let hash: string | null | undefined;
+    const vaultHash = (): string | null =>
+      hash === undefined ? (hash = exists ? hashSkillDirNormalized(sp) : null) : hash;
     let desktopStatus: DesktopStatus = "not-packaged";
     if (entry.desktop_package) {
-      const vaultHash = exists ? hashSkillDirNormalized(sp) : null;
       desktopStatus =
-        vaultHash === entry.desktop_package.content_hash ? "current" : "outdated";
+        vaultHash() === entry.desktop_package.content_hash ? "current" : "outdated";
     }
+    const link = entry.notion;
+    const notionStatus = notionConnected
+      ? computeNotionStatus({
+          connected: true,
+          link,
+          vaultHash: link?.state === "linked" && link.synced_at ? vaultHash() : null,
+          cacheRow: link?.page_id ? notionRows.get(link.page_id) : undefined,
+          cacheValid: notionCacheValid,
+        })
+      : undefined;
     out.push({
       name,
       targets,
@@ -299,6 +327,7 @@ export function listSkills(vaultPath: string, providers: Provider[] = []): Skill
         ? { desktop_package: entry.desktop_package }
         : {}),
       ...(entry.origin ? { origin: entry.origin } : {}),
+      ...(notionStatus ? { notion_status: notionStatus } : {}),
     });
   }
   out.sort((a, b) => a.name.localeCompare(b.name));

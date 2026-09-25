@@ -1,4 +1,5 @@
 import type { SearchScope } from "./search";
+import type { NotionStatus } from "./types";
 
 export interface ActiveFilters {
   providers?: string[];
@@ -13,6 +14,8 @@ export interface ActiveFilters {
    * the rest match `target_status[target]` exactly.
    */
   targetState?: "configured" | "synced" | "stale" | "missing";
+  /** Filter to a single Notion sync status — only meaningful when Notion is connected. */
+  notion?: NotionStatus;
 }
 
 export type SkillsFilterPill =
