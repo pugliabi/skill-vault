@@ -54,7 +54,7 @@ const DEFAULTS: SkillsPreferences = {
   sortDir: "asc",
   filters: {},
   savedViews: [],
-  searchScope: "all",
+  searchScope: "name",
 };
 
 export function loadPrefs(): SkillsPreferences {
