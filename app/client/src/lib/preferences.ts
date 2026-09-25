@@ -1,3 +1,5 @@
+import type { SearchScope } from "./search";
+
 export interface ActiveFilters {
   providers?: string[];
   tags?: string[];
@@ -40,6 +42,8 @@ export interface SkillsPreferences {
   sortDir: "asc" | "desc";
   filters: ActiveFilters;
   savedViews: SavedView[];
+  /** Which fields the Skills search box matches against. */
+  searchScope: SearchScope;
 }
 
 const KEY = "sv-skills-prefs";
@@ -50,6 +54,7 @@ const DEFAULTS: SkillsPreferences = {
   sortDir: "asc",
   filters: {},
   savedViews: [],
+  searchScope: "all",
 };
 
 export function loadPrefs(): SkillsPreferences {

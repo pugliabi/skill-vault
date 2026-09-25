@@ -8,7 +8,6 @@ import { Icon } from "../components/ui/icons";
 import {
   Button,
   DesktopBadge,
-  KBD,
   ProviderChip,
   StatusBadge,
 } from "../components/ui/primitives";
@@ -27,6 +26,7 @@ import { UpdateDialog } from "../components/UpdateDialog";
 import { TagChips } from "../components/TagChips";
 import { loadPrefs, savePrefs, type SavedView, type SkillsPreferences } from "../lib/preferences";
 import type { Skill } from "../lib/types";
+import { matchesSearch, parseSearch, searchRank, SEARCH_SCOPES, type SearchScope } from "../lib/search";
 
 type Filter =
   | "all"
@@ -159,10 +159,18 @@ export default function Skills() {
     const t = setTimeout(() => setDebouncedQuery(query), 200);
     return () => clearTimeout(t);
   }, [query]);
+  const search = useMemo(
+    () => parseSearch(query, prefs.searchScope),
+    [query, prefs.searchScope],
+  );
+  const debouncedSearch = parseSearch(debouncedQuery, prefs.searchScope);
+  const needsFullText =
+    (debouncedSearch.scope === "all" || debouncedSearch.scope === "content") &&
+    debouncedSearch.term.length >= 2;
   const { data: searchData } = useQuery({
-    queryKey: ["skill-search", debouncedQuery],
-    queryFn: () => api.searchSkills(debouncedQuery),
-    enabled: debouncedQuery.trim().length >= 2,
+    queryKey: ["skill-search", debouncedSearch.term],
+    queryFn: () => api.searchSkills(debouncedSearch.term),
+    enabled: needsFullText,
     staleTime: 10000,
   });
   const fullTextNames = useMemo(
@@ -204,15 +212,8 @@ export default function Skills() {
       if (filter === "missing" && s.status !== "missing") return false;
       if (filter === "desktop-outdated" && s.desktop_status !== "outdated")
         return false;
-      if (query) {
-        const ql = query.toLowerCase();
-        const localMatch =
-          s.name.toLowerCase().includes(ql) ||
-          s.description.toLowerCase().includes(ql);
-        // fullTextNames comes from the (debounced) body search — union it so
-        // body-only hits still show without losing instant name/desc filtering.
-        if (!localMatch && !fullTextNames.has(s.name)) return false;
-      }
+      if (search.term && !matchesSearch(s, search.scope, search.term, fullTextNames))
+        return false;
       // Advanced filters
       if (activeFilters.providers && activeFilters.providers.length > 0) {
         if (!s.targets.some((t) => activeFilters.providers!.includes(t))) return false;
@@ -239,13 +240,18 @@ export default function Skills() {
       }
       return true;
     });
-  }, [skills, filter, query, activeFilters, providerIds, fullTextNames]);
+  }, [skills, filter, search, activeFilters, providerIds, fullTextNames]);
 
   // Sorting
   const sorted = useMemo(() => {
     const arr = [...filtered];
     const dir = prefs.sortDir === "asc" ? 1 : -1;
     arr.sort((a, b) => {
+      // While searching by name (or everything), the best name matches lead.
+      if (search.term && (search.scope === "all" || search.scope === "name")) {
+        const r = searchRank(a, search.term) - searchRank(b, search.term);
+        if (r !== 0) return r;
+      }
       switch (prefs.sortBy) {
         case "name":
           return dir * a.name.localeCompare(b.name);
@@ -262,7 +268,7 @@ export default function Skills() {
       }
     });
     return arr;
-  }, [filtered, prefs.sortBy, prefs.sortDir]);
+  }, [filtered, prefs.sortBy, prefs.sortDir, search]);
 
   // URL model
   const overlayName = params.name ? decodeURIComponent(params.name) : undefined;
@@ -703,7 +709,17 @@ export default function Skills() {
                   ref={searchRef}
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Filter skills…"
+                  placeholder={
+                    prefs.searchScope === "all"
+                      ? "Search skills…  ( / )"
+                      : `Search ${SEARCH_SCOPES.find((o) => o.id === prefs.searchScope)!.label.toLowerCase()}…  ( / )`
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      setQuery("");
+                      e.currentTarget.blur();
+                    }
+                  }}
                   style={{
                     flex: 1,
                     border: 0,
@@ -714,7 +730,54 @@ export default function Skills() {
                     color: "var(--ink)",
                   }}
                 />
-                <KBD>/</KBD>
+                {query && (
+                  <button
+                    onClick={() => {
+                      setQuery("");
+                      searchRef.current?.focus();
+                    }}
+                    title="Clear search"
+                    style={{
+                      border: 0,
+                      background: "transparent",
+                      color: "var(--ink-3)",
+                      padding: 0,
+                      cursor: "pointer",
+                      fontSize: 14,
+                      lineHeight: 1,
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
+                <select
+                  value={search.scope}
+                  onChange={(e) => {
+                    updatePrefs({ searchScope: e.target.value as SearchScope });
+                    // Picking a scope overrides any inline "name:" prefix.
+                    if (search.scope !== prefs.searchScope) setQuery(search.term);
+                  }}
+                  title="Search in…"
+                  aria-label="Search scope"
+                  style={{
+                    height: 22,
+                    padding: "0 4px",
+                    fontSize: 11.5,
+                    fontFamily: "var(--sans)",
+                    color: search.scope === "all" ? "var(--ink-3)" : "var(--accent)",
+                    background: "var(--surface-2, var(--surface))",
+                    border: "0.5px solid var(--border-2)",
+                    borderRadius: 4,
+                    cursor: "pointer",
+                    outline: 0,
+                  }}
+                >
+                  {SEARCH_SCOPES.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               {/* Filter pills */}
