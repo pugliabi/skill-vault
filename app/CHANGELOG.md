@@ -4,6 +4,19 @@ All notable changes to the Skill Vault App are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com); versions use semver
 (the app package is `0.x` — minor bumps carry user-facing feature batches).
 
+## [Unreleased]
+
+### Added
+- **Version history.** Every skill change — in-app edits, pulls, updates,
+  adopts, renames, deletes, and edits made outside the app — is now saved
+  to `.history/` in the vault. New **History** tab on a skill's detail page
+  shows the timeline with diff-against-current and one-click restore.
+  Deleted skills can be restored from history, bringing back their tags and
+  targets along with their files. The version cap (default 50 per skill) is
+  configurable from Settings.
+- Skills search gains a **scope selector** (`Name` is the default), so you
+  can widen a search to file contents when you need to.
+
 ## [0.2.0] — 2026-07-02
 
 A large feature batch centered on making skill→provider coverage visible and

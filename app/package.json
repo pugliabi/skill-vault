@@ -7,6 +7,7 @@
     "skill-vault-app": "./dist/launcher.js"
   },
   "scripts": {
+    "test": "node --import tsx --test \"server/**/*.test.ts\"",
     "dev": "tsx watch --clear-screen=false server/launcher.ts",
     "build:client": "vite build",
     "build:server": "esbuild server/launcher.ts server/index.ts --bundle --platform=node --target=node20 --format=esm --packages=external --outdir=dist",

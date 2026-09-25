@@ -325,3 +325,23 @@ export interface WriteFileRequest {
   content: string;
   expected_sha256: string;
 }
+
+// ── Phase 1 (Task 5/6): version history ────────────────────────
+
+export type HistorySide = "vault" | "notion";
+
+export interface HistoryVersionSummary {
+  id: string;
+  at: string;
+  side: HistorySide;
+  source: string;
+  note?: string;
+  normalized_hash: string | null;
+  file_count: number;
+}
+
+export interface DeletedSkill {
+  name: string;
+  deleted_at: string;
+  versions: number;
+}

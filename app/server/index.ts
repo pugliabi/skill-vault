@@ -14,6 +14,7 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { configRouter } from "./routes/config.ts";
 import { skillsRouter } from "./routes/skills.ts";
+import { historyRouter } from "./routes/history.ts";
 import { adoptRouter } from "./routes/adopt.ts";
 import { pushRouter } from "./routes/push.ts";
 import { pullRouter } from "./routes/pull.ts";
@@ -40,6 +41,7 @@ import {
   type VaultWatcher,
 } from "./services/watcher.ts";
 import { readAppConfig } from "./services/appConfig.ts";
+import { createHistoryRecorder, scanForUnrecordedChanges } from "./services/historyRecorder.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, "..");
@@ -75,10 +77,15 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
   //      the unsubscribe handle for the cleanup hook.
   //   4. Hang cleanup off app.locals so launcher.ts can call it on
   //      SIGINT/SIGTERM before server.close().
+  const historyRecorder = createHistoryRecorder({
+    getVaultPath: () => readAppConfig().vault_path,
+  });
+
   const attachWatcherListeners = (w: VaultWatcher): void => {
     w.on("skill_changed", (p) =>
       broadcastSse({ type: "skill_changed", name: p.name }),
     );
+    w.on("skill_changed", (p) => historyRecorder.onSkillChanged(p.name));
     w.on("provider_changed", (p) =>
       broadcastSse({
         type: "provider_changed",
@@ -101,6 +108,23 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
     setActiveWatcher(null);
   }
 
+  // Startup scan: catch skill edits/deletes made while the app was
+  // closed (e.g. an agent editing the vault directly, or git pull).
+  // Deferred with setImmediate so it never blocks server boot.
+  if (initialCfg.vault_path) {
+    const vp = initialCfg.vault_path;
+    setImmediate(() => {
+      try {
+        const r = scanForUnrecordedChanges(vp);
+        console.log(
+          `[history] startup scan: ${r.recorded} recorded, ${r.deleted} deletions, ${r.gc} objects collected`,
+        );
+      } catch (err) {
+        console.error("[history] startup scan failed:", err);
+      }
+    });
+  }
+
   const unsubActivity = subscribeActivity((entry) =>
     broadcastSse({ type: "activity", entry }),
   );
@@ -112,6 +136,7 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
   app.locals.cleanupLiveUpdates = async (): Promise<void> => {
     unsubActivity();
     closeAllSse();
+    historyRecorder.flush();
     const current = getActiveWatcher();
     if (current) {
       try {
@@ -125,6 +150,7 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
 
   app.use("/api/config", configRouter());
   app.use("/api/skills", skillsRouter());
+  app.use("/api/history", historyRouter());
   app.use("/api/adopt", adoptRouter());
   app.use("/api/push", pushRouter());
   app.use("/api/pull", pullRouter());

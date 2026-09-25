@@ -5,6 +5,7 @@ import { readAppConfig } from "../services/appConfig.ts";
 import { auditVault } from "../services/audit.ts";
 import { readManifest, writeManifest, upsertManifestSkill } from "../services/vault.ts";
 import { linkSkillDir } from "../services/linking.ts";
+import { recordVersion } from "../services/history.ts";
 
 export function fixRouter(): Router {
   const r = Router();
@@ -30,6 +31,17 @@ export function fixRouter(): Router {
 
     try {
       if (kind === "orphan_folder" && action === "remove_folder") {
+        // Keep the removed folder's content in history so it can be restored
+        // from the Deleted skills dialog. Only for folders directly under
+        // <vault>/skills (where the audit finds orphans).
+        const skillsRoot = path.resolve(config.vault_path, "skills");
+        if (path.dirname(path.resolve(target)) === skillsRoot) {
+          recordVersion(config.vault_path, path.basename(target), {
+            source: "delete",
+            always: true,
+            note: "orphan folder removed",
+          });
+        }
         fs.rmSync(target, { recursive: true, force: true });
       } else if (kind === "orphan_folder" && action === "add_to_manifest") {
         const name = path.basename(target);

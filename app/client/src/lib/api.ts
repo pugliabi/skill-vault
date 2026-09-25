@@ -4,9 +4,11 @@ import type {
   AppConfig,
   ApplyUpdatesResult,
   CreateSkillRequest,
+  DeletedSkill,
   DesktopBackfillResult,
   DesktopPackageResult,
   FileContent,
+  HistoryVersionSummary,
   Provider,
   PullResult,
   PushResult,
@@ -338,4 +340,22 @@ export const api = {
     request<{ ok: boolean; skill: string; output: string }>(
       "POST", "/api/openclaw/export", { skill, ...opts },
     ),
+
+  // ── history (Phase 1, Task 5/6) ────────────────────────────────
+  listHistory: (name: string) =>
+    request<{ versions: HistoryVersionSummary[] }>("GET", `/api/history/${encodeURIComponent(name)}`),
+  historyDiff: (name: string, id: string, against = "current") =>
+    request<SkillDiff>(
+      "GET",
+      `/api/history/${encodeURIComponent(name)}/${encodeURIComponent(id)}/diff?against=${encodeURIComponent(against)}`,
+    ),
+  restoreVersion: (name: string, id: string) =>
+    request<{ version: HistoryVersionSummary }>(
+      "POST",
+      `/api/history/${encodeURIComponent(name)}/${encodeURIComponent(id)}/restore`,
+    ),
+  listDeletedSkills: () => request<{ skills: DeletedSkill[] }>("GET", "/api/history/_deleted"),
+  getHistoryConfig: () => request<{ max_versions: number }>("GET", "/api/history/_config"),
+  setHistoryConfig: (max_versions: number) =>
+    request<{ max_versions: number }>("PUT", "/api/history/_config", { max_versions }),
 };

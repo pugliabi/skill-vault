@@ -24,6 +24,7 @@ import {
   upsertManifestSkill,
 } from "./vault.ts";
 import type { Provider } from "../types/vault.ts";
+import { withHistory } from "./history.ts";
 
 export interface PullResult {
   skill: string;
@@ -97,10 +98,12 @@ export function pullSkill(
   }
 
   // Replace vault contents (but only if the source is a regular dir).
-  if (fs.existsSync(vaultDir)) {
-    fs.rmSync(vaultDir, { recursive: true, force: true });
-  }
-  copyRecursive(sourceDir, vaultDir);
+  withHistory(vaultPath, skillName, "pull", () => {
+    if (fs.existsSync(vaultDir)) {
+      fs.rmSync(vaultDir, { recursive: true, force: true });
+    }
+    copyRecursive(sourceDir, vaultDir);
+  }, `pulled from ${provider.id}`);
 
   // Update manifest provenance, preserving everything else.
   const manifest = readManifest(vaultPath);

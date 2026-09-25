@@ -11,6 +11,7 @@ import { TargetsTab } from "./TargetsTab";
 import { PushDrawer } from "./PushDrawer";
 import { ExportOpenClawDialog } from "./ExportOpenClawDialog";
 import { TagChips } from "./TagChips";
+import { HistoryTab } from "./HistoryTab";
 import type { SkillDetail as SkillDetailT } from "../lib/types";
 
 const RENAME_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$/;
@@ -26,7 +27,7 @@ export function SkillDetailOverlay({
 }) {
   const qc = useQueryClient();
   const [, navigate] = useLocation();
-  const [tab, setTab] = useState<"overview" | "targets" | "files">("overview");
+  const [tab, setTab] = useState<"overview" | "targets" | "files" | "history">("overview");
   const [pushOpen, setPushOpen] = useState(false);
   const [openclawOpen, setOpenclawOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
@@ -339,7 +340,7 @@ export function SkillDetailOverlay({
 
           {/* Tabs row */}
           <div style={{ display: "flex", gap: 0, padding: "0 28px" }}>
-            {(["overview", "targets", "files"] as const).map((t) => (
+            {(["overview", "targets", "files", "history"] as const).map((t) => (
               <button
                 key={t}
                 onClick={() => { if (confirmDiscardIfDirty()) { setTab(t); if (t !== "files") setSelectedFile(null); } }}
@@ -359,7 +360,7 @@ export function SkillDetailOverlay({
             minHeight: 0,
             display: "flex",
             flexDirection: "column",
-            overflowY: tab === "files" ? "hidden" : "auto",
+            overflowY: tab === "files" || tab === "history" ? "hidden" : "auto",
           }}
         >
           {skill && tab === "overview" && (
@@ -445,6 +446,8 @@ export function SkillDetailOverlay({
               </div>
             </div>
           )}
+
+          {skill && tab === "history" && <HistoryTab skillName={skill.name} />}
         </div>
       </div>
 

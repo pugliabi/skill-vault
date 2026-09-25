@@ -243,7 +243,7 @@ export function DiffDrawer({
   );
 }
 
-function ChangeMark({ change }: { change: FileDiff["change"] }) {
+export function ChangeMark({ change }: { change: FileDiff["change"] }) {
   const meta = {
     added:    { label: "+", color: "var(--ok)" },
     removed:  { label: "−", color: "var(--bad)" },
@@ -270,7 +270,14 @@ function ChangeMark({ change }: { change: FileDiff["change"] }) {
   );
 }
 
-function DiffBody({ file }: { file: FileDiff }) {
+export function DiffBody({
+  file,
+  labels = { left: "vault", right: "provider" },
+}: {
+  file: FileDiff;
+  /** Wording for the two sides being compared — defaults to DiffDrawer's vault/provider. */
+  labels?: { left: string; right: string };
+}) {
   if (file.change === "added" || file.change === "removed") {
     return (
       <div style={{ padding: 22, fontSize: 13, color: "var(--ink-2)" }}>
@@ -285,7 +292,7 @@ function DiffBody({ file }: { file: FileDiff }) {
             fontWeight: 600,
           }}
         >
-          {file.change === "added" ? "Only in provider" : "Only in vault"}
+          {file.change === "added" ? `Only in ${labels.right}` : `Only in ${labels.left}`}
         </div>
         <p style={{ margin: 0 }}>
           <code style={{ fontFamily: "var(--mono)" }}>{file.path}</code>{" "}
@@ -298,14 +305,14 @@ function DiffBody({ file }: { file: FileDiff }) {
   if (file.reason === "binary") {
     return (
       <div style={{ padding: 22, fontSize: 13, color: "var(--ink-2)" }}>
-        Binary file differs. Vault: {file.vault_size} B · Provider: {file.target_size} B
+        Binary file differs. {capitalize(labels.left)}: {file.vault_size} B · {capitalize(labels.right)}: {file.target_size} B
       </div>
     );
   }
   if (file.reason === "too-large") {
     return (
       <div style={{ padding: 22, fontSize: 13, color: "var(--ink-2)" }}>
-        File too large to diff (vault: {file.vault_size} B · provider: {file.target_size} B).
+        File too large to diff ({labels.left}: {file.vault_size} B · {labels.right}: {file.target_size} B).
       </div>
     );
   }
@@ -334,7 +341,7 @@ function DiffBody({ file }: { file: FileDiff }) {
       >
         {file.path}{" "}
         <span style={{ color: "var(--ink-4)", fontWeight: 400 }}>
-          · vault {file.vault_size}B → provider {file.target_size}B
+          · {labels.left} {file.vault_size}B → {labels.right} {file.target_size}B
         </span>
       </div>
       <pre
@@ -388,4 +395,8 @@ function DiffBody({ file }: { file: FileDiff }) {
       </pre>
     </div>
   );
+}
+
+function capitalize(s: string): string {
+  return s.length ? s[0].toUpperCase() + s.slice(1) : s;
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, ApiError } from "../lib/api";
@@ -53,6 +53,10 @@ export default function Settings() {
         <div style={{ height: 22 }} />
 
         <DefaultsSection config={config} qc={qc} />
+
+        <div style={{ height: 22 }} />
+
+        <HistorySection qc={qc} />
 
         <div style={{ height: 22 }} />
 
@@ -736,6 +740,79 @@ function DefaultsSection({
               + Add
             </Button>
           ) : null}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ── Version history section ────────────────────────────────── */
+
+function HistorySection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
+  const { data } = useQuery({ queryKey: ["history-config"], queryFn: () => api.getHistoryConfig() });
+  const [value, setValue] = useState<string>("");
+
+  useEffect(() => {
+    if (data) setValue(String(data.max_versions));
+  }, [data]);
+
+  const save = useMutation({
+    mutationFn: () => api.setHistoryConfig(Number(value)),
+    onSuccess: () => {
+      toast.success("History limit saved");
+      qc.invalidateQueries({ queryKey: ["history-config"] });
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Save failed"),
+  });
+
+  return (
+    <>
+      <Rule label="Version history" />
+      <div
+        style={{
+          background: "var(--surface)",
+          border: "0.5px solid var(--border)",
+          borderRadius: 8,
+          padding: "14px 18px",
+          marginBottom: 12,
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+        }}
+      >
+        <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+          Versions kept per skill in the vault&apos;s{" "}
+          <code style={{ fontFamily: "var(--mono)" }}>.history/</code> folder. Older versions
+          are dropped first.
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="number"
+            min={1}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            aria-label="Versions kept per skill"
+            style={{
+              width: 80,
+              fontFamily: "var(--mono)",
+              fontSize: 12,
+              color: "var(--ink)",
+              background: "var(--bg)",
+              border: "0.5px solid var(--border-2)",
+              borderRadius: 5,
+              padding: "0 10px",
+              height: 30,
+              outline: 0,
+            }}
+          />
+          <Button
+            kind="primary"
+            size="sm"
+            onClick={() => save.mutate()}
+            disabled={save.isPending || !(Number.isInteger(Number(value)) && Number(value) >= 1)}
+          >
+            Save
+          </Button>
         </div>
       </div>
     </>

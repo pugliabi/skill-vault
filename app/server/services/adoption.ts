@@ -28,6 +28,7 @@ import {
   skillsDir,
   upsertManifestSkill,
 } from "./vault.ts";
+import { withHistory } from "./history.ts";
 
 /**
  * Scan a directory for skill folders.
@@ -433,9 +434,11 @@ export function importSkills(
         skipped.push(name);
         continue;
       }
-      fs.rmSync(dest, { recursive: true, force: true });
     }
-    copyRecursive(src, dest);
+    withHistory(vaultPath, name, "adopt", () => {
+      if (destExists) fs.rmSync(dest, { recursive: true, force: true });
+      copyRecursive(src, dest);
+    }, providerId ? `adopted from ${providerId}` : "adopted");
     const prior = priorEntries[name];
     upsertManifestSkill(vaultPath, name, {
       // Spread first: preserves tags and any unknown keys on overwrite.

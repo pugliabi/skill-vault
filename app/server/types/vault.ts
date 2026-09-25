@@ -348,7 +348,8 @@ export type ActivityKind =
   | "promote"
   | "demote"
   | "remove"
-  | "rename";
+  | "rename"
+  | "restore";
 
 /**
  * One entry in the in-memory activity ring buffer. Recorded by route

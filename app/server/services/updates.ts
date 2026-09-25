@@ -30,6 +30,7 @@ import type {
 import { copyRecursive } from "./adoption.ts";
 import { hashSkillDirNormalized } from "./skillHash.ts";
 import { patchManifestSkill, readManifest, skillDir } from "./vault.ts";
+import { withHistory } from "./history.ts";
 
 /** How one origin's source root got resolved for this request. */
 interface ResolvedSource {
@@ -294,8 +295,10 @@ export async function applyUpdates(
       }
 
       const dest = skillDir(vaultPath, item.name);
-      fs.rmSync(dest, { recursive: true, force: true });
-      copyRecursive(upstreamDir, dest);
+      withHistory(vaultPath, item.name, "update", () => {
+        fs.rmSync(dest, { recursive: true, force: true });
+        copyRecursive(upstreamDir, dest);
+      }, "updated from source");
 
       const newSubpath =
         sourceRoot && upstreamDir.startsWith(sourceRoot)

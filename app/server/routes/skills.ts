@@ -19,6 +19,22 @@ import {
   writeSkillFile,
 } from "../services/vault.ts";
 import { validateSkillName } from "../services/skillName.ts";
+import { withHistory, moveHistory, recordVersion } from "../services/history.ts";
+
+/**
+ * `:name` must be a plain path segment before it reaches the filesystem
+ * (same guard as routes/history.ts): non-empty, no "/", "\\", or "..".
+ * Without it DELETE /api/skills/%2E%2E would resolve to the vault root.
+ */
+export function isSafeNameSegment(name: unknown): name is string {
+  return (
+    typeof name === "string" &&
+    name.length > 0 &&
+    !name.includes("/") &&
+    !name.includes("\\") &&
+    !name.includes("..")
+  );
+}
 
 /**
  * Skills endpoints.
@@ -160,6 +176,12 @@ export function skillsRouter(): Router {
       throw err;
     }
 
+    try {
+      recordVersion(cfg.vault_path, name, { source: "vault-edit", note: "created" });
+    } catch (err) {
+      console.error(`[history] create ${name}: ${(err as Error).message}`);
+    }
+
     recordActivity({
       kind: "adopt",
       skill: name,
@@ -238,6 +260,10 @@ export function skillsRouter(): Router {
    * Activity: kind: "rename", message: "<old> → <new>".
    */
   router.post("/:name/rename", (req, res) => {
+    if (!isSafeNameSegment(req.params.name)) {
+      res.status(400).json({ error: "invalid skill name" });
+      return;
+    }
     const cfg = readAppConfig();
     if (!cfg.vault_path) {
       res.status(409).json({ error: "vault not configured" });
@@ -284,6 +310,12 @@ export function skillsRouter(): Router {
     });
 
     try {
+      recordVersion(cfg.vault_path, oldName, { source: "external-edit", note: "unrecorded prior state" });
+    } catch (err) {
+      console.error(`[history] pre-rename snapshot of ${oldName}: ${(err as Error).message}`);
+    }
+
+    try {
       renameSkill(cfg.vault_path, oldName, newName);
     } catch (err) {
       recordActivity({
@@ -293,6 +325,19 @@ export function skillsRouter(): Router {
         message: (err as Error).message,
       });
       throw err;
+    }
+
+    // The rename itself succeeded; a history bookkeeping failure must not
+    // turn that into a 500 (the client would think nothing happened).
+    try {
+      moveHistory(cfg.vault_path, oldName, newName);
+      recordVersion(cfg.vault_path, newName, {
+        source: "rename",
+        note: `renamed from ${oldName}`,
+        always: true,
+      });
+    } catch (err) {
+      console.error(`[history] rename ${oldName} -> ${newName}: ${(err as Error).message}`);
     }
 
     recordActivity({
@@ -409,7 +454,9 @@ export function skillsRouter(): Router {
       return;
     }
 
-    const result = writeSkillFile(abs, content, expected);
+    const result = withHistory(cfg.vault_path, req.params.name, "vault-edit", () =>
+      writeSkillFile(abs, content, expected),
+    );
     if (result === "not_found") {
       // Defensive — the existsSync above should have caught this, but if
       // a concurrent delete races between the check and the write, we
@@ -596,6 +643,10 @@ export function skillsRouter(): Router {
   });
 
   router.delete("/:name", (req, res) => {
+    if (!isSafeNameSegment(req.params.name)) {
+      res.status(400).json({ error: "invalid skill name" });
+      return;
+    }
     const cfg = readAppConfig();
     if (!cfg.vault_path) {
       res.status(409).json({ error: "vault not configured" });
@@ -603,7 +654,8 @@ export function skillsRouter(): Router {
     }
     // Idempotent (no-op) deletes still record both starting and outcome
     // so the user sees the click took effect; the message distinguishes.
-    const existed = !!readManifest(cfg.vault_path).skills[req.params.name];
+    const manifestEntry = readManifest(cfg.vault_path).skills[req.params.name];
+    const existed = !!manifestEntry;
     recordActivity({
       kind: "remove",
       skill: req.params.name,
@@ -611,6 +663,12 @@ export function skillsRouter(): Router {
       message: "starting",
     });
     try {
+      recordVersion(cfg.vault_path, req.params.name, {
+        source: "delete",
+        note: "final state before delete",
+        always: true,
+        manifest_entry: manifestEntry,
+      });
       removeSkill(cfg.vault_path, req.params.name);
       recordActivity({
         kind: "remove",
