@@ -68,7 +68,8 @@ did not originate (round-trip safe).
   "stage": "production",            // optional: "staging" | "production"
   "source": "adopted from claude",  // optional free-form provenance string
   "origin": { /* SkillOrigin */ },  // optional structured provenance
-  "desktop_package": { /* DesktopPackageInfo */ }  // optional last Claude Desktop packaging
+  "desktop_package": { /* DesktopPackageInfo */ },  // optional last Claude Desktop packaging
+  "notion": { /* NotionLink */ }    // optional link to a native Notion Skill page
 }
 ```
 
@@ -81,6 +82,7 @@ Field meanings:
 | `source` | `string` | Free-form provenance for display. Conventional prefixes: `"adopted from <x>"`, `"pulled from <x>"`, `"scanned from <x>"`, `"searched from <x>"`. |
 | `origin` | `SkillOrigin` | Structured provenance for update-from-source. Optional (additive, compatibility rule 1). |
 | `desktop_package` | `DesktopPackageInfo` | Record of the last Claude Desktop packaging. Optional (additive, compatibility rule 1). |
+| `notion` | `NotionLink` | Link between this skill and a Notion Skill page. Optional (additive, compatibility rule 1). |
 
 Readers MUST ignore unknown fields. Writers SHOULD preserve unknown fields
 when rewriting the manifest (round-trip safe).
@@ -158,6 +160,62 @@ account, "packaged" is used as a proxy for "uploaded".
 Readers MUST ignore unknown fields inside `desktop_package` and writers
 SHOULD preserve them (same round-trip rule as the entry itself).
 
+### `SkillEntry.notion` — Notion link
+
+Records a link between this vault skill and a page in a Notion "Skills"
+database, when the user has connected Notion (see `notion.json` below) and
+linked the skill. Entries without `notion` were never linked, or the link
+was explicitly cleared.
+
+```jsonc
+{
+  "page_id": "…",                         // Notion page id
+  "state": "linked",                      // "linked" | "legacy" | "unlinked" | "vault-only"
+  "linked_at": "2026-07-23T15:04:00Z",    // ISO 8601 UTC — when the link was created
+  "synced_at": "2026-07-23T15:10:00Z",    // ISO 8601 UTC — last moment both sides were known equivalent; ABSENT = never synced
+  "vault_hash": "<sha256>",               // normalized hash of the vault copy at synced_at
+  "notion_version_id": "…",               // Notion's version id for the skill at synced_at (or at link time for conflicts)
+  "notion_edited_at": "2026-07-23T15:09:00Z",  // Notion "Last edited" value at the same moment
+  "base_vault_version": "…",              // vault-side history version id used as the sync baseline
+  "base_notion_version": "…",             // notion-side history version id used as the sync baseline
+  "notion_title": "My Skill"              // Notion page title at link time — display only
+}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `page_id` | `string` | Id of the linked Notion page. Required. |
+| `state` | `"linked"` \| `"legacy"` \| `"unlinked"` \| `"vault-only"` | Link lifecycle. `linked` — an ordinary two-way link to a Notion-native page. `legacy` — the Notion page was detected as a converted copy of this vault skill (see the legacy-conversion rule below); content is not compared for sync purposes. `unlinked` — the user explicitly disconnected this skill from Notion; it is excluded from auto-matching until relinked. `vault-only` — the user marked this skill as intentionally not represented in Notion. |
+| `linked_at` | `string` | ISO 8601 UTC timestamp of when the link was created. Preserved across relinks to the same page. |
+| `synced_at` | `string` | ISO 8601 UTC timestamp of the last moment the vault copy and the Notion copy were known to be equivalent (first link if the content matched, or a completed sync). **Absent means the two sides have never been confirmed equivalent** — readers MUST treat this as a conflict, not as "unknown"/neutral. |
+| `vault_hash` | `string` | Normalized content hash (see "Content hash algorithm" below) of the vault copy at `synced_at`. Compared against the vault copy's current hash to detect vault-side drift. |
+| `notion_version_id` | `string` | Notion's version identifier for the page's content at `synced_at` (or at link time, for links recorded as a conflict). Compared against the latest known Notion version to detect Notion-side drift. |
+| `notion_edited_at` | `string` | Notion's "Last edited" timestamp captured at the same moment as `notion_version_id`. |
+| `base_vault_version` | `string` | Id of the vault-side `.history` version used as the common ancestor for the last sync, when available. |
+| `base_notion_version` | `string` | Id of the notion-side `.history` version used as the common ancestor for the last sync, when available. |
+| `notion_title` | `string` | The Notion page's title at link time, kept only for display. |
+
+**Legacy conversion.** A Notion page is treated as a `legacy` copy of a
+vault skill (rather than a Notion-native skill to sync against) when its
+title is a display variant of the vault skill's name (title differs from
+the vault name, but normalizing the title — lowercase, every run of
+non-`[a-z0-9]` characters collapsed to `-`, trimmed — equals the vault
+name) **and** it looks like a converted summary rather than the full
+skill: either the Notion page has no attached files while the vault copy
+has files beyond `SKILL.md`, or the Notion page's `SKILL.md` body contains
+the phrase "What Claude automates". Legacy links are excluded from
+content-drift comparison.
+
+**Notion-native pages** that have no vault match and whose title is not a
+valid skill-folder name (`^[a-z0-9]+(-[a-z0-9]+)*$`) are surfaced
+separately from ordinary "Notion-only" matches, since they cannot be
+represented as a vault skill folder as-is.
+
+Readers MUST ignore unknown fields inside `notion` and writers SHOULD
+preserve them (same round-trip rule as the entry itself). Any reader that
+rewrites a `SkillEntry` it does not otherwise understand MUST preserve an
+existing `notion` field unchanged.
+
 ### Content hash algorithm
 
 The "normalized content hash" used by `origin.content_hash`,
@@ -196,6 +254,35 @@ Derived fields are a convenience for UIs and MUST match what the
 filesystem currently says. They become stale if the skill directory is
 edited outside the tool — both tools are expected to recompute them on
 every read, not cache them in `skills.json`.
+
+## `notion.json` — Notion settings
+
+Optional file at `<vault>/notion.json`, shared vault-wide settings for the
+Notion connection. Committed with the vault like `skills.json`; it holds no
+credentials or per-machine state.
+
+```jsonc
+{
+  "data_source_id": "…",              // chosen Notion Skills data source
+  "data_source_name": "My Skills",    // display name for that data source
+  "last_edited_property": "Last edited",  // name of the last-edited-time property added to the data source, or null if declined/unavailable
+  "linked_at": "2026-07-23T15:04:00Z" // ISO 8601 UTC — last time a link/relink pass completed
+}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `data_source_id` | `string` | Id of the Notion data source (database) the user picked as their Skills source. Absent = not connected/configured. |
+| `data_source_name` | `string` | Display name of that data source, for the UI. |
+| `last_edited_property` | `string \| null` | Name of the last-edited-time property added to the data source so drift can be detected. `null` means the user declined adding it, or it wasn't available. |
+| `linked_at` | `string` | ISO 8601 UTC timestamp of the last completed link/relink pass. |
+
+Readers MUST ignore unknown fields and writers SHOULD preserve them
+(round-trip safe), same as the other top-level vault files.
+
+Notion sign-in (OAuth tokens) and the last-known Notion-side row cache are
+**per-machine** and live outside the vault entirely — they are never
+written to `<vault>/notion.json` or committed with the vault.
 
 ## `.sync-log.json` — push history
 
