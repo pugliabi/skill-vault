@@ -178,7 +178,8 @@ was explicitly cleared.
   "notion_edited_at": "2026-07-23T15:09:00Z",  // Notion "Last edited" value at the same moment
   "base_vault_version": "…",              // vault-side history version id used as the sync baseline
   "base_notion_version": "…",             // notion-side history version id used as the sync baseline
-  "notion_title": "My Skill"              // Notion page title at link time — display only
+  "notion_title": "My Skill",             // Notion page title at link time — display only
+  "vault_name": "my-skill"                // vault folder name at last link/sync — absent on older links
 }
 ```
 
@@ -194,6 +195,7 @@ was explicitly cleared.
 | `base_vault_version` | `string` | Id of the vault-side `.history` version used as the common ancestor for the last sync, when available. |
 | `base_notion_version` | `string` | Id of the notion-side `.history` version used as the common ancestor for the last sync, when available. |
 | `notion_title` | `string` | The Notion page's title at link time, kept only for display. |
+| `vault_name` | `string` | The vault skill folder's name as of the last link or sync. Used only to detect vault-side renames (comparing it against the folder's current name); absent on links created before this field existed, which simply never produce a rename detection until their next sync. |
 
 **Legacy conversion.** A Notion page is treated as a `legacy` copy of a
 vault skill (rather than a Notion-native skill to sync against) when its
@@ -423,7 +425,7 @@ assumed globally unique across vaults — treat them as opaque within one
 |---|---|---|
 | `id` | `string` | Opaque version id, `<base36 ms timestamp>-<6 hex chars>`. |
 | `at` | `string` | ISO 8601 UTC timestamp of the snapshot. |
-| `side` | `"vault"` \| `"notion"` | Which copy this version snapshots. Phase 1 only records `"vault"`. |
+| `side` | `"vault"` \| `"notion"` | Which copy this version snapshots. |
 | `source` | `string` | What triggered the snapshot; see the source list below. |
 | `note` | `string` | Optional free-form annotation (e.g. why a snapshot was taken). |
 | `files` | `Record<string,string>` | `/`-separated relative path → SHA-256 of that file's raw bytes at snapshot time. |
@@ -433,9 +435,39 @@ assumed globally unique across vaults — treat them as opaque within one
 Recognized `source` values: `vault-edit`, `external-edit`, `pull`,
 `push-notion-copy`, `notion-edit`, `claude-merge`, `force-push`,
 `force-pull`, `restore`, `rename`, `delete`, `adopt`, `update`,
-`legacy-snapshot`. Phase 1 of the app only emits `vault`-side sources;
-`notion`/`push-notion-copy`/`notion-edit`/`claude-merge` are reserved for a
-later phase that syncs against a Notion copy.
+`legacy-snapshot`.
+
+The Notion-sync sources record which side of a Notion link changed and why,
+so history stays a truthful record of both copies even though only the
+vault copy lives on disk:
+
+- **`push-notion-copy`** (`notion` side) — recorded right after an ordinary
+  push, from a fresh re-download of what Notion now holds. Confirms what
+  Notion actually stored (Notion may reformat content on write; see
+  `docs/notion-sync.md`).
+- **`notion-edit`** (`notion` side) — a snapshot of Notion's copy taken for
+  a reason other than "we just pushed it": before an about-to-happen force
+  push overwrites it, on every pull (before the merge/replace decision),
+  when a Notion-only page is adopted into the vault, during first-time
+  linking, or when the background Notion checker notices a linked page's
+  version changed (no vault write happens in that last case — it only
+  updates what "changed-notion" is compared against).
+- **`claude-merge`** (`vault` side) — a Conflicts-page resolution built from
+  a Claude-assisted merge, written to the vault immediately before it is
+  force-pushed back to Notion. (`vault-edit` is used instead when the
+  resolution is "keep my own hand-edited copy" rather than Claude's
+  output — it is not Notion-specific, but Conflicts reuses it as the other
+  resolution tag.)
+- **`force-push`** (`vault` side) — recorded at the start of a force push,
+  right after Notion's about-to-be-overwritten copy is captured as
+  `notion-edit`. Marks "this vault copy is the one that won."
+- **`force-pull`** (`vault` side) — the vault folder replacement written by
+  a force pull (Notion's copy overlaid onto the vault; vault-only
+  frontmatter fields are preserved). Used instead of `pull` specifically
+  because a force pull skips the 3-way merge.
+
+See `docs/notion-sync.md` for the full push/pull/merge/force user flows
+these sources come from.
 
 **Deduplication:** a new version is only appended when it differs from the
 most recent version on the *same* `side`. A state counts as identical when
