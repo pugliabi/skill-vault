@@ -28,6 +28,27 @@ First run shows a Setup page: pick a vault directory, then add your agent tools 
 
 The **Dashboard** is home base: skill and provider counts, synced / stale / missing status cards, a health bar per provider, and an *actions available* list. Each action row is a one-click fix — "1 skill drifted — re-push to update", "87 skills missing from a target — push to restore" — with the equivalent CLI command shown on the right.
 
+### Let the AI assistant fix things for you
+
+Press **Ctrl/⌘ + J** anywhere to open the built-in AI assistant — a docked chat
+pane powered by your local [Claude Code](https://claude.com/claude-code) CLI. It
+opens already knowing what needs attention: a **For you** list of ranked
+suggestion cards (broken update sources, available updates, failed operations,
+Notion drift, integrity issues…) computed from the app's own signals at zero AI
+cost and kept fresh by a background source sweep. Every card has a **✦ Fix with
+AI** button; every failure row and skill view has an **Ask AI** entry point.
+
+The chat routes to the right agent for the context — a vault-wide agent for bulk
+work, a per-skill agent when a skill is in focus — backed by specialist
+subagents (repo-hunter, update-fixer, notion-doctor, error-triager). The
+flagship trick: a skill whose upstream repo moved ("gone upstream") gets traced
+through git history and the web, its origin repaired, and the update applied,
+while you watch the tool timeline. Everything it does flows through the app's
+own API — audited in Activity, reversible via version history — and destructive
+operations are excluded from its toolset by design. There's a mic button for
+dictation, and a one-click **AI briefing** that turns the suggestion list into a
+prioritized plan. Full guide: [AI Assistant](docs/assistant.md).
+
 ### Find skills fast
 
 ![Skills list](docs/images/skills-list.jpg)
@@ -112,6 +133,7 @@ pyproject.toml      packaging for the CLI (installs `sv` and `skill-vault`)
 
 - [Getting Started](docs/getting-started.md) — full installation and setup guide
 - [Features & Use Cases](docs/features.md) — the app and CLI feature tour, with screenshots
+- [AI Assistant](docs/assistant.md) — the built-in chat agents, proactive suggestions, and voice input
 - [Configuration Reference](docs/configuration.md) — every setting: config.json, env vars, CLI flags
 - [Examples](docs/examples.md) — recipes for common workflows
 - [Troubleshooting](docs/troubleshooting.md) — common issues and fixes

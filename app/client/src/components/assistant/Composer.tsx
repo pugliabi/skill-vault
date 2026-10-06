@@ -1,5 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AgentKind, Phase } from "../../lib/assistantStore";
+import { speechSupported, startDictation, type Dictation } from "../../lib/speech";
 import { Icon } from "../ui/icons";
 import { Button } from "../ui/primitives";
 
@@ -7,6 +8,11 @@ import { Button } from "../ui/primitives";
  * Message composer: auto-growing textarea, Enter sends / Shift+Enter
  * newline, Stop replaces Send while a turn runs. The draft lives in the
  * store (pre-seeded by "Ask AI" entry points), not local state.
+ *
+ * Voice input: a mic button (Web Speech API — Chrome/Edge; hidden where
+ * unsupported) dictates into the draft. Final utterances append to the
+ * draft; the in-flight guess renders as a live hint under the box.
+ * Dictation stops on send, on toggle, and on unmount.
  */
 export function Composer({
   draft,
@@ -29,6 +35,47 @@ export function Composer({
 }) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
   const working = phase !== "idle";
+
+  // ── Voice input ─────────────────────────────────────────────
+  const [listening, setListening] = useState(false);
+  const [interim, setInterim] = useState("");
+  const dictationRef = useRef<Dictation | null>(null);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const canDictate = speechSupported();
+
+  const stopDictation = (): void => {
+    dictationRef.current?.stop();
+    dictationRef.current = null;
+  };
+
+  const toggleDictation = (): void => {
+    if (listening) {
+      stopDictation();
+      return;
+    }
+    const d = startDictation({
+      onFinal: (text) => {
+        const t = text.trim();
+        if (!t) return;
+        const cur = draftRef.current;
+        onDraft(cur ? `${cur.replace(/\s+$/, "")} ${t}` : t);
+      },
+      onInterim: setInterim,
+      onEnd: () => {
+        dictationRef.current = null;
+        setListening(false);
+        setInterim("");
+      },
+    });
+    if (d) {
+      dictationRef.current = d;
+      setListening(true);
+    }
+  };
+
+  // Never leave the mic hot after unmount (panel closed mid-dictation).
+  useEffect(() => stopDictation, []);
 
   // Auto-grow between 1 and 6 rows.
   useEffect(() => {
@@ -76,7 +123,10 @@ export function Composer({
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
-              if (!working && draft.trim()) onSend();
+              if (!working && draft.trim()) {
+                stopDictation();
+                onSend();
+              }
             }
           }}
           className="sv-scroll"
@@ -94,6 +144,28 @@ export function Composer({
             padding: 0,
           }}
         />
+        {canDictate && !disabled && (
+          <button
+            onClick={toggleDictation}
+            title={listening ? "Stop dictating" : "Dictate (voice to text)"}
+            style={{
+              width: 26,
+              height: 26,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+              border: listening ? "0.5px solid color-mix(in oklab, var(--bad) 45%, transparent)" : "0.5px solid transparent",
+              background: listening ? "color-mix(in oklab, var(--bad) 10%, transparent)" : "transparent",
+              borderRadius: 6,
+              color: listening ? "var(--bad)" : "var(--ink-3)",
+              cursor: "pointer",
+            }}
+            className={listening ? "sv-pulse" : undefined}
+          >
+            {Icon.mic}
+          </button>
+        )}
         {working ? (
           <Button kind="danger" size="sm" icon={Icon.stop} onClick={onStop} title="Stop this turn">
             Stop
@@ -103,7 +175,10 @@ export function Composer({
             kind="accent"
             size="sm"
             icon={Icon.send}
-            onClick={onSend}
+            onClick={() => {
+              stopDictation();
+              onSend();
+            }}
             disabled={disabled || !draft.trim()}
             title="Send (Enter)"
           />
@@ -117,9 +192,25 @@ export function Composer({
           color: "var(--ink-4)",
           display: "flex",
           justifyContent: "space-between",
+          gap: 10,
         }}
       >
-        <span>⏎ send · ⇧⏎ newline</span>
+        <span style={{ flexShrink: 0 }}>⏎ send · ⇧⏎ newline</span>
+        {listening && (
+          <span
+            style={{
+              flex: 1,
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              color: "var(--ink-3)",
+              textAlign: "right",
+            }}
+          >
+            {interim || "listening…"}
+          </span>
+        )}
         {working && (
           <span className="sv-dots" style={{ color: "var(--accent)" }}>
             <span /><span /><span />

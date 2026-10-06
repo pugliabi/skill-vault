@@ -319,7 +319,14 @@ export function SkillDetailOverlay({
                   />
                 </div>
 
-                <AskAIButton options={{ skill: skill.name }} />
+                {/* The overlay sits above the docked chat pane — close it
+                    first so the pre-seeded chat is actually visible. */}
+                <AskAIButton
+                  options={{ skill: skill.name }}
+                  onBeforeOpen={() => {
+                    if (confirmDiscardIfDirty()) onClose();
+                  }}
+                />
                 <Button kind="primary" size="sm" icon={Icon.push} onClick={() => setPushOpen(true)} disabled={!providers.length}>Push</Button>
                 <Button kind="default" size="sm" icon={Icon.pull} onClick={() => pullMut.mutate()} disabled={!firstTarget || pullMut.isPending}>
                   {pullMut.isPending ? "…" : "Pull"}

@@ -7,6 +7,11 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
 ## [Unreleased]
 
 ### Added
+- **Voice input in the assistant** — a mic button in the chat composer
+  dictates into the draft (browser Web Speech API; Chrome/Edge — hidden
+  where unsupported). Final phrases append to the draft, the in-flight
+  guess shows as a live hint, and dictation stops on send, toggle, or
+  closing the panel.
 - **Proactive suggestions ("For you")** — the assistant now knows what needs
   attention before you ask. A zero-AI-cost engine composes ranked cards from
   the app's own signals (broken/available updates, failed operations, Notion
@@ -41,7 +46,8 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
   **Ask AI** entry points: failing rows in Check-for-updates, sync errors
   and failure toasts, skill panels, Notion review/conflicts pages, the
   multi-select bar (selection as context) and the Skills toolbar (active
-  filters as context). Settings → AI assistant installs the bundled
+  filters as context); Ask AI from the skill detail popup closes the popup
+  so the chat is visible. Settings → AI assistant installs the bundled
   skills/agents into the vault for direct use from Claude Code.
 - **Upgrade legacy Notion pages** (Notion ▾ → Upgrade legacy pages (N), or
   click a skill's `legacy` badge): compare the full vault skill with the

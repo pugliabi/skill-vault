@@ -122,6 +122,24 @@ If the chosen port is busy, the launcher picks the next free one automatically.
 - **Where**: env / `.env`
 - **Default**: unset (dev). Set `production` only after `npm run build` to serve the bundled client from `dist/`.
 
+## Assistant state files (per machine)
+
+The AI assistant keeps its state in `~/.skill-vault/`, next to the config —
+never inside the vault, never committed:
+
+- `assistant-sessions.json` — chat history index so conversations survive app
+  restarts (the Claude Code CLI holds the full transcripts and resumes them).
+- `update-sweep.json` — the background source sweep's cached statuses + git
+  ahead/behind, feeding the "For you" suggestion cards. Ignored automatically
+  when `vault_path` changes.
+- `assistant-suggestions.json` — dismissed suggestion cards (a dismissal lasts
+  7 days or until the card's content changes).
+
+All three are safe to delete; they regenerate. The assistant also uses
+`repos_dir` (above) as the home for git clones it works with, and needs no
+configuration of its own beyond a signed-in `claude` CLI — see
+[assistant.md](./assistant.md).
+
 ## CLI flags worth knowing
 
 Run `sv <command> --help` for the full set per command. Frequently used:

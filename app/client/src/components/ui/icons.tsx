@@ -37,6 +37,12 @@ export const Icon: Record<string, ReactElement> = {
       <path d="M2.5 8a5.5 5.5 0 102.2-4.4M2.5 2.8v2.8h2.8" stroke={stroke} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
+  mic: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+      <rect x="6" y="1.5" width="4" height="8" rx="2" stroke={stroke} strokeWidth="1.4" />
+      <path d="M3.5 7.5a4.5 4.5 0 009 0M8 12v2.5M5.5 14.5h5" stroke={stroke} strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  ),
   bulb: (
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
       <path d="M8 1.5a4.5 4.5 0 00-2.5 8.2c.6.4 1 1 1 1.8h3c0-.8.4-1.4 1-1.8A4.5 4.5 0 008 1.5z" stroke={stroke} strokeWidth="1.3" strokeLinejoin="round" />

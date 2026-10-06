@@ -102,3 +102,11 @@ The app's **Devices** page shows the same snapshots with a visual compare. See [
 ## Providers — manage where skills go
 
 Providers are named directories skills can be pushed to — one per agent tool, plus any custom location (a project repo's skills folder, for example). Manage them in the app's Settings page (add/rename/remove with live path validation, "★ All providers" bulk add) or via `sv config`. Both tools read the same `agent_locations` map, so changes made in either are visible to both.
+
+## AI assistant — chat agents that fix the vault
+
+A docked chat pane on every page (sidebar button or Ctrl/⌘ + J), powered by the local Claude Code CLI. It routes to the right agent for the context — a **vault agent** for bulk work (update checks, push/sync, cross-skill error fixing) or a **skill agent** scoped to one skill — with specialist subagents (repo-hunter, update-fixer, notion-doctor, error-triager) it delegates to. Replies stream live over a compact tool timeline; every mutation goes through the app's own API, so it lands in Activity and version history like your own clicks, and destructive operations are excluded from its toolset entirely. A mic button dictates into the composer (Chrome/Edge). Full guide: [assistant.md](./assistant.md).
+
+## Proactive suggestions — the app tells you what needs attention
+
+The assistant's **For you** list ranks suggestion cards computed from the app's own signals at zero AI cost: broken update sources, available updates, failed operations, Notion conflicts and drift, stale/missing provider copies, integrity issues, name mismatches, and more. A background sweep re-checks every skill's source every 6 hours (and on demand) so the cards stay fresh. Each card deep-links to the right page and offers **Fix with AI**; dismissals persist until the card's content changes. The sidebar Assistant button carries a count of items that need action, and a one-click **AI briefing** turns the list into a prioritized plan.

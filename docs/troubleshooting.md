@@ -105,3 +105,26 @@ Or set the ANTHROPIC_API_KEY environment variable.
 **Cause**: Manual file operations in the vault outside the tools.
 
 **Solution**: `sv fix` audits and repairs manifest/disk drift. For a skill folder you added manually, `sv add <vault>/skills/<name>` registers it.
+
+## The AI assistant
+
+### Problem: The panel says "Assistant unavailable"
+
+The reason line tells you which prerequisite failed:
+- **claude.exe not found / claude --version failed** — install [Claude Code](https://claude.com/claude-code) and sign in (`claude` must work in a terminal). On Windows the real `claude.exe` must be resolvable, not just a shim; reinstalling the CLI normally fixes this.
+- **vault not configured** — finish the Setup page first.
+- **assistant plugin bundle missing** — the app's `assistant-plugin/` folder is gone; re-pull or reinstall the app.
+
+Use the Retry button after fixing; status is cached for 60 seconds.
+
+### Problem: A chat turn errors with "a turn is already running"
+
+One turn runs per chat (two app-wide) to bound spend. Wait for the running turn (pulsing dot on the sidebar button) or press Stop in that chat.
+
+### Problem: Suggestions say "sources not checked yet" or look stale
+
+The background sweep first runs ~45 seconds after the app starts and every 6 hours after, skipping while a Notion job or manual update check is running. Click **refresh** in the For-you footer to run it now. Update cards also drop out automatically once you've re-adopted or updated a skill after the sweep.
+
+### Problem: The mic button does nothing
+
+Grant microphone permission when the browser asks (check the address-bar permission icon if you dismissed it). Dictation needs Chrome or Edge; the button hides entirely on browsers without the Web Speech API.

@@ -37,3 +37,15 @@ The app binds `127.0.0.1` by default. Binding `0.0.0.0` makes the dashboard — 
 Use Rename in the app's skill detail — it cascades through the manifest and provider directories. Renaming a folder by hand leaves stale entries; run `sv fix` if you did.
 
 **License?** MIT — see [LICENSE](../LICENSE).
+
+**What does the AI assistant cost to run?**
+Chat turns run through your local Claude Code CLI on your existing Claude subscription — typically $0.05–0.70 per turn depending on tool use, shown after each reply. Everything else is free: the proactive **For you** suggestions, the background source sweep, and all badges are computed deterministically with no AI calls. The only AI spends are turns you start: messages, **Fix with AI** cards you send, and the **AI briefing** button.
+
+**Can the assistant break my vault?**
+It edits through the same audited API the UI uses, so every change appears in Activity and is restorable from version history. Deleting skills, force-overwriting Notion, arbitrary shell commands, and anything outside the vault/clones folders are excluded from its toolset by design — those remain manual, in the UI.
+
+**Why doesn't the mic button show in the assistant?**
+Voice input uses the browser's built-in speech recognition (Chrome and Edge ship it; Firefox doesn't). The button hides itself where the API is unavailable, and the first use asks for microphone permission.
+
+**Does the background sweep change my clones?**
+It runs the same `git pull --ff-only` a manual *Check updates* does on local clones, and nothing else — it never modifies the vault. Statuses are cached (survives restarts) and shown with their age; disable by simply not running the app, or re-check on demand with the refresh link.
