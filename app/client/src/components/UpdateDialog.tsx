@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, ApiError } from "../lib/api";
 import { Button } from "./ui/primitives";
+import { AskAIButton } from "./assistant/AskAIButton";
 import type { UpdateCheckResult } from "../lib/types";
 
 /**
@@ -108,6 +109,35 @@ export function UpdateDialog({
 
   const shortHash = (h?: string) => (h ? h.slice(0, 8) : "—");
 
+  /** "Ask AI to fix" — closes this dialog (it sits above the panel) and
+   * opens the assistant pre-seeded with the skill + the failed check. */
+  const askAiFor = (r: UpdateCheckResult) => (
+    <AskAIButton
+      label="Ask AI to fix"
+      onBeforeOpen={cleanupAndClose}
+      options={{
+        skill: r.name,
+        chips: [
+          {
+            kind: "failure",
+            id: `update:${r.name}`,
+            label: `failure: ${statusLabel(r.status)}`,
+            data: {
+              operation: "update-check",
+              status: r.status,
+              message: r.message,
+              origin: r.origin,
+              recorded_hash: r.recorded_hash,
+              vault_hash: r.vault_hash,
+              upstream_hash: r.upstream_hash,
+            },
+          },
+        ],
+        prompt: `This skill failed its update check (${statusLabel(r.status)}${r.message ? `: ${r.message}` : ""}). Diagnose it and fix it.`,
+      }}
+    />
+  );
+
   return (
     <div
       style={{
@@ -173,7 +203,7 @@ export function UpdateDialog({
                   tone="var(--warn)"
                 >
                   {conflicts.map((r) => (
-                    <Row key={r.name} r={r} checked={picked.has(r.name)} onToggle={toggle} shortHash={shortHash} warn />
+                    <Row key={r.name} r={r} checked={picked.has(r.name)} onToggle={toggle} shortHash={shortHash} warn action={askAiFor(r)} />
                   ))}
                 </Section>
               )}
@@ -200,6 +230,9 @@ export function UpdateDialog({
                       <span title={r.message} style={{ flex: 1, fontSize: 11, color: "var(--ink-4)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {r.message ?? ""}
                       </span>
+                      {(r.status === "upstream_missing" || r.status === "source_missing" || r.status === "error") && (
+                        <span style={{ flexShrink: 0, opacity: 1 }}>{askAiFor(r)}</span>
+                      )}
                     </div>
                   ))}
                 </Section>
@@ -270,12 +303,14 @@ function Row({
   onToggle,
   shortHash,
   warn = false,
+  action,
 }: {
   r: UpdateCheckResult;
   checked: boolean;
   onToggle: (name: string) => void;
   shortHash: (h?: string) => string;
   warn?: boolean;
+  action?: React.ReactNode;
 }) {
   const sourceLabel =
     r.origin?.type === "git"
@@ -319,6 +354,11 @@ function Row({
       >
         {r.message ?? sourceLabel}
       </span>
+      {action && (
+        <span style={{ flexShrink: 0 }} onClick={(e) => e.preventDefault()}>
+          {action}
+        </span>
+      )}
     </label>
   );
 }

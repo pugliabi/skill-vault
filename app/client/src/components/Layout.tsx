@@ -2,8 +2,10 @@ import { type ReactNode, useState } from "react";
 import { useLocation, Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import { NavIcon } from "./ui/icons";
+import { Icon, NavIcon } from "./ui/icons";
 import { ActivityDrawer } from "./ActivityDrawer";
+import { AssistantPanel } from "./assistant/AssistantPanel";
+import { toggleAssistant, useAssistantState, useAssistantWorking } from "../lib/assistantStore";
 import { THEME_LABELS, type ThemeName, useTheme } from "../lib/theme";
 
 /**
@@ -21,6 +23,8 @@ export function Layout({ children }: { children: ReactNode }) {
   const [location, navigate] = useLocation();
   const [theme, setTheme] = useTheme();
   const [activityOpen, setActivityOpen] = useState(false);
+  const assistantWorking = useAssistantWorking();
+  const assistantMode = useAssistantState().mode;
   const { data: config } = useQuery({
     queryKey: ["config"],
     queryFn: () => api.getConfig(),
@@ -223,6 +227,33 @@ export function Layout({ children }: { children: ReactNode }) {
           }}
         >
           <button
+            onClick={toggleAssistant}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "5px 8px",
+              border: "0.5px solid var(--border-2)",
+              background: assistantMode !== "closed" ? "var(--surface-2)" : "var(--bg)",
+              borderRadius: 6,
+              cursor: "pointer",
+              color: "var(--ink-2)",
+              fontSize: 12,
+              position: "relative",
+            }}
+            title="AI assistant (Ctrl+J)"
+          >
+            <span style={{ display: "inline-flex", color: "var(--accent)" }}>{Icon.sparkle}</span>
+            <span style={{ flex: 1, textAlign: "left" }}>Assistant</span>
+            {assistantWorking && (
+              <span
+                className="sv-pulse"
+                style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--accent)" }}
+              />
+            )}
+            <span style={{ fontFamily: "var(--mono)", fontSize: 9.5, color: "var(--ink-4)" }}>⌃J</span>
+          </button>
+          <button
             onClick={() => setActivityOpen(true)}
             style={{
               display: "flex",
@@ -273,9 +304,11 @@ export function Layout({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
-      <main className="sv-scroll" style={{ flex: 1, overflow: "auto" }}>
+      <main className="sv-scroll" style={{ flex: 1, overflow: "auto", minWidth: 0 }}>
         {children}
       </main>
+
+      <AssistantPanel />
 
       <ActivityDrawer open={activityOpen} onClose={() => setActivityOpen(false)} />
     </div>

@@ -1,0 +1,5 @@
+{
+  "name": "skill-vault-assistant",
+  "version": "1.0.0",
+  "description": "Agents and skills for the Skill Vault app's built-in AI assistant: vault-wide and per-skill lead agents, plus repo-hunter, update-fixer, notion-doctor, and error-triager specialists."
+}

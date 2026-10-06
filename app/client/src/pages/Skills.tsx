@@ -24,6 +24,7 @@ import { AutoTagDialog } from "../components/AutoTagDialog";
 import { HealthDialog } from "../components/HealthDialog";
 import { DeletedSkillsDialog } from "../components/DeletedSkillsDialog";
 import { UpdateDialog } from "../components/UpdateDialog";
+import { AskAIButton } from "../components/assistant/AskAIButton";
 import { Menu, NotionMenu, useBulkPushToNotion } from "../components/ToolbarMenus";
 import { TagChips } from "../components/TagChips";
 import { loadPrefs, savePrefs, type SavedView, type SkillsPreferences } from "../lib/preferences";
@@ -350,7 +351,8 @@ export default function Skills() {
 
       if (isInput) return;
 
-      if ((e.key === "j" || e.key === "k") && sorted.length > 0) {
+      // Plain j/k only — Ctrl/Cmd+J belongs to the assistant panel toggle.
+      if ((e.key === "j" || e.key === "k") && !e.ctrlKey && !e.metaKey && !e.altKey && sorted.length > 0) {
         e.preventDefault();
         const currentIdx = sorted.findIndex((s) => s.name === activeName);
         let nextIdx = currentIdx === -1 ? 0 : currentIdx;
@@ -1110,6 +1112,22 @@ export default function Skills() {
                 allTags={allTags}
                 filters={activeFilters}
                 onChange={setActiveFilters}
+              />
+
+              <AskAIButton
+                options={{
+                  chips:
+                    Object.keys(activeFilters).length > 0 || query
+                      ? [
+                          {
+                            kind: "filter",
+                            id: "skills-filters",
+                            label: "current filters",
+                            data: { ...activeFilters, ...(query ? { search: query } : {}) },
+                          },
+                        ]
+                      : [],
+                }}
               />
             </div>
           </div>

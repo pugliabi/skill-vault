@@ -8,6 +8,7 @@ import { GuardBanner } from "../components/GuardBanner";
 import { Button } from "../components/ui/primitives";
 import { ChangeMark, DiffBody } from "../components/DiffDrawer";
 import { useNotionRunJob } from "../lib/useNotionRunJob";
+import { AskAIButton } from "../components/assistant/AskAIButton";
 import type {
   NotionDeletedAction,
   NotionDirection,
@@ -240,6 +241,12 @@ export default function NotionReview({ direction }: { direction: NotionDirection
               : "Notion changes that would come into the vault. Nothing runs until you choose."}
             {plan?.checked_at && <> · checked {new Date(plan.checked_at).toLocaleTimeString()}</>}
           </span>
+          <AskAIButton
+            options={{
+              chips: [{ kind: "notion", id: `notion-${direction}`, label: `notion: ${direction} review` }],
+              prompt: `Walk me through this Notion ${direction} plan — what would each row do, and is anything risky?`,
+            }}
+          />
           <Button size="sm" onClick={reload} disabled={isFetching || running}>
             {isFetching ? "Checking…" : "Reload"}
           </Button>

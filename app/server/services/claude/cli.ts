@@ -361,6 +361,135 @@ export function createRunner(
 /** Default runner: spawns the real `claude` binary. Never used in tests. */
 export const defaultRunner: ClaudeRunner = createRunner(realSpawn, defaultKillTree);
 
+// ── Streaming runner (assistant chat turns) ──────────────────────────────
+
+export type ClaudeStreamRunner = (
+  args: string[],
+  stdin: string,
+  opts: {
+    cwd: string;
+    /** Reset on every stdout line — agentic turns legitimately idle between tool calls, not forever. */
+    idleTimeoutMs: number;
+    /** Absolute cap for one turn regardless of activity. */
+    hardTimeoutMs: number;
+    /** Aborting kills the whole process tree and rejects, like a timeout. */
+    signal?: AbortSignal;
+    /** Called once per complete stdout line (no trailing newline). */
+    onLine: (line: string) => void;
+  },
+) => Promise<{ code: number | null; stderr: string }>;
+
+/**
+ * Builds a `ClaudeStreamRunner` for `--output-format stream-json` calls:
+ * stdout is line-buffered (a chunk boundary can land mid-JSON-line, so the
+ * partial tail is carried over to the next chunk) and forwarded line-by-line
+ * via `onLine` instead of accumulated. Unlike `createRunner`'s single
+ * timeout, this uses an idle timeout reset on every line plus a hard cap —
+ * a healthy agentic turn streams events for minutes, but a wedged CLI stops
+ * producing lines. Timeout and abort both kill the whole process tree.
+ */
+export function createStreamRunner(
+  spawnFn: SpawnFn,
+  killTreeFn: KillTreeFn,
+  deps: { resolveExe?: () => string | null; platform?: NodeJS.Platform } = {},
+): ClaudeStreamRunner {
+  const resolveExe = deps.resolveExe ?? resolveClaudeExe;
+  const platform = deps.platform ?? process.platform;
+
+  return (args, stdin, opts) => {
+    return new Promise((resolve, reject) => {
+      if (opts.signal?.aborted) {
+        reject(new ClaudeError("claude CLI call aborted"));
+        return;
+      }
+      let invocation: SpawnInvocation;
+      try {
+        invocation = buildSpawnInvocation(args, opts.cwd, resolveExe, platform);
+      } catch (err) {
+        reject(err);
+        return;
+      }
+
+      const child = spawnFn(invocation.command, invocation.args, invocation.options);
+
+      let stderr = "";
+      let pending = ""; // partial stdout line carried across chunks
+      let settled = false;
+
+      const settleResolve = (value: { code: number | null; stderr: string }) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(idleTimer);
+        clearTimeout(hardTimer);
+        opts.signal?.removeEventListener("abort", onAbort);
+        resolve(value);
+      };
+      const settleReject = (err: Error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(idleTimer);
+        clearTimeout(hardTimer);
+        opts.signal?.removeEventListener("abort", onAbort);
+        reject(err);
+      };
+      const onAbort = () => {
+        if (settled) return;
+        killTreeFn(child);
+        settleReject(new ClaudeError("claude CLI call aborted"));
+      };
+      opts.signal?.addEventListener("abort", onAbort, { once: true });
+
+      let idleTimer = setTimeout(onIdle, opts.idleTimeoutMs);
+      function onIdle() {
+        killTreeFn(child);
+        settleReject(
+          new ClaudeError(`claude CLI produced no output for ${Math.round(opts.idleTimeoutMs / 1000)}s`),
+        );
+      }
+      const hardTimer = setTimeout(() => {
+        killTreeFn(child);
+        settleReject(new ClaudeError(`claude CLI exceeded the ${Math.round(opts.hardTimeoutMs / 1000)}s turn cap`));
+      }, opts.hardTimeoutMs);
+
+      const emitLines = (chunk: string) => {
+        pending += chunk;
+        let nl: number;
+        while ((nl = pending.indexOf("\n")) !== -1) {
+          const line = pending.slice(0, nl).replace(/\r$/, "");
+          pending = pending.slice(nl + 1);
+          if (line.length > 0 && !settled) opts.onLine(line);
+        }
+      };
+
+      child.stdout?.on("data", (d) => {
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(onIdle, opts.idleTimeoutMs);
+        emitLines(String(d));
+      });
+      child.stderr?.on("data", (d) => (stderr += String(d)));
+      child.on("error", (err) => settleReject(err));
+      child.on("close", (code) => {
+        // Flush a final unterminated line before resolving.
+        if (pending.length > 0 && !settled) {
+          const tail = pending.replace(/\r$/, "");
+          pending = "";
+          if (tail.length > 0) opts.onLine(tail);
+        }
+        settleResolve({ code, stderr });
+      });
+      child.stdin?.on?.("error", (err) => {
+        stderr += `${stderr ? "\n" : ""}[stdin] ${err.message}`;
+      });
+
+      child.stdin?.write(stdin);
+      child.stdin?.end();
+    });
+  };
+}
+
+/** Default stream runner: spawns the real `claude` binary. Never used in tests. */
+export const defaultStreamRunner: ClaudeStreamRunner = createStreamRunner(realSpawn, defaultKillTree);
+
 let availabilityCache: { at: number; value: { available: boolean; version?: string; reason?: string } } | null = null;
 const AVAILABILITY_CACHE_MS = 60_000;
 

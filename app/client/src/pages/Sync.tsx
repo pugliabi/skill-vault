@@ -12,6 +12,8 @@ import {
   useChecklistSelection,
 } from "../components/Checklist";
 import { DiffDrawer } from "../components/DiffDrawer";
+import { AskAIButton } from "../components/assistant/AskAIButton";
+import { openAssistant } from "../lib/assistantStore";
 import type { SyncPlan } from "../lib/types";
 
 type RowStatus = "idle" | "running" | "ok" | "error";
@@ -217,9 +219,24 @@ export default function Sync() {
     }
 
     setRunning(false);
+    const askAiAction = {
+      label: "Ask AI",
+      onClick: () =>
+        openAssistant({
+          chips: [
+            {
+              kind: "failure" as const,
+              id: "sync:summary",
+              label: `failure: sync (${fail} failed)`,
+              data: { operation: "sync", failed: fail, ok },
+            },
+          ],
+          prompt: `${fail} action(s) in my sync run just failed. Look at the recent errors, explain what went wrong, and fix what you safely can.`,
+        }),
+    };
     if (ok && !fail) toast.success(`Sync complete — ${ok} actions`);
-    else if (ok && fail) toast.warning(`${ok} ok, ${fail} failed`);
-    else if (fail) toast.error("Sync failed");
+    else if (ok && fail) toast.warning(`${ok} ok, ${fail} failed`, { action: askAiAction });
+    else if (fail) toast.error("Sync failed", { action: askAiAction });
 
     refetchAll();
   };
@@ -889,16 +906,32 @@ function PlanRow({
             <span style={{ color: "var(--ok)", fontSize: 13 }}>{Icon.check}</span>
           )}
           {st === "error" && (
-            <span
-              style={{
-                color: "var(--danger)",
-                fontSize: 12,
-                fontFamily: "var(--sans)",
-                fontWeight: 400,
-              }}
-            >
-              ✗ {rowState?.error}
-            </span>
+            <>
+              <span
+                style={{
+                  color: "var(--danger)",
+                  fontSize: 12,
+                  fontFamily: "var(--sans)",
+                  fontWeight: 400,
+                }}
+              >
+                ✗ {rowState?.error}
+              </span>
+              <AskAIButton
+                options={{
+                  skill: title,
+                  chips: [
+                    {
+                      kind: "failure",
+                      id: `sync:${kind}:${title}`,
+                      label: `failure: ${kind} failed`,
+                      data: { operation: kind, skill: title, error: rowState?.error },
+                    },
+                  ],
+                  prompt: `The ${kind} of "${title}" failed with: ${rowState?.error ?? "unknown error"}. Diagnose and fix it.`,
+                }}
+              />
+            </>
           )}
         </div>
         <div style={{ fontSize: 12, color: "var(--ink-3)" }}>{sub}</div>

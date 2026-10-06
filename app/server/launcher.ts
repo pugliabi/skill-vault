@@ -30,6 +30,7 @@ import net from "node:net";
 import open from "open";
 import { createApp } from "./index.ts";
 import { readCliAppBlock } from "./services/appConfig.ts";
+import { setServerPort } from "./services/runtime.ts";
 
 // ── CLI argument parsing ───────────────────────────────────────
 
@@ -173,6 +174,8 @@ async function main(): Promise<void> {
       port ||
       (server.address() as { port: number } | null)?.port ||
       preferredPort;
+    // The assistant's MCP bridge needs the *bound* port, not the preferred one.
+    setServerPort(effective);
     const displayHost =
       host === "0.0.0.0" || host === "::" ? "localhost" : host;
     const url = `http://${displayHost}:${effective}`;

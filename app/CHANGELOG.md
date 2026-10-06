@@ -7,6 +7,26 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
 ## [Unreleased]
 
 ### Added
+- **AI assistant** — a docked, collapsible chat pane available on every page
+  (sidebar button or Ctrl/Cmd+J). Context-routed agents, not one generalist:
+  a **vault agent** for app-wide work (bulk update checks, push/sync, finding
+  and fixing errors) and a **skill agent** when a specific skill is in focus,
+  backed by specialist subagents (repo-hunter, update-fixer, notion-doctor,
+  error-triager) and bundled skills (vault-operations, vault-format,
+  finding-skill-origins, syncing-from-github, connecting-notion). Runs on the
+  local `claude` CLI with streaming responses, a compact tool-activity
+  timeline, per-turn cost, multi-session history with resume (survives app
+  restarts), and Stop. The agent acts through the app's own API via an MCP
+  bridge, so every change lands in the activity feed and version history;
+  skill deletion and Notion force-overwrite are excluded from its toolset.
+  It can research the web and git history to repair broken update sources
+  (`gone upstream`) end-to-end: locate the moved skill, rewrite its origin
+  (new `PATCH /api/skills/:name/origin`), verify, and apply the update.
+  **Ask AI** entry points: failing rows in Check-for-updates, sync errors
+  and failure toasts, skill panels, Notion review/conflicts pages, the
+  multi-select bar (selection as context) and the Skills toolbar (active
+  filters as context). Settings → AI assistant installs the bundled
+  skills/agents into the vault for direct use from Claude Code.
 - **Upgrade legacy Notion pages** (Notion ▾ → Upgrade legacy pages (N), or
   click a skill's `legacy` badge): compare the full vault skill with the
   Notion summary page, then replace the summary with the full skill in the

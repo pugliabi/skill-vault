@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "./ui/icons";
 import { Button } from "./ui/primitives";
+import { AskAIButton } from "./assistant/AskAIButton";
 import type { Skill } from "../lib/types";
 
 /**
@@ -154,6 +155,19 @@ export function BulkActionBar({
         allTags={allTags}
         onApply={onApplyTags}
         disabled={count === 0}
+      />
+      <AskAIButton
+        kind="default"
+        options={{
+          chips: [
+            {
+              kind: "skills",
+              id: "selection",
+              label: `${count} selected skill${count === 1 ? "" : "s"}`,
+              data: { skills: selectedSkills.map((s) => s.name) },
+            },
+          ],
+        }}
       />
       <Button
         kind="default"

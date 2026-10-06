@@ -3,6 +3,45 @@ import type { ReactElement } from "react";
 const stroke = "currentColor";
 
 export const Icon: Record<string, ReactElement> = {
+  sparkle: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+      <path d="M8 1.5l1.5 4.2L14 7.5l-4.5 1.8L8 13.5 6.5 9.3 2 7.5l4.5-1.8L8 1.5z" stroke={stroke} strokeWidth="1.4" strokeLinejoin="round" />
+      <path d="M12.8 11.4l.5 1.3 1.3.5-1.3.5-.5 1.3-.5-1.3-1.3-.5 1.3-.5.5-1.3z" fill={stroke} />
+    </svg>
+  ),
+  stop: (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+      <rect x="2.5" y="2.5" width="7" height="7" rx="1.2" stroke={stroke} strokeWidth="1.5" />
+    </svg>
+  ),
+  send: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+      <path d="M8 13V3M4.5 6.5L8 3l3.5 3.5" stroke={stroke} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+  terminal: (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+      <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" stroke={stroke} strokeWidth="1.3" />
+      <path d="M4.5 6l2.5 2-2.5 2M8.5 10.5h3" stroke={stroke} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+  globe: (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+      <circle cx="8" cy="8" r="6" stroke={stroke} strokeWidth="1.3" />
+      <path d="M2 8h12M8 2c-1.8 1.7-2.7 3.8-2.7 6S6.2 12.3 8 14c1.8-1.7 2.7-3.8 2.7-6S9.8 3.7 8 2z" stroke={stroke} strokeWidth="1.2" />
+    </svg>
+  ),
+  history: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+      <path d="M8 4.5V8l2.5 1.5" stroke={stroke} strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M2.5 8a5.5 5.5 0 102.2-4.4M2.5 2.8v2.8h2.8" stroke={stroke} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+  wrench: (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+      <path d="M9.5 2.5a4 4 0 00-4.9 5L2 10.1a1.5 1.5 0 002.1 2.1l2.6-2.6a4 4 0 005-4.9L9.5 7 9 7l-.1-.5 2.2-2.2-1.6-1.8z" stroke={stroke} strokeWidth="1.3" strokeLinejoin="round" />
+    </svg>
+  ),
   search: (
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
       <circle cx="7" cy="7" r="5" stroke={stroke} strokeWidth="1.5" />

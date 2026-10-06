@@ -8,6 +8,7 @@ import {
   claudeAvailable,
   createKillTree,
   createRunner,
+  createStreamRunner,
   parseClaudeCmdShim,
   resetClaudeAvailableCache,
   runClaudeJson,
@@ -451,4 +452,101 @@ test("runClaudeJson appends --model only when asked and forwards the abort signa
   assert.equal(seenSignal, ac.signal);
   await runClaudeJson("p", "s", {}, runner);
   assert.ok(!calls[1].includes("--model"));
+});
+
+// ── createStreamRunner ───────────────────────────────────────────────────
+
+test("createStreamRunner reassembles lines across chunk boundaries, strips CR, and flushes the tail on close", async () => {
+  const child = makeFakeChild(501);
+  const lines: string[] = [];
+  const runner = createStreamRunner(() => child, () => {}, { resolveExe: () => "C:\fake\claude.exe", platform: "win32" });
+  const promise = runner(["-p"], "hi", {
+    cwd: "C:\tmp",
+    idleTimeoutMs: 5000,
+    hardTimeoutMs: 10_000,
+    onLine: (l) => lines.push(l),
+  });
+
+  child.stdout.emit("data", '{"a":');
+  child.stdout.emit("data", '1}\r\n{"b":2}\n{"c"');
+  child.stdout.emit("data", ":3}"); // no trailing newline — must still be delivered on close
+  child.emit("close", 0);
+
+  const result = await promise;
+  assert.deepEqual(lines, ['{"a":1}', '{"b":2}', '{"c":3}']);
+  assert.equal(result.code, 0);
+  assert.equal(child.writtenStdin, "hi");
+});
+
+test("createStreamRunner skips blank lines and never calls onLine after settle", async () => {
+  const child = makeFakeChild(502);
+  const lines: string[] = [];
+  const killCalls: ChildProcessLike[] = [];
+  const runner = createStreamRunner(() => child, (c) => killCalls.push(c), {
+    resolveExe: () => "C:\fake\claude.exe",
+    platform: "win32",
+  });
+  const ac = new AbortController();
+  const promise = runner(["-p"], "", {
+    cwd: "C:\tmp",
+    idleTimeoutMs: 5000,
+    hardTimeoutMs: 10_000,
+    signal: ac.signal,
+    onLine: (l) => lines.push(l),
+  });
+
+  child.stdout.emit("data", "one\n\n\r\n");
+  ac.abort();
+  child.stdout.emit("data", "late\n");
+  await assert.rejects(promise, /aborted/);
+  assert.deepEqual(lines, ["one"]);
+  assert.deepEqual(killCalls, [child]);
+  assert.doesNotThrow(() => child.emit("close", null));
+});
+
+test("createStreamRunner rejects via the idle timeout when the CLI goes quiet", async () => {
+  const child = makeFakeChild(503);
+  const killCalls: ChildProcessLike[] = [];
+  const runner = createStreamRunner(() => child, (c) => killCalls.push(c), {
+    resolveExe: () => "C:\fake\claude.exe",
+    platform: "win32",
+  });
+  const promise = runner(["-p"], "", {
+    cwd: "C:\tmp",
+    idleTimeoutMs: 20,
+    hardTimeoutMs: 60_000,
+    onLine: () => {},
+  });
+  await assert.rejects(promise, (err) => {
+    assert.ok(err instanceof ClaudeError);
+    assert.match(err.message, /no output for/);
+    return true;
+  });
+  assert.deepEqual(killCalls, [child]);
+});
+
+test("createStreamRunner enforces the hard cap even while lines keep flowing", async () => {
+  const child = makeFakeChild(504);
+  const killCalls: ChildProcessLike[] = [];
+  const runner = createStreamRunner(() => child, (c) => killCalls.push(c), {
+    resolveExe: () => "C:\fake\claude.exe",
+    platform: "win32",
+  });
+  const promise = runner(["-p"], "", {
+    cwd: "C:\tmp",
+    idleTimeoutMs: 60_000,
+    hardTimeoutMs: 30,
+    onLine: () => {},
+  });
+  const feeder = setInterval(() => child.stdout.emit("data", "tick\n"), 5);
+  try {
+    await assert.rejects(promise, (err) => {
+      assert.ok(err instanceof ClaudeError);
+      assert.match(err.message, /turn cap/);
+      return true;
+    });
+  } finally {
+    clearInterval(feeder);
+  }
+  assert.deepEqual(killCalls, [child]);
 });

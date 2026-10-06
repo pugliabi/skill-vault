@@ -7,6 +7,7 @@ import { Icon } from "../components/ui/icons";
 import { Button, ProviderChip, Rule } from "../components/ui/primitives";
 import ImportVaultDialog from "../components/ImportVaultDialog";
 import { NotionSection } from "../components/NotionSection";
+import { assistantApi } from "../lib/assistant";
 import type { AppConfig, Provider } from "../lib/types";
 
 /**
@@ -94,6 +95,8 @@ export default function Settings() {
           </div>
         </div>
         {importOpen && <ImportVaultDialog onClose={() => setImportOpen(false)} />}
+
+        <AssistantSection />
 
         <Rule label="App" />
         <div
@@ -1284,5 +1287,74 @@ function TagRow({
         </Button>
       </div>
     </div>
+  );
+}
+
+/* ── AI assistant ───────────────────────────────────────────────── */
+
+/**
+ * Install the assistant's bundled skills (vault-operations, vault-format,
+ * finding-skill-origins, syncing-from-github, connecting-notion) into the
+ * vault as ordinary skills — usable from Claude Code directly — and the
+ * assistant's agent definitions into ~/.claude/agents.
+ */
+function AssistantSection() {
+  const qc = useQueryClient();
+  const { data } = useQuery({
+    queryKey: ["assistant-installable"],
+    queryFn: () => assistantApi.installable(),
+  });
+  const [withAgents, setWithAgents] = useState(true);
+  const install = useMutation({
+    mutationFn: () => assistantApi.installSkills({ agents: withAgents }),
+    onSuccess: (r) => {
+      const parts: string[] = [];
+      if (r.installed_skills.length) parts.push(`${r.installed_skills.length} skill(s) installed`);
+      if (r.installed_agents.length) parts.push(`${r.installed_agents.length} agent(s) installed`);
+      if (r.skipped_skills.length) parts.push(`${r.skipped_skills.length} already present`);
+      toast.success(parts.join(" · ") || "Nothing to install");
+      qc.invalidateQueries({ queryKey: ["skills"] });
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Install failed"),
+  });
+
+  return (
+    <>
+      <Rule label="AI assistant" />
+      <div
+        style={{
+          background: "var(--surface)",
+          border: "0.5px solid var(--border)",
+          borderRadius: 8,
+          padding: "14px 18px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+          fontSize: 13,
+          color: "var(--ink-2)",
+          marginBottom: 18,
+        }}
+      >
+        <p style={{ margin: 0 }}>
+          Install the assistant's skills ({(data?.skills ?? []).join(", ") || "…"}) into the vault as
+          regular skills, so they're pushable to providers and usable from Claude Code directly.
+        </p>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={withAgents}
+            onChange={(e) => setWithAgents(e.target.checked)}
+            style={{ accentColor: "var(--accent)" }}
+          />
+          Also install the agent definitions (vault-manager, skill-agent, repo-hunter, update-fixer,
+          notion-doctor, error-triager) into the claude provider's <code style={{ fontFamily: "var(--mono)" }}>agents/</code> folder
+        </label>
+        <div>
+          <Button onClick={() => install.mutate()} disabled={install.isPending}>
+            {install.isPending ? "Installing…" : "Install assistant skills"}
+          </Button>
+        </div>
+      </div>
+    </>
   );
 }

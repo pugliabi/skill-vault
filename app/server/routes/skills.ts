@@ -19,6 +19,7 @@ import {
 import { validateSkillName } from "../services/skillName.ts";
 import { withHistory, recordVersion } from "../services/history.ts";
 import { SkillOpError, deleteVaultSkill, renameVaultSkill } from "../services/skillLifecycle.ts";
+import { OriginError, originBodyTooLarge, setSkillOrigin, type OriginInput } from "../services/origin.ts";
 import { fixSkillName, listNameMismatches } from "../services/skillNames.ts";
 import type { ProviderOutcome } from "../services/providerLinks.ts";
 
@@ -43,6 +44,7 @@ export function isSafeNameSegment(name: unknown): name is string {
  *   GET    /api/skills           — list (drift-checked against providers)
  *   GET    /api/skills/:name     — single skill + file tree + per-target status
  *   PATCH  /api/skills/:name     — partial manifest update (stage, targets, source)
+ *   PATCH  /api/skills/:name/origin — rewrite update-from-source provenance (+ optional verify)
  *   DELETE /api/skills/:name     — remove from manifest AND filesystem
  *   GET    /api/skills/name-mismatches      — folders whose SKILL.md `name` differs
  *   POST   /api/skills/:name/fix-name {use: "name"|"folder"} — make the two agree
@@ -556,6 +558,44 @@ export function skillsRouter(opts: { isBusy?: () => boolean } = {}): Router {
     }
     const detail = getSkillDetail(cfg.vault_path, req.params.name, cfg.providers);
     res.json(detail);
+  });
+
+  // Rewrite a skill's structured origin (update-from-source provenance).
+  // Body: { origin: {type, url?, path?, provider_id?, subpath?, ref?}, verify?: boolean }
+  // `adopted_at`/`content_hash` are stamped server-side, never accepted from
+  // the caller. With verify:true the response includes a fresh update check
+  // for the skill so a repair confirms itself in one round-trip.
+  router.patch("/:name/origin", async (req, res) => {
+    const cfg = readAppConfig();
+    if (!cfg.vault_path) {
+      res.status(409).json({ error: "vault not configured" });
+      return;
+    }
+    if (!isSafeNameSegment(req.params.name)) {
+      res.status(400).json({ error: "invalid skill name" });
+      return;
+    }
+    const body = (req.body ?? {}) as { origin?: OriginInput; verify?: boolean };
+    if (!body.origin || typeof body.origin !== "object") {
+      res.status(400).json({ error: "body must include an origin object" });
+      return;
+    }
+    if (originBodyTooLarge(body)) {
+      res.status(413).json({ error: "origin payload too large" });
+      return;
+    }
+    try {
+      const result = await setSkillOrigin(cfg.vault_path, req.params.name, body.origin, {
+        verify: body.verify === true,
+      });
+      res.json({ entry: result.entry, ...(result.check ? { check: result.check } : {}) });
+    } catch (err) {
+      if (err instanceof OriginError) {
+        res.status(err.status).json({ error: err.message });
+        return;
+      }
+      throw err;
+    }
   });
 
   router.post("/zip", async (req, res) => {

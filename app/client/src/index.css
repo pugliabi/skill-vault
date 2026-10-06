@@ -100,6 +100,50 @@
 }
 .sv-pulse { animation: svPulse 2s ease-in-out infinite; }
 
+/* ── Assistant panel ───────────────────────────────────────────── */
+
+/* Docked right pane slide-in */
+.sv-slide-in-right {
+  animation: svSlideInRight 180ms ease-out;
+}
+@keyframes svSlideInRight {
+  from { opacity: 0; transform: translateX(14px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* Running-tool spinner glyph */
+.sv-spin { animation: svSpin 0.9s linear infinite; transform-origin: center; }
+@keyframes svSpin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* "Working…" three-dot indicator */
+.sv-dots span {
+  display: inline-block;
+  width: 4px; height: 4px; border-radius: 50%;
+  background: currentColor;
+  margin-right: 3px;
+  animation: svDots 1.2s ease-in-out infinite;
+}
+.sv-dots span:nth-child(2) { animation-delay: 0.15s; }
+.sv-dots span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes svDots {
+  0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
+  30%           { opacity: 1; transform: translateY(-2px); }
+}
+
+/* Chat-density markdown (the base .sv-markdown sizes suit the file preview) */
+.sv-markdown--chat { font-size: 13px; }
+.sv-markdown--chat h1 { font-size: 16px; }
+.sv-markdown--chat h2 { font-size: 14.5px; }
+.sv-markdown--chat h3,
+.sv-markdown--chat h4 { font-size: 13.5px; }
+.sv-markdown--chat p, .sv-markdown--chat ul, .sv-markdown--chat ol { font-size: 13px; }
+.sv-markdown--chat pre { font-size: 11.5px; }
+.sv-markdown--chat code { font-size: 11.5px; }
+.sv-markdown--chat table { font-size: 12px; }
+
 /* ── Markdown rendered preview (Phase 2) ─────────────────────────── */
 
 .sv-markdown {

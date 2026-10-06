@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { api, ApiError } from "../lib/api";
 import { Icon } from "./ui/icons";
 import { Button, DesktopBadge, StatusBadge } from "./ui/primitives";
+import { AskAIButton } from "./assistant/AskAIButton";
 import { timeAgo } from "../lib/status";
 import { FilePreviewPane } from "./FilePreviewPane";
 import { TargetsTab } from "./TargetsTab";
@@ -318,6 +319,7 @@ export function SkillDetailOverlay({
                   />
                 </div>
 
+                <AskAIButton options={{ skill: skill.name }} />
                 <Button kind="primary" size="sm" icon={Icon.push} onClick={() => setPushOpen(true)} disabled={!providers.length}>Push</Button>
                 <Button kind="default" size="sm" icon={Icon.pull} onClick={() => pullMut.mutate()} disabled={!firstTarget || pullMut.isPending}>
                   {pullMut.isPending ? "…" : "Pull"}

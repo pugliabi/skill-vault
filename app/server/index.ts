@@ -33,6 +33,8 @@ import {
   closeAllSse,
 } from "./routes/events.ts";
 import { activityRouter } from "./routes/activity.ts";
+import { assistantRouter } from "./routes/assistant.ts";
+import { abortAllTurns } from "./services/assistant/session.ts";
 import { subscribeActivity } from "./services/activity.ts";
 import {
   createVaultWatcher,
@@ -146,6 +148,7 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
   // a final FIN. The "active" watcher may have been swapped by
   // rebuildWatcher(), so close whichever one is currently registered.
   app.locals.cleanupLiveUpdates = async (): Promise<void> => {
+    abortAllTurns(); // kill any in-flight assistant CLI processes
     unsubActivity();
     closeAllSse();
     historyRecorder.flush();
@@ -178,6 +181,7 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
   app.use("/api/notion", notionRouter());
   app.use("/api/claude", claudeRouter());
   app.use("/api/activity", activityRouter());
+  app.use("/api/assistant", assistantRouter({ mode: opts.mode, appRoot: APP_ROOT }));
   app.use("/api/events", eventsRouter());
 
   // JSON error handler for API routes — anything the route handlers

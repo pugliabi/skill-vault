@@ -7,6 +7,7 @@ import { Layout } from "../components/Layout";
 import { Button } from "../components/ui/primitives";
 import { ChangeMark, DiffBody } from "../components/DiffDrawer";
 import { ClaudeMergePanel } from "../components/ClaudeMergePanel";
+import { AskAIButton } from "../components/assistant/AskAIButton";
 import type { ConflictResolveBody, MergeResult, NotionConflict, NotionConflictItem } from "../lib/types";
 
 /**
@@ -88,9 +89,15 @@ export default function NotionConflicts() {
           <h1 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: "var(--ink)", letterSpacing: "-0.01em" }}>
             Notion conflicts
           </h1>
-          <span style={{ fontSize: 12, color: "var(--ink-3)" }}>
+          <span style={{ fontSize: 12, color: "var(--ink-3)", flex: 1 }}>
             Skills edited in both the vault and Notion since the last sync.
           </span>
+          <AskAIButton
+            options={{
+              chips: [{ kind: "notion", id: "notion-conflicts", label: "notion: conflicts" }],
+              prompt: "Help me understand my Notion conflicts — what diverged on each side, and what's the safest way to resolve each one?",
+            }}
+          />
         </div>
 
         {isLoading ? (

@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { api, ApiError } from "../lib/api";
 import { Icon } from "./ui/icons";
 import { Button, DesktopBadge, StatusBadge } from "./ui/primitives";
+import { AskAIButton } from "./assistant/AskAIButton";
 import { timeAgo } from "../lib/status";
 import { FilePreviewPane } from "./FilePreviewPane";
 import { TargetsTab } from "./TargetsTab";
@@ -273,6 +274,9 @@ export function SkillSidePanel({
               </div>
             )}
           </div>
+          <span style={{ marginLeft: "auto" }}>
+            <AskAIButton options={{ skill: skill.name }} />
+          </span>
         </div>
 
         {/* Name + rename */}

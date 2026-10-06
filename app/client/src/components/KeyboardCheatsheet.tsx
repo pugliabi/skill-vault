@@ -11,6 +11,7 @@ const SHORTCUTS: Array<{ keys: string[]; label: string }> = [
   { keys: ["j"], label: "Next skill" },
   { keys: ["k"], label: "Previous skill" },
   { keys: ["⌘", "K"], label: "Command palette / jump to skill" },
+  { keys: ["⌘", "J"], label: "Toggle the AI assistant" },
   { keys: ["Esc"], label: "Close dialog / clear selection" },
   { keys: ["?"], label: "Toggle this help" },
 ];

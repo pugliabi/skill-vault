@@ -10,7 +10,7 @@
     "test": "node --import tsx --test \"server/**/*.test.ts\"",
     "dev": "tsx watch --clear-screen=false server/launcher.ts",
     "build:client": "vite build",
-    "build:server": "esbuild server/launcher.ts server/index.ts --bundle --platform=node --target=node20 --format=esm --packages=external --outdir=dist",
+    "build:server": "esbuild server/launcher.ts server/index.ts --bundle --platform=node --target=node20 --format=esm --packages=external --outdir=dist && esbuild server/assistant-mcp/main.ts --bundle --platform=node --target=node20 --format=esm --packages=external --outfile=dist/assistant-mcp.js",
     "build": "npm run build:client && npm run build:server",
     "start": "node dist/launcher.js",
     "typecheck": "tsc --noEmit"
@@ -39,7 +39,8 @@
     "sonner": "^1.5.0",
     "tailwind-merge": "^2.5.4",
     "tar": "^7.5.22",
-    "wouter": "^3.3.5"
+    "wouter": "^3.3.5",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.8",
