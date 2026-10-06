@@ -23,6 +23,7 @@ import { AgentChip, ContextChips } from "./ContextChips";
 import { Composer } from "./Composer";
 import { MessageThread } from "./MessageThread";
 import { SessionList } from "./SessionList";
+import { SuggestionCards } from "./SuggestionCards";
 
 /**
  * The assistant pane — DOCKED, not modal: it sits as a flex sibling of the
@@ -36,6 +37,13 @@ import { SessionList } from "./SessionList";
 export function AssistantPanel() {
   const state = useAssistantState();
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [forYouOpen, setForYouOpen] = useState(false);
+  const suggestions = useQuery({
+    queryKey: ["assistant-suggestions"],
+    queryFn: () => assistantApi.suggestions(),
+    staleTime: 60_000,
+  });
+  const actionCount = suggestions.data?.cards.filter((c) => c.severity === "action").length ?? 0;
   const panelRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
@@ -216,7 +224,38 @@ export function AssistantPanel() {
         <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)", flexShrink: 0 }}>Assistant</span>
         <AgentChip agent={state.agent} skill={state.skill} />
         <span style={{ flex: 1 }} />
-        <HeaderIconButton title="Chat history" onClick={() => setHistoryOpen((v) => !v)}>
+        {frozen && (
+          <span style={{ position: "relative", display: "inline-flex" }}>
+            <HeaderIconButton title="Suggestions (For you)" onClick={() => { setHistoryOpen(false); setForYouOpen((v) => !v); }}>
+              {Icon.bulb}
+            </HeaderIconButton>
+            {actionCount > 0 && (
+              <span
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  right: 0,
+                  minWidth: 13,
+                  height: 13,
+                  padding: "0 3px",
+                  borderRadius: 7,
+                  background: "var(--bad)",
+                  color: "#fff",
+                  fontFamily: "var(--mono)",
+                  fontSize: 8.5,
+                  fontWeight: 700,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  pointerEvents: "none",
+                }}
+              >
+                {actionCount}
+              </span>
+            )}
+          </span>
+        )}
+        <HeaderIconButton title="Chat history" onClick={() => { setForYouOpen(false); setHistoryOpen((v) => !v); }}>
           {Icon.history}
         </HeaderIconButton>
         <HeaderIconButton title="New chat" onClick={() => { setHistoryOpen(false); newChat(); }}>
@@ -228,6 +267,28 @@ export function AssistantPanel() {
         <HeaderIconButton title="Close (⌘J)" onClick={closeAssistant}>
           {Icon.x}
         </HeaderIconButton>
+
+        {forYouOpen && (
+          <div
+            className="sv-fade-in sv-scroll"
+            style={{
+              position: "absolute",
+              top: 40,
+              right: 12,
+              width: 340,
+              maxHeight: 420,
+              overflowY: "auto",
+              background: "var(--surface)",
+              border: "0.5px solid var(--border-2)",
+              borderRadius: 8,
+              boxShadow: "0 10px 32px oklch(0.1 0.01 60 / 0.22)",
+              zIndex: 20,
+              padding: 10,
+            }}
+          >
+            <SuggestionCards compact onAfterAction={() => setForYouOpen(false)} />
+          </div>
+        )}
 
         {historyOpen && (
           <SessionList
@@ -303,6 +364,7 @@ export function AssistantPanel() {
           loading={state.loadingSession}
           onSuggestion={(text) => sendMessage(text)}
           onRetry={retryLastMessage}
+          suggestionsSlot={state.agent === "vault" ? <SuggestionCards /> : undefined}
         />
       )}
 

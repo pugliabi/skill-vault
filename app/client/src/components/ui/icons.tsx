@@ -37,6 +37,12 @@ export const Icon: Record<string, ReactElement> = {
       <path d="M2.5 8a5.5 5.5 0 102.2-4.4M2.5 2.8v2.8h2.8" stroke={stroke} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
+  bulb: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+      <path d="M8 1.5a4.5 4.5 0 00-2.5 8.2c.6.4 1 1 1 1.8h3c0-.8.4-1.4 1-1.8A4.5 4.5 0 008 1.5z" stroke={stroke} strokeWidth="1.3" strokeLinejoin="round" />
+      <path d="M6.5 13.5h3M7 15h2" stroke={stroke} strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  ),
   wrench: (
     <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
       <path d="M9.5 2.5a4 4 0 00-4.9 5L2 10.1a1.5 1.5 0 002.1 2.1l2.6-2.6a4 4 0 005-4.9L9.5 7 9 7l-.1-.5 2.2-2.2-1.6-1.8z" stroke={stroke} strokeWidth="1.3" strokeLinejoin="round" />

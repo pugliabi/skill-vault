@@ -144,6 +144,7 @@ export function MessageThread({
   loading,
   onSuggestion,
   onRetry,
+  suggestionsSlot,
 }: {
   items: ChatItem[];
   phase: Phase;
@@ -152,6 +153,8 @@ export function MessageThread({
   loading: boolean;
   onSuggestion: (text: string) => void;
   onRetry: () => void;
+  /** Proactive "For you" cards, rendered above the canned prompts in the empty state. */
+  suggestionsSlot?: React.ReactNode;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [pinned, setPinned] = useState(true); // stick to bottom until the user scrolls up
@@ -180,7 +183,11 @@ export function MessageThread({
 
   if (items.length === 0) {
     return (
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", padding: "0 22px", gap: 14 }}>
+      <div
+        className="sv-scroll"
+        style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: suggestionsSlot ? "flex-start" : "center", padding: suggestionsSlot ? "16px 22px" : "0 22px", gap: 14, overflowY: "auto", minHeight: 0 }}
+      >
+        {suggestionsSlot}
         <div style={{ textAlign: "center", color: "var(--ink-4)", display: "flex", justifyContent: "center" }}>
           <span style={{ transform: "scale(1.6)", display: "inline-flex" }}>{Icon.sparkle}</span>
         </div>

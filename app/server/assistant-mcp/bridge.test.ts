@@ -124,6 +124,11 @@ test("every tool hits its documented endpoint with the right method and body", a
       args: {},
       expect: [{ method: "GET", path: "/api/config" }],
     },
+    {
+      tool: "get_suggestions",
+      args: {},
+      expect: [{ method: "GET", path: "/api/assistant/suggestions" }],
+    },
   ];
 
   for (const row of table) {

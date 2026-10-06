@@ -41,7 +41,8 @@ const clients = new Set<Response>();
 type SsePayload =
   | { type: "skill_changed"; name: string }
   | { type: "provider_changed"; provider_id: string; skill?: string }
-  | { type: "activity"; entry: ActivityEntry };
+  | { type: "activity"; entry: ActivityEntry }
+  | { type: "suggestions_changed" };
 
 function writeSse(res: Response, eventName: string, data: unknown): void {
   try {
@@ -66,6 +67,8 @@ export function broadcastSse(payload: SsePayload): void {
       writeSse(res, "provider_changed", data);
     } else if (payload.type === "activity") {
       writeSse(res, "activity", payload.entry);
+    } else if (payload.type === "suggestions_changed") {
+      writeSse(res, "suggestions_changed", {});
     }
   }
 }

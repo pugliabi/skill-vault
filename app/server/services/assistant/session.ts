@@ -22,7 +22,7 @@ import type { AssistantStreamEvent } from "./streamEvents.ts";
 export type AgentKind = "vault" | "skill";
 
 export interface ChatContextChip {
-  kind: "skill" | "skills" | "filter" | "failure" | "notion" | "page";
+  kind: "skill" | "skills" | "filter" | "failure" | "notion" | "page" | "suggestion";
   id: string;
   label: string;
   data?: Record<string, unknown>;

@@ -116,6 +116,12 @@ export function openEventStream(queryClient: QueryClient): OpenedStream {
     }
   });
 
+  source.addEventListener("suggestions_changed", () => {
+    // Background sweep finished or a dismissal happened in another tab —
+    // the panel's "For you" list and the sidebar badge re-fetch.
+    queryClient.invalidateQueries({ queryKey: ["assistant-suggestions"] });
+  });
+
   source.onerror = (err) => {
     // EventSource auto-reconnects; flip readiness off until the next
     // 'open' event so UI gates re-engage.

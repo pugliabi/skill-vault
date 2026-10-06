@@ -414,7 +414,8 @@ export interface ActivityEntry {
 export type SseEvent =
   | { type: "skill_changed"; name: string }
   | { type: "provider_changed"; provider_id: string; skill?: string }
-  | { type: "activity"; entry: ActivityEntry };
+  | { type: "activity"; entry: ActivityEntry }
+  | { type: "suggestions_changed" };
 
 // ── Phase 2: create / edit / rename payloads ───────────────────
 

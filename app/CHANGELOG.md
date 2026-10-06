@@ -7,6 +7,22 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
 ## [Unreleased]
 
 ### Added
+- **Proactive suggestions ("For you")** — the assistant now knows what needs
+  attention before you ask. A zero-AI-cost engine composes ranked cards from
+  the app's own signals (broken/available updates, failed operations, Notion
+  conflicts and drift, stale/missing provider copies, audit findings, name
+  mismatches, origin-less skills, outdated Desktop packages, lingering
+  staging, untagged), kept fresh by a background update sweep (boot + every
+  6 h, yields to foreground checks, cleans its temp clones, cache survives
+  restarts). Cards appear in the assistant's empty state and a header
+  lightbulb popover, with severity tints, "Fix with AI" (pre-seeds the chat),
+  deep links, and dismiss (7 days or until the card's content changes —
+  stored server-side so the sidebar badge, panel, and agents agree). The
+  sidebar Assistant button shows an action-count badge; a one-click **AI
+  briefing** turns the current cards into a prioritized plan. Agents see the
+  same cards via the new `get_suggestions` vault tool, and `checkUpdates`
+  gained a `pull` option. Strictly suggest-only: the background sweep never
+  changes the vault.
 - **AI assistant** — a docked, collapsible chat pane available on every page
   (sidebar button or Ctrl/Cmd+J). Context-routed agents, not one generalist:
   a **vault agent** for app-wide work (bulk update checks, push/sync, finding

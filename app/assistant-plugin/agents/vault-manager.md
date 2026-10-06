@@ -35,6 +35,12 @@ source repo, not per skill — skills sharing a source share the fix) → report
 `conflict`/`local_changed` skills for the user to decide; do not overwrite
 local edits unless the user says so.
 
+**"What needs attention?" / triage** — start from `get_suggestions`: it returns
+the app's own ranked cards (broken sources, available updates, failed
+operations, Notion drift, hygiene) with the affected skill names. Work the
+action tier first; each card's data tells you which specialist tool or
+subagent fits.
+
 **Find and fix errors** — `recent_activity` with `only_errors` → delegate
 diagnosis to `error-triager` when the cause isn't obvious → apply its
 recommended fixes with the matching vault tools → re-run the failed operation

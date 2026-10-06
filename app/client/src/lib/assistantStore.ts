@@ -22,6 +22,8 @@ import {
   type AssistantChip,
   type AssistantStreamEvent,
   type StoredTurn,
+  type SuggestionAction,
+  type SuggestionCard,
 } from "./assistant";
 import { ApiError } from "./api";
 
@@ -466,6 +468,47 @@ export function stopTurn(): void {
   const id = state.sessionId;
   abortController?.abort(); // drops the stream; the server kills the CLI tree
   if (id) void assistantApi.stop(id).catch(() => {}); // belt and braces
+}
+
+// ── Proactive suggestions ────────────────────────────────────────
+
+/** Wire a suggestion card's ask-ai action into the chat: fresh context,
+ * prompt pre-filled (NEVER auto-sent — the user reviews first). */
+export function applySuggestionAction(card: SuggestionCard, action: Extract<SuggestionAction, { type: "ask-ai" }>): void {
+  const singleSkill = card.skills?.length === 1 ? card.skills[0] : undefined;
+  openAssistant({
+    ...(singleSkill ? { skill: singleSkill } : {}),
+    chips: [
+      {
+        kind: "suggestion",
+        id: `suggestion:${card.id}`,
+        label: card.title.length > 60 ? `${card.title.slice(0, 59)}…` : card.title,
+        data: { kind: card.kind, count: card.count, skills: card.skills, detail: card.detail },
+      },
+      ...(action.chips ?? []),
+    ],
+    prompt: action.prompt,
+    newSession: true,
+  });
+}
+
+/** The AI briefing: an explicit button click IS the ask — new chat, sent
+ * immediately with the current cards embedded. */
+export function startBriefing(cards: SuggestionCard[]): void {
+  const lite = cards.map((c) => ({
+    kind: c.kind,
+    severity: c.severity,
+    title: c.title,
+    count: c.count,
+    ...(c.detail ? { detail: c.detail } : {}),
+    ...(c.skills ? { skills: c.skills.slice(0, 10) } : {}),
+  }));
+  let json = JSON.stringify(lite);
+  if (json.length > 4000) json = `${json.slice(0, 3999)}…`;
+  newChat();
+  sendMessage(
+    `Here are the app's current proactive suggestions for my vault:\n\n${json}\n\nGive me a short prioritized briefing: what matters most and why, what can wait, and the exact order you'd tackle things in. Don't fix anything yet.`,
+  );
 }
 
 export function retryLastMessage(): void {

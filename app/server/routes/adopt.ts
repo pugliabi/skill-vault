@@ -7,6 +7,7 @@ import { recordActivity } from "../services/activity.ts";
 import { browseDirs, importSkills, scanForSkills } from "../services/adoption.ts";
 import { discoverAll } from "../services/discover.ts";
 import { applyUpdates, checkUpdates } from "../services/updates.ts";
+import { beginForegroundCheck, endForegroundCheck } from "../services/assistant/updateSweep.ts";
 import type {
   AdoptImportRequest,
   ApplyUpdatesRequest,
@@ -199,11 +200,16 @@ export function adoptRouter(): Router {
       return;
     }
     const body = (req.body ?? {}) as CheckUpdatesRequest;
+    // Flag the foreground check so the background update sweep yields
+    // instead of racing this request's git pulls (see updateSweep.ts).
+    beginForegroundCheck();
     try {
       const results = await checkUpdates(cfg.vault_path, body.skills);
       res.json({ results });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
+    } finally {
+      endForegroundCheck();
     }
   });
 
@@ -219,6 +225,7 @@ export function adoptRouter(): Router {
       res.status(400).json({ error: "items[] is required" });
       return;
     }
+    beginForegroundCheck();
     try {
       const result = await applyUpdates(cfg.vault_path, body.items);
       for (const skill of result.updated) {
@@ -236,6 +243,8 @@ export function adoptRouter(): Router {
         message: (err as Error).message,
       });
       res.status(500).json({ error: (err as Error).message });
+    } finally {
+      endForegroundCheck();
     }
   });
 

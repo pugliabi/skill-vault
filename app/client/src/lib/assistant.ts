@@ -24,7 +24,7 @@ export type AssistantStreamEvent =
 
 // ── Context chips (mirror server sanitizeChips) ──────────────────
 
-export type ChipKind = "skill" | "skills" | "filter" | "failure" | "notion" | "page";
+export type ChipKind = "skill" | "skills" | "filter" | "failure" | "notion" | "page" | "suggestion";
 
 export interface AssistantChip {
   kind: ChipKind;
@@ -107,6 +107,11 @@ export const assistantApi = {
     rest<{ ok: boolean }>("DELETE", `/api/assistant/sessions/${encodeURIComponent(id)}`),
   stop: (id: string) =>
     rest<{ stopped: boolean }>("POST", `/api/assistant/sessions/${encodeURIComponent(id)}/stop`),
+  suggestions: () => rest<SuggestionsResponse>("GET", "/api/assistant/suggestions"),
+  dismissSuggestion: (id: string, fingerprint: string) =>
+    rest<{ ok: boolean }>("POST", "/api/assistant/suggestions/dismiss", { id, fingerprint }),
+  restoreSuggestion: (id: string) => rest<{ ok: boolean }>("POST", "/api/assistant/suggestions/restore", { id }),
+  runSweep: () => rest<{ started: boolean; running: boolean }>("POST", "/api/assistant/suggestions/sweep"),
   installable: () => rest<{ skills: string[] }>("GET", "/api/assistant/install-skills"),
   installSkills: (body: { skills?: string[]; agents?: boolean; overwrite?: boolean }) =>
     rest<{
@@ -116,6 +121,34 @@ export const assistantApi = {
       skipped_agents: { name: string; reason: string }[];
     }>("POST", "/api/assistant/install-skills", body),
 };
+
+// ── Proactive suggestions ("For you") ────────────────────────────
+
+export type SuggestionSeverity = "action" | "warn" | "info";
+
+export type SuggestionAction =
+  | { type: "ask-ai"; label: string; prompt: string; chips?: AssistantChip[] }
+  | { type: "link"; label: string; href: string };
+
+export interface SuggestionCard {
+  id: string;
+  kind: string;
+  severity: SuggestionSeverity;
+  title: string;
+  detail?: string;
+  count: number;
+  skills?: string[];
+  actions: SuggestionAction[];
+  freshness?: string;
+  fingerprint: string;
+}
+
+export interface SuggestionsResponse {
+  cards: SuggestionCard[];
+  generated_at: string;
+  sweep: { checked_at: string | null; running: boolean };
+  dismissed: Array<{ id: string; at: string }>;
+}
 
 // ── The turn stream ──────────────────────────────────────────────
 

@@ -6,6 +6,7 @@ import { Icon, NavIcon } from "./ui/icons";
 import { ActivityDrawer } from "./ActivityDrawer";
 import { AssistantPanel } from "./assistant/AssistantPanel";
 import { toggleAssistant, useAssistantState, useAssistantWorking } from "../lib/assistantStore";
+import { assistantApi } from "../lib/assistant";
 import { THEME_LABELS, type ThemeName, useTheme } from "../lib/theme";
 
 /**
@@ -25,6 +26,12 @@ export function Layout({ children }: { children: ReactNode }) {
   const [activityOpen, setActivityOpen] = useState(false);
   const assistantWorking = useAssistantWorking();
   const assistantMode = useAssistantState().mode;
+  const { data: suggestionsData } = useQuery({
+    queryKey: ["assistant-suggestions"],
+    queryFn: () => assistantApi.suggestions(),
+    staleTime: 60_000,
+  });
+  const suggestionCount = suggestionsData?.cards.filter((c) => c.severity === "action").length ?? 0;
   const { data: config } = useQuery({
     queryKey: ["config"],
     queryFn: () => api.getConfig(),
@@ -250,6 +257,27 @@ export function Layout({ children }: { children: ReactNode }) {
                 className="sv-pulse"
                 style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--accent)" }}
               />
+            )}
+            {!assistantWorking && suggestionCount > 0 && (
+              <span
+                title={`${suggestionCount} suggestion${suggestionCount === 1 ? "" : "s"} need attention`}
+                style={{
+                  minWidth: 15,
+                  height: 15,
+                  padding: "0 4px",
+                  borderRadius: 8,
+                  background: "var(--bad)",
+                  color: "#fff",
+                  fontFamily: "var(--mono)",
+                  fontSize: 9.5,
+                  fontWeight: 700,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                {suggestionCount}
+              </span>
             )}
             <span style={{ fontFamily: "var(--mono)", fontSize: 9.5, color: "var(--ink-4)" }}>⌃J</span>
           </button>

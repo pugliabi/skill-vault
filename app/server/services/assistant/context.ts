@@ -126,6 +126,8 @@ export function buildTurnContext(data: TurnContextData): string {
       lines.push(`Active Skills-page filters: ${JSON.stringify(chip.data)}`);
     } else if (chip.kind === "failure" && chip.data) {
       lines.push(`Failure in focus (${chip.label}): ${JSON.stringify(chip.data)}`);
+    } else if (chip.kind === "suggestion" && chip.data) {
+      lines.push(`Suggestion in focus (${chip.label}): ${JSON.stringify(chip.data)}`);
     } else if (chip.kind === "page") {
       lines.push(`User is on the ${chip.label} page.`);
     }

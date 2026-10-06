@@ -51,6 +51,7 @@ const CHIP_TINT: Record<AssistantChip["kind"], string> = {
   failure: "var(--warn)",
   notion: "var(--info)",
   page: "var(--ink-3)",
+  suggestion: "var(--accent)",
 };
 
 export function ContextChips({

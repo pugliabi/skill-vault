@@ -58,7 +58,7 @@ function sourceKey(origin: SkillOrigin): string {
  * origins are shallow-cloned to a temp dir. Never throws — failures come
  * back as `fatal`/`message` so one broken source can't sink the whole check.
  */
-async function resolveSource(origin: SkillOrigin, seq: number): Promise<ResolvedSource> {
+async function resolveSource(origin: SkillOrigin, seq: number, pull: boolean): Promise<ResolvedSource> {
   if (origin.type === "git" && !origin.path) {
     if (!origin.url) {
       return { root: null, fatal: "error", message: "origin has no url or path" };
@@ -83,13 +83,14 @@ async function resolveSource(origin: SkillOrigin, seq: number): Promise<Resolved
   if (!root || !fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
     return { root: null, fatal: "source_missing", message: `source path missing: ${root ?? "(none)"}` };
   }
-  if (!fs.existsSync(path.join(root, ".git"))) {
+  if (!fs.existsSync(path.join(root, ".git")) || !pull) {
     return { root };
   }
   // A local git checkout: freshen it first so "check for updates" means
   // "against the remote", not "against whenever I last pulled". Any
   // failure (git absent, diverged branch, offline) degrades to comparing
-  // the checkout as-is.
+  // the checkout as-is. Callers pass pull:false to compare as-is (e.g. a
+  // policy of no background git activity).
   try {
     const { simpleGit } = await import("simple-git");
     await simpleGit(root).pull(["--ff-only"]);
@@ -156,7 +157,9 @@ function threeWay(
 export async function checkUpdates(
   vaultPath: string,
   names?: string[],
+  opts: { pull?: boolean } = {},
 ): Promise<UpdateCheckResult[]> {
+  const pull = opts.pull !== false;
   const manifest = readManifest(vaultPath);
   const targets: { name: string; origin?: SkillOrigin }[] = [];
   if (names && names.length > 0) {
@@ -177,7 +180,7 @@ export async function checkUpdates(
     if (!t.origin) continue;
     const key = sourceKey(t.origin);
     if (!sources.has(key)) {
-      sources.set(key, await resolveSource(t.origin, seq++));
+      sources.set(key, await resolveSource(t.origin, seq++, pull));
     }
   }
 
@@ -272,7 +275,7 @@ export async function applyUpdates(
       if (!upstreamDir) {
         const key = sourceKey(origin);
         if (!freshSources.has(key)) {
-          const resolved = await resolveSource(origin, seq++);
+          const resolved = await resolveSource(origin, seq++, true);
           if (resolved.tmpPath) ownClones.push(resolved.tmpPath);
           freshSources.set(key, resolved);
         }

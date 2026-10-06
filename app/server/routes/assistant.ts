@@ -37,15 +37,21 @@ import {
   type ChatContextChip,
 } from "../services/assistant/session.ts";
 import { installAssistantSkills, listPluginSkills } from "../services/assistant/installer.ts";
+import { composeSuggestions, gatherSuggestionInputs } from "../services/assistant/suggestions.ts";
+import { addDismissal, readDismissals, readSweepCache, removeDismissal } from "../services/assistant/suggestionStore.ts";
+import type { UpdateSweeper } from "../services/assistant/updateSweep.ts";
+import { broadcastSse } from "./events.ts";
 import type { AssistantStreamEvent } from "../services/assistant/streamEvents.ts";
 
 export interface AssistantRouterOpts {
   mode: "development" | "production";
   /** The app package root (holds package.json, assistant-plugin/, dist/). */
   appRoot: string;
+  /** The background update sweeper — lets /suggestions report + trigger it. */
+  sweeper?: Pick<UpdateSweeper, "runNow" | "isRunning">;
 }
 
-const VALID_CHIP_KINDS = new Set(["skill", "skills", "filter", "failure", "notion", "page"]);
+const VALID_CHIP_KINDS = new Set(["skill", "skills", "filter", "failure", "notion", "page", "suggestion"]);
 
 function sanitizeChips(raw: unknown): ChatContextChip[] {
   if (!Array.isArray(raw)) return [];
@@ -133,6 +139,60 @@ export function assistantRouter(opts: AssistantRouterOpts): Router {
 
   router.post("/sessions/:id/stop", (req, res) => {
     res.json({ stopped: stopSession(req.params.id) });
+  });
+
+  // ── Proactive suggestions ("For you") ────────────────────────────────
+
+  router.get("/suggestions", (_req, res) => {
+    const cfg = readAppConfig();
+    const running = opts.sweeper?.isRunning() ?? false;
+    if (!cfg.vault_path) {
+      // 200-empty keeps badge/panel code trivial on fresh installs.
+      res.json({ cards: [], generated_at: new Date().toISOString(), sweep: { checked_at: null, running }, dismissed: [] });
+      return;
+    }
+    const inputs = gatherSuggestionInputs({ vault_path: cfg.vault_path, providers: cfg.providers });
+    res.json({
+      cards: composeSuggestions(inputs),
+      generated_at: inputs.now.toISOString(),
+      sweep: { checked_at: readSweepCache(cfg.vault_path)?.checked_at ?? null, running },
+      dismissed: readDismissals().map((d) => ({ id: d.id, at: d.at })),
+    });
+  });
+
+  router.post("/suggestions/dismiss", (req, res) => {
+    const body = (req.body ?? {}) as { id?: string; fingerprint?: string };
+    if (typeof body.id !== "string" || typeof body.fingerprint !== "string") {
+      res.status(400).json({ error: "id and fingerprint are required" });
+      return;
+    }
+    addDismissal(body.id, body.fingerprint);
+    broadcastSse({ type: "suggestions_changed" }); // other tabs drop the card too
+    res.json({ ok: true });
+  });
+
+  router.post("/suggestions/restore", (req, res) => {
+    const body = (req.body ?? {}) as { id?: string };
+    if (typeof body.id !== "string") {
+      res.status(400).json({ error: "id is required" });
+      return;
+    }
+    removeDismissal(body.id);
+    broadcastSse({ type: "suggestions_changed" });
+    res.json({ ok: true });
+  });
+
+  router.post("/suggestions/sweep", (_req, res) => {
+    if (!opts.sweeper) {
+      res.status(503).json({ error: "sweeper not available in this environment" });
+      return;
+    }
+    if (opts.sweeper.isRunning()) {
+      res.json({ started: false, running: true });
+      return;
+    }
+    const started = opts.sweeper.runNow();
+    res.status(started ? 202 : 200).json({ started, running: !started });
   });
 
   // Install the assistant's skills (and optionally agents) into the vault

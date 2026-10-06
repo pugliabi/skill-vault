@@ -214,6 +214,12 @@ export const TOOLS: Record<string, ToolDef> = {
     schema: {},
     handler: async (_args, http) => expectOk(await http("GET", "/api/config"), "get_config"),
   },
+  get_suggestions: {
+    description:
+      "The app's ranked proactive suggestions — what's broken or needs attention right now (broken sources, available updates, failed operations, Notion drift, hygiene). The best starting point for 'what needs attention' or any triage request.",
+    schema: {},
+    handler: async (_args, http) => expectOk(await http("GET", "/api/assistant/suggestions"), "get_suggestions"),
+  },
 
   // ── Mutating ───────────────────────────────────────────────────────────
   apply_update: {
