@@ -3,6 +3,22 @@
 Running log of change sets, newest first. Detailed per-release notes live in
 [changelog.md](./changelog.md) and [app/CHANGELOG.md](../app/CHANGELOG.md).
 
+## 2026-10-06 — Default app port changed to 9994
+
+### Changes Made
+- Built-in default port 5174 → 9994 (launcher resolvePort, help text,
+  run.bat banner, Notion OAuth callback fallback URL).
+- Added `app/.env.example` (was referenced by docs but missing).
+
+### Files Modified
+- `app/server/launcher.ts`, `app/server/services/notion/checker.ts`,
+  `app/run.bat`, `app/.env.example` — port default
+- `README.md`, `docs/getting-started.md`, `docs/configuration.md` — docs
+
+### Impact
+- Fresh installs open on http://localhost:9994. Explicit PORT/.env/config
+  values still win; busy ports still fall through to the next free one.
+
 ## 2026-10-06 — AI assistant: voice input + popup Ask-AI fix
 
 ### Changes Made

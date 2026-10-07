@@ -18,7 +18,7 @@
  *   → process.env (set on the shell invocation)
  *   → .env file in this directory (loaded by dotenv)
  *   → `app` block in ~/.skill-vault/config.json
- *   → built-in default (port 5174, host 127.0.0.1, open browser on)
+ *   → built-in default (port 9994, host 127.0.0.1, open browser on)
  *
  * Note: steps 2 and 3 look at the SAME variables (PORT, HOST,
  * OPEN_BROWSER). `.env` just seeds process.env before we read it.
@@ -81,7 +81,7 @@ function printHelp(): void {
          npm run dev -- [options]
 
   Options:
-    -p, --port <port>    Port to bind (default: 5174)
+    -p, --port <port>    Port to bind (default: 9994)
     -h, --host <host>    Host to bind (default: 127.0.0.1)
         --no-open        Don't auto-open the browser
         --help           Show this message
@@ -113,7 +113,7 @@ function resolvePort(): number {
     if (!Number.isNaN(n)) return n;
   }
   if (typeof cliAppBlock.port === "number") return cliAppBlock.port;
-  return 5174;
+  return 9994;
 }
 
 function resolveHost(): string {
@@ -144,7 +144,7 @@ const MODE =
 async function findFreePort(start: number, host: string): Promise<number> {
   // Try up to 10 ports starting at `start`. Returns 0 on exhaustion so
   // the caller can fall back to OS-assigned ports instead of crashing
-  // on a fresh machine where 5174 happens to be taken.
+  // on a fresh machine where 9994 happens to be taken.
   for (let p = start; p < start + 10; p++) {
     const free = await new Promise<boolean>((resolve) => {
       const server = net.createServer();

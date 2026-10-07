@@ -96,14 +96,14 @@ Precedence, highest wins:
 2. **Environment variables** — `PORT`, `HOST`, `OPEN_BROWSER` (`1`/`0`)
 3. **`.env` file** in `app/` — copy [`app/.env.example`](../app/.env.example) to `app/.env`
 4. **`app` block** in `~/.skill-vault/config.json`
-5. **Built-in defaults** — port `5174`, host `127.0.0.1`, open browser on
+5. **Built-in defaults** — port `9994`, host `127.0.0.1`, open browser on
 
 If the chosen port is busy, the launcher picks the next free one automatically.
 
 ### PORT
 
 - **Where**: env / `.env` / `--port`
-- **Type**: number — **Default**: `5174`
+- **Type**: number — **Default**: `9994`
 - **Notes**: Deliberately not 5000 (the old `sv app` port) to dodge stale-process collisions.
 
 ### HOST

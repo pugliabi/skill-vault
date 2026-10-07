@@ -17,7 +17,7 @@ REM    1. CLI flags passed to this .bat  (run.bat --port 5500)
 REM    2. Environment variables set here (from .env)
 REM    3. .env file                      (already loaded above)
 REM    4. `app` block in ~/.skill-vault/config.json (shared w/ sv)
-REM    5. Built-in defaults (5174 / 127.0.0.1 / open browser on)
+REM    5. Built-in defaults (9994 / 127.0.0.1 / open browser on)
 REM
 REM  Usage:
 REM    run.bat                         # defaults + .env
@@ -52,7 +52,7 @@ echo   ===============
 if defined PORT (
     echo     PORT         : !PORT!          [from .env]
 ) else (
-    echo     PORT         : default         [5174 or CLI config]
+    echo     PORT         : default         [9994 or CLI config]
 )
 if defined HOST (
     echo     HOST         : !HOST!          [from .env]

@@ -27,6 +27,9 @@ semver; the project is pre-1.0, so minor versions carry feature batches.
   `checkUpdates` gained a `pull` opt-out.
 
 ### Changed
+- **Default port is now 9994** (was 5174) — quickstart URL, launcher help,
+  and `.env.example` updated; if the port is busy the launcher still walks to
+  the next free one.
 - Skill detail popup's Ask AI closes the popup so the chat is visible.
 - `Ctrl/⌘+J` reserved for the assistant (Skills-page `j/k` navigation now
   ignores modified keypresses).

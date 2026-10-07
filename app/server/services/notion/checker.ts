@@ -137,7 +137,7 @@ export async function gitGuard(vaultPath: string, gitFactory: GitFactory = defau
 type ApiConn = { api: NotionApi; close(): Promise<void> };
 
 async function defaultOpenApi(): Promise<ApiConn> {
-  const redirectUrl = readNotionAuth().redirect_url ?? "http://localhost:5174/api/notion/callback";
+  const redirectUrl = readNotionAuth().redirect_url ?? "http://localhost:9994/api/notion/callback";
   const client = await getNotionClient(redirectUrl);
   return {
     api: new NotionApi((name, args) => callToolJson(client, name, args)),

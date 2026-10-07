@@ -16,7 +16,7 @@ git clone https://github.com/pugliabi/skill-vault.git
 cd skill-vault/app
 npm install
 npm run dev
-# → opens http://localhost:5174
+# → opens http://localhost:9994
 ```
 
 On Windows, `app\run.bat` does the same and prints the resolved port/host first. Port, host, and browser auto-open are configurable — see [Configuration](./configuration.md).

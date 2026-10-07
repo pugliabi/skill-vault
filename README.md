@@ -15,7 +15,7 @@ git clone https://github.com/pugliabi/skill-vault.git
 cd skill-vault/app
 npm install
 npm run dev
-# → opens http://localhost:5174
+# → opens http://localhost:9994
 ```
 
 First run shows a Setup page: pick a vault directory, then add your agent tools as providers under **Settings**. Full walkthrough in [Getting Started](docs/getting-started.md); the optional `sv` CLI is covered there too.
