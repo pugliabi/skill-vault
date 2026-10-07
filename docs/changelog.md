@@ -27,6 +27,9 @@ semver; the project is pre-1.0, so minor versions carry feature batches.
   `checkUpdates` gained a `pull` opt-out.
 
 ### Changed
+- **This repository is now the single development home** for the app, the
+  `sv` CLI, and docs (the former private→public code mirror is retired; the
+  private repo keeps only the skill library).
 - **Default port is now 9994** (was 5174) — quickstart URL, launcher help,
   and `.env.example` updated; if the port is busy the launcher still walks to
   the next free one.

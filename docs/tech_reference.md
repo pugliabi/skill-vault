@@ -72,9 +72,11 @@ single-flight, yields to foreground checks, lite cache in
 fingerprint-revival semantics. Voice input is the browser Web Speech API
 (`client/src/lib/speech.ts`).
 
-## Mirroring note
+## Repository roles
 
-This public repository's `app/` and `src/skill_vault/` are mirrored from a
-private working copy (sanitized and leak-checked); `README.md` and `docs/` are
-authored here and replicated back. Changes to code and docs land as separate
-commits for that reason.
+Since 2026-10-06 this repository is the single home of the product: the app
+(`app/`), the `sv` CLI (`src/skill_vault/`), and all documentation are
+developed directly here. The user's skill library itself (the vault that
+`vault_path` points at) lives in a separate private repository — this repo
+ships the tools, not the skills. (Historical note: before the split, code was
+mirrored in from that private repo; those `[sv-sync]` commits are the residue.)

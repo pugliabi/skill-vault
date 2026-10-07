@@ -3,6 +3,22 @@
 Running log of change sets, newest first. Detailed per-release notes live in
 [changelog.md](./changelog.md) and [app/CHANGELOG.md](../app/CHANGELOG.md).
 
+## 2026-10-06 — Repo split: this repo is now the single dev home
+
+### Changes Made
+- The app and `sv` CLI are now developed directly in this repository; the
+  private vault repo holds only the skill library. The old private→public
+  code mirror is retired (its script refuses to run; the session hook flag
+  is off).
+
+### Files Modified
+- `docs/tech_reference.md` — repository-roles section replaces the
+  mirroring note. (Code trees and `pyproject.toml` were removed from the
+  private repo; no code changed here.)
+
+### Impact
+- Contribute/edit app + CLI + docs in one place. No more mirror commits.
+
 ## 2026-10-06 — Default app port changed to 9994
 
 ### Changes Made
