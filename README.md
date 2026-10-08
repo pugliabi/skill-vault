@@ -40,15 +40,16 @@ Notion drift, integrity issues) computed from the app's own signals at zero AI
 cost and kept fresh by a background source sweep. Every card has a **✦ Fix with
 AI** button, and every failure row and skill view has an **Ask AI** entry point.
 
-![The assistant returning a star-ranked table of GitHub skills, with the ones already in the vault marked](docs/images/assistant-discovery.png)
+![The skill-scout specialist returning a star-ranked table of GitHub skills](docs/images/assistant-discovery.png)
 
 Ask in plain language. *"Find the top GitHub skills for creating agents"* returns
 a verified, star-ranked table with the skills you already have marked, then
 offers to adopt the rest. *"This skill says gone upstream, fix it"* traces the
 source through git history and the web, repairs the origin, and applies the
-update while you watch the tool timeline:
+update. The tool timeline shows each step as it happens, here on a read-only
+update check:
 
-![A repair in progress, showing the tool timeline](docs/images/assistant-timeline.png)
+![An update check: the skills it loaded, the tools it ran, and its findings](docs/images/assistant-timeline.png)
 
 One lead agent runs every chat, loads the right one of ten bundled skills for the
 job, and hands heavy research or parallel repairs to five specialist subagents.

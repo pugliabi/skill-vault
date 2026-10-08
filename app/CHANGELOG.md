@@ -12,6 +12,8 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
 - Assistant timeline labels on newer Claude Code CLIs: `agent: <name> — <task>`
   for delegations (tool named `Agent`, namespaced agent names) and
   `Loading skill: <name>` for skill loads.
+- Wide tables in assistant replies scroll sideways instead of overflowing
+  the pane.
 
 ### Changed
 - **Assistant bundle v2.0.0** - one comprehensive `vault-assistant` lead

@@ -7,7 +7,7 @@ diagnose failed operations. It runs on your local [Claude Code](https://claude.c
 CLI, so it uses your existing Claude subscription and nothing leaves your machine
 except the model calls Claude Code itself makes.
 
-![The assistant finding star-ranked GitHub skills and marking the ones already in the vault](images/assistant-discovery.png)
+![The skill-scout specialist returning a star-ranked table of GitHub skills](images/assistant-discovery.png)
 
 - [Requirements](#requirements)
 - [Opening the assistant](#opening-the-assistant)
@@ -177,7 +177,9 @@ is doing (`Searching web: …`, `Running: git log…`, `vault: set_origin`,
 `agent: repo-hunter`) — click a line for its input/output. **Stop** kills the
 turn immediately. Each reply ends with its cost and duration.
 
-![A repair in progress: context chips, the request, and the tool timeline between the assistant's notes](images/assistant-timeline.png)
+![An update check: the skills it loaded, the tools it ran, and its findings](images/assistant-timeline.png)
+
+A table too wide for the pane scrolls sideways inside the reply.
 
 The history button lists recent chats; conversations survive app restarts and
 resume with full context. Multiple chats can exist; one turn runs per chat

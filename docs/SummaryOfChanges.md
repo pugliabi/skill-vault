@@ -7,7 +7,9 @@ Running log of change sets, newest first. Detailed per-release notes live in
 
 ### Changes Made
 - Four screenshots of the assistant added (For you suggestions, GitHub skill
-  discovery, a repair with its tool timeline, a skill-scoped chat).
+  discovery, an update check with its tool timeline, a skill-scoped chat).
+- Fixed: a table wider than the chat pane ran off its edge; it now scrolls
+  sideways inside the reply.
 - README assistant section rewritten as a showcase with three of the shots.
 - `docs/assistant.md` gained a "Using it: what to ask" section (task table,
   how decisions are handed back, skill-scoped chats) and inline screenshots;

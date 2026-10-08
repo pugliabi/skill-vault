@@ -36,6 +36,8 @@ semver; the project is pre-1.0, so minor versions carry feature batches.
   file preview) now show their markers and indentation.
 - Assistant timeline labels on newer Claude Code CLIs: delegations read
   `agent: <name> — <task>` and skill loads read `Loading skill: <name>`.
+- A table wider than the assistant pane scrolls inside the reply instead of
+  running off the edge.
 
 ### Changed
 - **Assistant bundle v2.0.0** — rebuilt around one comprehensive

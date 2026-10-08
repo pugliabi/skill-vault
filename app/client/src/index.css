@@ -143,6 +143,8 @@
 .sv-markdown--chat pre { font-size: 11.5px; }
 .sv-markdown--chat code { font-size: 11.5px; }
 .sv-markdown--chat table { font-size: 12px; }
+/* A wide table must scroll inside the reply, not run off the panel edge. */
+.sv-markdown--chat table { display: block; max-width: 100%; overflow-x: auto; }
 
 /* ── Markdown rendered preview (Phase 2) ─────────────────────────── */
 
