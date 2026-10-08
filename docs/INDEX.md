@@ -18,6 +18,7 @@ Start at the [README](../README.md) for the overview and quickstart tour.
 |---|---|
 | [configuration.md](./configuration.md) | Every setting: `config.json`, env vars, CLI flags, assistant state files |
 | [vault-format.md](./vault-format.md) | The on-disk contract both tools implement (authoritative spec) |
+| [brand.md](./brand.md) | Logo, colours, type and icon files for Skill Vault |
 | [tech_reference.md](./tech_reference.md) | Architecture notes and the app's HTTP API surface |
 
 ## Support

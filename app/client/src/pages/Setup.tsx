@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Logo } from "@/components/ui/Logo";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
@@ -40,23 +41,7 @@ export default function Setup() {
     >
       <div style={{ width: "100%", maxWidth: 560 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 32 }}>
-          <div
-            style={{
-              width: 30,
-              height: 30,
-              borderRadius: 6,
-              background: "var(--ink)",
-              color: "var(--bg)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontFamily: "var(--mono)",
-              fontWeight: 700,
-              fontSize: 14,
-            }}
-          >
-            sv
-          </div>
+          <Logo size={30} />
           <span style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>Skill Vault</span>
         </div>
 

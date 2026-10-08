@@ -33,6 +33,11 @@
     --new:        oklch(0.4 0.012 60);
     --new-bg:     oklch(0.92 0.008 60);
 
+    /* Skill Vault brand (docs/brand.md) */
+    --brand-amber: #eba640;
+    --brand-brown: #7a4b26;
+    --brand-ink:   #0f0e0d;
+
     --accent:    oklch(0.65 0.16 50);
     --accent-2:  oklch(0.55 0.18 50);
 

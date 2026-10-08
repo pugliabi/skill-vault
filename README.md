@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/skill-vault-banner.png" alt="Skill Vault: one library of agent skills, synced everywhere" width="100%">
+</p>
+
 # Skill Vault
 
 One library of agent skills, synced everywhere.
@@ -150,6 +154,7 @@ pyproject.toml      packaging for the CLI (installs `sv` and `skill-vault`)
 - [Troubleshooting](docs/troubleshooting.md) — common issues and fixes
 - [FAQ](docs/faq.md) — frequently asked questions
 - [Vault Format](docs/vault-format.md) — the on-disk contract both tools implement
+- [Brand](docs/brand.md) — logo, colours, and icon files
 
 ## License
 

@@ -1,7 +1,7 @@
 import type { Config } from "tailwindcss";
 
 // Modern SaaS direction per the design spec:
-// neutral warm-gray base + single confident indigo accent, 8px grid.
+// neutral warm-gray base + the Skill Vault amber/brown brand, 8px grid.
 export default {
   content: ["./client/index.html", "./client/src/**/*.{ts,tsx}"],
   theme: {
@@ -31,14 +31,18 @@ export default {
         ],
       },
       colors: {
-        // The neutral scale + single indigo accent. Semantic greens/reds/
+        // The neutral scale + brand palette. Semantic greens/reds/
         // yellows come from Tailwind's default palette (green-600, red-600,
         // amber-600) used only on status badges.
-        accent: {
-          DEFAULT: "#6366F1", // indigo-500
-          hover: "#4F46E5",   // indigo-600
-          ring: "#A5B4FC",    // indigo-300
-          subtle: "#EEF2FF",  // indigo-50
+        // Skill Vault brand palette (docs/brand.md). The UI accent itself
+        // is the --accent CSS var in index.css.
+        brand: {
+          amber: "#EBA640",
+          brown: "#7A4B26",
+          ink: "#0F0E0D",
+          panel: "#191715",
+          deep: "#3D2817",
+          cream: "#EFE9E1",
         },
       },
       boxShadow: {

@@ -1,4 +1,5 @@
 import { type ReactNode, useState } from "react";
+import { Logo } from "@/components/ui/Logo";
 import { useLocation, Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
@@ -110,21 +111,18 @@ export function Layout({ children }: { children: ReactNode }) {
             style={{
               width: 30,
               height: 30,
-              borderRadius: 6,
-              background: "var(--ink)",
-              color: "var(--bg)",
+              padding: 0,
+              background: "transparent",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              fontFamily: "var(--mono)",
-              fontWeight: 700,
-              fontSize: 14,
               flexShrink: 0,
               border: 0,
+              cursor: "pointer",
             }}
             title="Skill Vault"
           >
-            sv
+            <Logo size={30} />
           </button>
           <div style={{ display: "flex", flexDirection: "column" }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)", lineHeight: 1.2 }}>
