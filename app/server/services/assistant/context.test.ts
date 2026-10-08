@@ -15,9 +15,9 @@ function base(overrides: Partial<TurnContextData> = {}): TurnContextData {
   };
 }
 
-test("pickLeadAgent routes by context kind", () => {
-  assert.equal(pickLeadAgent("vault"), "vault-manager");
-  assert.equal(pickLeadAgent("skill"), "skill-agent");
+test("pickLeadAgent always routes to the single vault-assistant lead", () => {
+  assert.equal(pickLeadAgent("vault"), "vault-assistant");
+  assert.equal(pickLeadAgent("skill"), "vault-assistant");
 });
 
 test("resolveReposDir prefers the config pass-through and falls back to the adopt default", () => {

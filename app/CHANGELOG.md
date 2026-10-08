@@ -6,6 +6,18 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
 
 ## [Unreleased]
 
+### Changed
+- **Assistant bundle v2.0.0** - one comprehensive `vault-assistant` lead
+  (context doctrine, skill routing, delegation + latency rules) + five thin
+  skill-backed subagents (repo-hunter, update-fixer, new skill-scout,
+  read-only error-triager, notion-doctor) + ten skills (five deepened with
+  references: tool I/O, manifest spec, GitHub search recipes, Notion states;
+  five new: triaging-errors, analyzing-suggestions, navigating-app-features
+  + feature catalog, authoring-skills + review checklist, discovering-skills
+  + search recipes). Plugin references/ readable at runtime (second
+  --add-dir); briefing routes through analyzing-suggestions; discovery
+  prompt in the empty state.
+
 ### Added
 - **Voice input in the assistant** — a mic button in the chat composer
   dictates into the draft (browser Web Speech API; Chrome/Edge — hidden

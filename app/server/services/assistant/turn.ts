@@ -52,6 +52,10 @@ export function buildTurnArgs(input: TurnArgsInput): string[] {
     ALLOWED_TOOLS,
     "--add-dir",
     input.reposDir,
+    // Second add-dir: the plugin bundle itself, so skills' references/
+    // files are Read-able at runtime (progressive disclosure).
+    "--add-dir",
+    input.pluginDir,
     "--append-system-prompt",
     input.contextBlock,
   ];

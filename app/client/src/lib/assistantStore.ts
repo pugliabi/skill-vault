@@ -507,7 +507,7 @@ export function startBriefing(cards: SuggestionCard[]): void {
   if (json.length > 4000) json = `${json.slice(0, 3999)}…`;
   newChat();
   sendMessage(
-    `Here are the app's current proactive suggestions for my vault:\n\n${json}\n\nGive me a short prioritized briefing: what matters most and why, what can wait, and the exact order you'd tackle things in. Don't fix anything yet.`,
+    `Here are the app's current proactive suggestions for my vault:\n\n${json}\n\nUse the analyzing-suggestions skill to interpret these cards, then give me a short prioritized briefing: what matters most and why, what can wait, and the exact order you'd tackle things in. Don't fix anything yet.`,
   );
 }
 

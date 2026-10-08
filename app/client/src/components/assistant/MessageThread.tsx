@@ -17,7 +17,7 @@ const SUGGESTIONS: Record<AgentKind, string[]> = {
   vault: [
     "Check all skills for updates and apply the safe ones",
     "Find the errors from my recent operations and fix them",
-    "Which skills are stale, and should I push or pull?",
+    "Find top-starred GitHub skills worth adopting for my stack",
     "What's the Notion sync state of my vault?",
   ],
   skill: [
@@ -193,9 +193,9 @@ export function MessageThread({
         </div>
         <div style={{ textAlign: "center", fontSize: 12.5, color: "var(--ink-3)", lineHeight: 1.5 }}>
           {agent === "skill" ? (
-            <>Skill agent — scoped to <span style={{ fontFamily: "var(--mono)", color: "var(--ink-2)" }}>{skill}</span>: its source, updates, files, targets, and Notion link.</>
+            <>Assistant — scoped to <span style={{ fontFamily: "var(--mono)", color: "var(--ink-2)" }}>{skill}</span>: its source, updates, files, targets, and Notion link.</>
           ) : (
-            <>Vault agent — checks updates, pushes, syncs, and fixes errors across every skill. It can research the web and git repos, and repair broken sources.</>
+            <>Assistant — checks updates, pushes, syncs, fixes errors, and discovers new skills across your whole vault. It can research the web and git repos, repair broken sources, and even write skills.</>
           )}
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>

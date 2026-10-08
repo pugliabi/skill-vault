@@ -1,62 +1,77 @@
 ---
 name: finding-skill-origins
-description: Strategy for locating where a vault skill's upstream source lives now — tracking renames inside a repo with git log --follow and -S, finding moved/renamed repos via web search on distinctive content, and verifying a candidate before repairing the origin. Use for upstream_missing, source_missing, dead clone URLs, or unknown provenance.
+description: Use this skill when locating where a vault skill's upstream source lives now — a broken or unknown origin, upstream_missing or source_missing status, a dead or 404 clone URL, or a repo that moved, was renamed, or restructured. Covers git forensics (log --follow, -S, --diff-filter), GitHub and web search on distinctive content, candidate verification, and recording the repaired origin. Triggers: "where did this skill come from", "the source is gone", "repo moved", "fix the origin", "upstream missing", "source missing", "dead URL", "find the new home", "provenance".
 ---
 
-# Finding where a skill lives (or moved to)
+# Finding where a skill lives now
 
-Goal: a verified `{type, url|path, subpath, ref?}` for `set_origin`. Wrong
-guesses poison future updates — verify before you repair.
+Goal: a VERIFIED `{type, url|path, subpath, ref?}` for `set_origin`. A wrong
+origin silently poisons every future update check — verify before repairing,
+and never record low confidence.
+
+See ./references/github-search-recipes.md for exact GitHub API calls, URL
+templates, rename-redirect detection, and rate-limit etiquette.
+
+## 0. The shortcut
+
+Read the check result's `message` first. `moved to <rel>` means the checker
+already found the skill inside the same source — `set_origin` with that
+subpath (`verify:true`), done. No hunting.
 
 ## 1. Mine what's recorded
 
-`get_skill` → the old origin (url/path/subpath/ref) and `source` string
-("adopted from X", "scanned from <repo>"). Read the vault copy's SKILL.md and
-pick 2–3 distinctive search keys: the frontmatter name, an unusual sentence,
-a function or file name unique to the skill.
+`get_skill` → the old origin (url/path/subpath/ref) and the free-form
+`source` string ("scanned from <repo>" often names the home). Read the vault
+copy's SKILL.md and pick 2-3 distinctive search keys: the frontmatter name,
+one unusual sentence, a unique file or function name.
 
-## 2. Moved INSIDE the same repo (the common case — upstream_missing)
+## 2. Moved INSIDE the same repo (the common case)
 
-Repos restructure far more often than they vanish. Get a full clone (the
-repos dir from `get_config`; `git fetch --unshallow` if it's shallow), then:
+Repos restructure far more often than they vanish. Get a full clone under
+the repos dir (`git fetch --unshallow` if shallow), then in order:
 
 ```
 git log --all --oneline --follow -- "<old subpath>/SKILL.md"   # rename chain
+git log --all --diff-filter=R --summary | grep -i <name>       # explicit renames
 git log --all -S"<distinctive line>" --name-only --oneline     # content moves
-git grep -l "<distinctive key>" $(git rev-parse HEAD)          # where is it NOW
+git grep -l "<distinctive key>" HEAD                           # where is it NOW
 ```
 
 `scan_dir_for_skills` on the clone root lists every skill folder the repo
 holds today — often the fastest confirmation of the new subpath. Also check
-the repo's releases/CHANGELOG for "moved/renamed/consolidated" notes.
+releases/CHANGELOG for "moved/renamed/consolidated" notes, and watch for the
+monorepo pattern (`skills/<x>` → `plugins/<x>/skills/<x>` or a merge of
+several skills into one successor folder — note it for the user if so).
 
-## 3. Repo gone, renamed, or unknown (source_missing, dead URLs)
+## 3. Repo gone, renamed, or unknown
 
-- WebSearch, most-specific first: `"<distinctive sentence>" github`, then
-  `<skill-name> SKILL.md github`, then `<old org>/<old repo>` (GitHub redirects
-  renames — WebFetch the old URL and see where it lands).
-- Org/product renames are common (e.g. a vendor consolidating `*-skills`
-  repos into one monorepo). Check the old org's profile and pinned repos.
-- GitHub code search via WebFetch:
-  `https://github.com/search?q=%22<quoted+phrase>%22&type=code`.
+- WebFetch the OLD URL first: GitHub redirects renamed repos — the API
+  response's `full_name` reveals the new home in one call.
+- WebSearch, most-specific first: `"<distinctive sentence>" github` →
+  `<skill-name> SKILL.md github` → `<old org>/<old repo>`.
+- Check the old org's profile/pinned repos (vendors consolidate `*-skills`
+  repos into monorepos regularly).
+- Deleted originals: the fork network — the most-starred fork is the usual
+  successor (recipes file has the call).
 
-## 4. Verify the candidate (non-negotiable)
+## 4. Verify — non-negotiable, all three
 
-A candidate is confirmed only when ALL hold:
-1. The folder exists at the proposed subpath (WebFetch the file listing, or
+1. The folder EXISTS at the proposed subpath (fetch the contents listing, or
    clone and look).
-2. Its SKILL.md is recognizably the same skill — same `name:`, clearly shared
-   content with the vault copy (not a same-named stranger).
-3. It is plausibly the *successor*: equal or newer content, or an explicit
-   rename trail leading there.
+2. It is recognizably the SAME skill — same `name:`, clearly shared content
+   with the vault copy; not a same-named stranger.
+3. It is plausibly the SUCCESSOR — equal or newer content, or an explicit
+   rename/move trail leading there.
 
-Then prefer recording a `dir` origin pointing at a clone in the repos dir
-(auto-pulls on every check) when the user keeps clones; otherwise a pure
-`git` origin with the URL. Always pass `verify:true` to `set_origin` and read
-the recheck status — `update_available`/`up_to_date` proves the fix.
+## 5. Record
+
+Prefer a `dir` origin pointing at a clone under the repos dir (it auto-pulls
+on every future check); otherwise pure `git` with the URL. Always
+`verify:true` on set_origin and read the recheck — `update_available` or
+`up_to_date` proves the repair; `upstream_missing` again means it's wrong.
 
 ## Dead ends
 
-Report honestly: what you searched, the best near-miss, and the options —
-keep the skill origin-less (it still works, just no update checks), or let
-the user name the source. Never record a low-confidence origin.
+Report honestly: what was searched, the best near-miss, and the options —
+leave the skill origin-less (it still works; it just can't update-check) or
+let the user name the source. A guessed origin is worse than none.

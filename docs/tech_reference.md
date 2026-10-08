@@ -54,9 +54,10 @@ One chat turn = one headless `claude -p` spawn (Claude Code CLI) with:
 - `--output-format stream-json` adapted server-side into a compact NDJSON
   event stream on the `POST /api/assistant/stream` response (`text_delta`,
   `tool_start/`result``, `turn_end` with cost, `error`);
-- `--plugin-dir app/assistant-plugin` providing the lead agents
-  (vault-manager, skill-agent), subagents (repo-hunter, update-fixer,
-  notion-doctor, error-triager), and five skills;
+- `--plugin-dir app/assistant-plugin` providing the vault-assistant lead,
+  five thin skill-backed subagents (repo-hunter, update-fixer, skill-scout,
+  error-triager, notion-doctor), and ten skills with references/ files
+  (readable at runtime via a second --add-dir of the plugin dir);
 - `--mcp-config` launching `server/assistant-mcp/` — a stdio MCP server whose
   tools call back into the app's own HTTP API (hence auditing/history for
   free). ~19 tools; deliberately no delete, no Notion force, no OAuth;

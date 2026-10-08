@@ -27,6 +27,17 @@ semver; the project is pre-1.0, so minor versions carry feature batches.
   `checkUpdates` gained a `pull` opt-out.
 
 ### Changed
+- **Assistant bundle v2.0.0** — rebuilt around one comprehensive
+  `vault-assistant` lead agent plus five thin, skill-backed specialist
+  subagents (repo-hunter, update-fixer, new skill-scout, read-only
+  error-triager, notion-doctor) and **ten skills** (five deepened with
+  reference files, five new: triaging-errors, analyzing-suggestions,
+  navigating-app-features, authoring-skills, discovering-skills). The
+  assistant can now search GitHub for star-ranked skills to adopt, write and
+  review skills to a quality checklist, explain every app feature with deep
+  links, and run bulk repairs with parallel subagents. The AI briefing routes
+  through analyzing-suggestions; plugin reference files are readable at
+  runtime.
 - **This repository is now the single development home** for the app, the
   `sv` CLI, and docs (the former private→public code mirror is retired; the
   private repo keeps only the skill library).

@@ -22,7 +22,7 @@ function makeSession(): AssistantSession {
 
 const BASE_ARGS = {
   sessionId: "11111111-2222-3333-4444-555555555555",
-  leadAgent: "vault-manager",
+  leadAgent: "vault-assistant",
   contextBlock: "# ctx\nline two",
   mcpConfigJson: '{"mcpServers":{}}',
   pluginDir: "C:\\app\\assistant-plugin",
@@ -47,11 +47,13 @@ test("buildTurnArgs: first turn uses --session-id, later turns --resume; flag se
     "--plugin-dir",
     "C:\\app\\assistant-plugin",
     "--agent",
-    "vault-manager",
+    "vault-assistant",
     "--allowedTools",
     ALLOWED_TOOLS,
     "--add-dir",
     "C:\\Github\\skills-repos",
+    "--add-dir",
+    "C:\\app\\assistant-plugin",
     "--append-system-prompt",
     "# ctx\nline two",
   ]);
@@ -65,6 +67,7 @@ test("buildTurnArgs: first turn uses --session-id, later turns --resume; flag se
   assert.ok(!first.includes("--dangerously-skip-permissions"));
   assert.match(ALLOWED_TOOLS, /Bash\(git:\*\)/);
   assert.match(ALLOWED_TOOLS, /mcp__vault__\*/);
+  assert.ok(/(^|,)Task(,|$)/.test(ALLOWED_TOOLS), "Task stays — the lead delegates to the bundled subagents");
   assert.ok(!/(^|,)Bash(,|$)/.test(ALLOWED_TOOLS), "unrestricted Bash must never be allowed");
 });
 

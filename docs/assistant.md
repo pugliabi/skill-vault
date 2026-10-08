@@ -9,7 +9,7 @@ except the model calls Claude Code itself makes.
 
 - [Requirements](#requirements)
 - [Opening the assistant](#opening-the-assistant)
-- [Agents — who you're talking to](#agents--who-youre-talking-to)
+- [The agent, its skills, and its specialists](#the-agent-its-skills-and-its-specialists)
 - [Proactive suggestions — "For you"](#proactive-suggestions--for-you)
 - [Voice input](#voice-input)
 - [Ask AI entry points](#ask-ai-entry-points)
@@ -39,22 +39,44 @@ The pane is docked, not a modal — the rest of the app stays fully usable besid
 it. Drag its left edge to resize, collapse it to a slim rail, or close it; a
 running turn keeps working either way.
 
-## Agents — who you're talking to
+## The agent, its skills, and its specialists
 
-The chat routes to a purpose-built lead agent based on context, shown as a chip
-in the header:
+Every chat is led by one comprehensive agent — **vault-assistant** — which
+reads your context, loads the right skill for the job, and delegates heavy
+research or parallel work to specialists. The header chip shows the chat's
+*scope*:
 
 | Chip | When | Scope |
 |---|---|---|
-| `VAULT AGENT` | Opened generally (sidebar, Ctrl+J, bulk/filter context) | The whole vault: bulk update checks, push/sync, cross-skill error fixing |
+| `VAULT AGENT` | Opened generally (sidebar, Ctrl+J, bulk/filter context) | The whole vault: bulk update checks, push/sync, cross-skill error fixing, discovery |
 | `SKILL · <name>` | Opened from a skill (side panel, detail view, a failure row) | That one skill: its source, updates, files, targets, Notion link |
 
-Lead agents delegate to specialist subagents as needed — **repo-hunter** (finds
-where a skill's upstream moved), **update-fixer** (repairs broken origins
-end-to-end), **notion-doctor** (Notion sync diagnosis), **error-triager**
-(classifies recent failures) — and load bundled skills covering vault
-operations, the vault format, origin-hunting strategy, GitHub sync, and Notion
-sync. You'll see subagent handoffs in the tool timeline as `agent: repo-hunter`.
+**Ten bundled skills** carry the know-how, loaded on demand (you'll see
+`Skill` lines in the timeline):
+
+| Skill | Covers |
+|---|---|
+| vault-operations | Every vault tool recipe + a full tool I/O reference |
+| vault-format | Manifest, origins, hashes, update-status semantics |
+| syncing-from-github | Adopt → check → apply → repair pipeline, bulk passes |
+| finding-skill-origins | Git forensics + web search for moved/renamed sources |
+| connecting-notion | Link states, push/pull plans, drift, failure modes |
+| triaging-errors | Clustering failures, per-kind probes, exact fixes |
+| analyzing-suggestions | Reading "For you" cards; powers the AI briefing |
+| navigating-app-features | Every page, button, deep link, and sv CLI equivalent |
+| authoring-skills | Writing and improving skills to a quality checklist |
+| discovering-skills | GitHub star-ranked skill search → one-step adoption |
+
+**Five specialist subagents** handle work that would flood the chat or can
+run in parallel — they load the same skills and report back: **repo-hunter**
+(provenance research), **update-fixer** (one broken source each; several run
+in parallel on bulk passes), **skill-scout** (GitHub discovery sweeps),
+**error-triager** (read-only failure sweeps — it literally cannot mutate),
+**notion-doctor** (verbose Notion diagnosis). You'll see handoffs in the
+timeline as `agent: repo-hunter`. Simple asks are never delegated, so they
+stay seconds-fast; expect roughly 3–5s for a plain answer, ~30s with a tool
+check, ~1 minute for research, and 1–2 minutes for a bulk pass with parallel
+repairs.
 
 Context travels as removable **chips** under the header: the focused skill, a
 multi-selection from the Skills page, active filters, a failure being
@@ -141,13 +163,15 @@ deliberately bounded:
 
 ## Install the assistant's skills into your vault
 
-**Settings → AI assistant → Install assistant skills** copies the bundled
-skills (`vault-operations`, `vault-format`, `finding-skill-origins`,
-`syncing-from-github`, `connecting-notion`) into your vault as ordinary skills
-— pushable to providers and usable from Claude Code directly — and optionally
-the agent definitions into your claude provider's `agents/` folder. They're
-recorded with an origin pointing at the app's bundle, so app upgrades surface
-as normal skill updates.
+**Settings → AI assistant → Install assistant skills** copies all ten bundled
+skills (the table above, including their reference files) into your vault as
+ordinary skills — pushable to providers and usable from Claude Code directly —
+and optionally the agent definitions (`vault-assistant` plus the five
+specialists) into your claude provider's `agents/` folder. They're recorded
+with an origin pointing at the app's bundle, so app upgrades surface as normal
+skill updates. If you installed the older six-agent set, the obsolete
+`vault-manager.md` and `skill-agent.md` in `~/.claude/agents` can be deleted
+by hand — the installer never removes files.
 
 ## How it works
 

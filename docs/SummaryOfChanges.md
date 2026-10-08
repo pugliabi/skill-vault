@@ -3,6 +3,36 @@
 Running log of change sets, newest first. Detailed per-release notes live in
 [changelog.md](./changelog.md) and [app/CHANGELOG.md](../app/CHANGELOG.md).
 
+## 2026-10-08 — Assistant bundle v2: comprehensive lead + skill-backed specialists
+
+### Changes Made
+- One comprehensive `vault-assistant` lead agent (context doctrine, skill
+  routing table, delegation + latency rules, playbooks) replaces the
+  vault-manager/skill-agent pair.
+- Five thin subagents, each backed by shared skills: repo-hunter,
+  update-fixer (parallel per-source on bulk passes), NEW skill-scout
+  (GitHub discovery), error-triager (read-only), notion-doctor.
+- Ten skills: five rebuilt to the skill-creator standard with reference
+  files (tool I/O reference, manifest spec, GitHub search recipes, Notion
+  state machine), five new (triaging-errors, analyzing-suggestions,
+  navigating-app-features + feature catalog, authoring-skills + review
+  checklist, discovering-skills + search recipes).
+- Runtime: plugin dir added as a second --add-dir so reference files load;
+  briefing prompt routes through analyzing-suggestions; new discovery
+  empty-state prompt.
+
+### Files Modified
+- `app/assistant-plugin/**` (6 agents → 6 files incl. new lead + scout; 10
+  skill dirs, 6 references files; plugin.json v2.0.0)
+- `app/server/services/assistant/{context,turn}.ts` (+tests)
+- `app/client/src/{pages/Settings.tsx, lib/assistantStore.ts, components/assistant/MessageThread.tsx}`
+- `docs/{assistant,features,tech_reference,changelog,SummaryOfChanges}.md`
+
+### Impact
+- The assistant handles any request through explicit routing, discovers new
+  skills on GitHub by stars, authors skills to the vault standard, and runs
+  bulk repairs in parallel — with simple asks staying seconds-fast.
+
 ## 2026-10-06 — Repo split: this repo is now the single dev home
 
 ### Changes Made

@@ -16,13 +16,16 @@ import { getSkillDetail } from "../vault.ts";
 import { readNotionAuth, readNotionSettings } from "../notion/store.ts";
 import type { AgentKind, ChatContextChip } from "./session.ts";
 
-export const LEAD_AGENTS: Record<AgentKind, string> = {
-  vault: "vault-manager",
-  skill: "skill-agent",
-};
+/**
+ * One lead agent runs every conversation (bundle v2): vault-assistant.
+ * AgentKind still matters — it shapes the context block's scope wording
+ * (whole-vault vs focus-skill) and the UI's scope chip — but specialist
+ * work is delegated by the lead itself via Task subagents.
+ */
+export const LEAD_AGENT = "vault-assistant";
 
-export function pickLeadAgent(agent: AgentKind): string {
-  return LEAD_AGENTS[agent];
+export function pickLeadAgent(_agent: AgentKind): string {
+  return LEAD_AGENT;
 }
 
 export interface TurnContextData {

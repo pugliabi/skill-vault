@@ -1293,10 +1293,10 @@ function TagRow({
 /* ── AI assistant ───────────────────────────────────────────────── */
 
 /**
- * Install the assistant's bundled skills (vault-operations, vault-format,
- * finding-skill-origins, syncing-from-github, connecting-notion) into the
- * vault as ordinary skills — usable from Claude Code directly — and the
- * assistant's agent definitions into ~/.claude/agents.
+ * Install the assistant plugin's ten bundled skills into the vault as
+ * ordinary skills — usable from Claude Code directly — and the agent
+ * definitions (the vault-assistant lead + its five specialist subagents)
+ * into ~/.claude/agents.
  */
 function AssistantSection() {
   const qc = useQueryClient();
@@ -1346,8 +1346,8 @@ function AssistantSection() {
             onChange={(e) => setWithAgents(e.target.checked)}
             style={{ accentColor: "var(--accent)" }}
           />
-          Also install the agent definitions (vault-manager, skill-agent, repo-hunter, update-fixer,
-          notion-doctor, error-triager) into the claude provider's <code style={{ fontFamily: "var(--mono)" }}>agents/</code> folder
+          Also install the agent definitions (vault-assistant plus the repo-hunter, update-fixer,
+          skill-scout, error-triager, and notion-doctor specialists) into the claude provider's <code style={{ fontFamily: "var(--mono)" }}>agents/</code> folder
         </label>
         <div>
           <Button onClick={() => install.mutate()} disabled={install.isPending}>
