@@ -37,7 +37,7 @@ All JSON under `/api`. The notable groups:
 | Area | Endpoints |
 |---|---|
 | Config | `GET/PATCH /api/config`, provider CRUD |
-| Skills | `GET /api/skills`, `GET/PATCH/DELETE /api/skills/:name`, `GET /api/skills/search`, `PATCH /api/skills/:name/origin` (origin repair + optional verify) |
+| Skills | `GET /api/skills`, `GET/PATCH/DELETE /api/skills/:name`, `GET /api/skills/search`, `PATCH /api/skills/:name/origin` (origin repair + optional verify; `origin: null` clears it) |
 | Updates & adoption | `POST /api/adopt/{scan,clone,import,check-updates,update,cleanup,discover}` |
 | Push/pull/sync | `POST /api/push`, `POST /api/pull`, `GET /api/sync/plan` |
 | Notion | `GET /api/notion/{status,summary,plan,guard}`, `POST /api/notion/{run,force,push-selected,…}` (job polling via `GET /api/notion/run/:id`) |
@@ -53,7 +53,10 @@ One chat turn = one headless `claude -p` spawn (Claude Code CLI) with:
   cwd, which is pinned to the vault path);
 - `--output-format stream-json` adapted server-side into a compact NDJSON
   event stream on the `POST /api/assistant/stream` response (`text_delta`,
-  `tool_start/`result``, `turn_end` with cost, `error`);
+  `tool_start`/`tool_result`, `turn_end` with cost, `error`). Tool labels
+  are computed server-side in `streamEvents.ts` (`labelForTool`), which
+  handles both the `Task` and `Agent` delegation tool names and strips the
+  plugin namespace from agent and skill names;
 - `--plugin-dir app/assistant-plugin` providing the vault-assistant lead,
   five thin skill-backed subagents (repo-hunter, update-fixer, skill-scout,
   error-triager, notion-doctor), and ten skills with references/ files

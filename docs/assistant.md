@@ -7,8 +7,11 @@ diagnose failed operations. It runs on your local [Claude Code](https://claude.c
 CLI, so it uses your existing Claude subscription and nothing leaves your machine
 except the model calls Claude Code itself makes.
 
+![The assistant finding star-ranked GitHub skills and marking the ones already in the vault](images/assistant-discovery.png)
+
 - [Requirements](#requirements)
 - [Opening the assistant](#opening-the-assistant)
+- [Using it: what to ask](#using-it-what-to-ask)
 - [The agent, its skills, and its specialists](#the-agent-its-skills-and-its-specialists)
 - [Proactive suggestions — "For you"](#proactive-suggestions--for-you)
 - [Voice input](#voice-input)
@@ -23,8 +26,10 @@ except the model calls Claude Code itself makes.
 The [Claude Code](https://claude.com/claude-code) CLI (`claude`) must be installed
 and signed in on the machine running the app. The panel checks availability and
 shows the reason when it can't run (CLI missing, vault not configured). Chat turns
-bill to your Claude subscription; each reply shows its cost (typically $0.05–0.70
-per turn depending on how much tool work the agent does).
+bill to your Claude subscription; each reply shows its cost. Expect roughly
+$0.05–0.20 for a plain answer or a single check, and $1–1.50 for a
+research-heavy turn that delegates to a specialist (a GitHub discovery sweep, a
+multi-skill repair).
 
 ## Opening the assistant
 
@@ -39,6 +44,33 @@ The pane is docked, not a modal — the rest of the app stays fully usable besid
 it. Drag its left edge to resize, collapse it to a slim rail, or close it; a
 running turn keeps working either way.
 
+## Using it: what to ask
+
+Type (or dictate) a request in plain language. The assistant reads the page you
+are on, any skill you opened it from, and recent failures, so you rarely need to
+spell out context. Things it handles well:
+
+| You want to… | Ask something like | What happens |
+|---|---|---|
+| Know what needs attention | *"What needs attention?"* or click **✦ AI briefing** | A prioritized plan built from the suggestion cards. Nothing is changed. |
+| Update everything safely | *"Check all skills for updates and apply the safe ones"* | One bulk check, safe updates applied, conflicts listed for you to decide. |
+| Fix a broken source | *"This skill says gone upstream. Fix it."* | It traces where the source moved (git history, then the web), repairs the origin, and applies the update. |
+| Find new skills | *"Find top-starred GitHub skills for building MCP servers"* | A verified, star-ranked table with the ones you already have marked, then an offer to adopt. |
+| Diagnose failures | *"Why did my last sync fail?"* | Failures are clustered into root causes, each with the exact fix. |
+| Sync with Notion | *"What's the Notion sync state?"* / *"Push these to Notion"* | Status and a plan first; conflicts are sent to the Conflicts page. |
+| Write or improve a skill | *"Create a skill for reviewing SQL migrations"* | It writes the folder, registers it in the vault, and reviews it against a checklist. |
+| Find your way around | *"Where do I fix name mismatches?"* | The page, the path, and the steps, plus an offer to do it when it can. |
+
+When a decision is yours to make (which side wins a conflict, whether to clear a
+dead source), the assistant stops and gives you numbered options instead of
+picking for you. Reply with the number.
+
+Starting from a skill scopes the chat to that skill. Open **✦ Ask AI** on any
+skill and the header chip changes to `SKILL · <name>`, with prompts for that
+skill ready to click:
+
+![A chat scoped to one skill, opened from the skill's Ask AI button](images/assistant-skill-scope.png)
+
 ## The agent, its skills, and its specialists
 
 Every chat is led by one comprehensive agent — **vault-assistant** — which
@@ -52,7 +84,7 @@ research or parallel work to specialists. The header chip shows the chat's
 | `SKILL · <name>` | Opened from a skill (side panel, detail view, a failure row) | That one skill: its source, updates, files, targets, Notion link |
 
 **Ten bundled skills** carry the know-how, loaded on demand (you'll see
-`Skill` lines in the timeline):
+`Loading skill: …` lines in the timeline):
 
 | Skill | Covers |
 |---|---|
@@ -73,7 +105,7 @@ run in parallel — they load the same skills and report back: **repo-hunter**
 in parallel on bulk passes), **skill-scout** (GitHub discovery sweeps),
 **error-triager** (read-only failure sweeps — it literally cannot mutate),
 **notion-doctor** (verbose Notion diagnosis). You'll see handoffs in the
-timeline as `agent: repo-hunter`. Simple asks are never delegated, so they
+timeline as a line such as `agent: repo-hunter — Hunt check-updates upstream`. Simple asks are never delegated, so they
 stay seconds-fast; expect roughly 3–5s for a plain answer, ~30s with a tool
 check, ~1 minute for research, and 1–2 minutes for a bulk pass with parallel
 repairs.
@@ -95,6 +127,8 @@ signals — no AI cost, computed instantly:
 - stale or missing provider copies, vault integrity issues, name mismatches
 - origin-less skills, outdated Claude Desktop packages, lingering staging,
   untagged skills
+
+![The For you list: ranked suggestion cards with Fix with AI and deep-link actions](images/assistant-for-you.png)
 
 Each card offers **✦ Fix with AI** (opens the chat pre-filled with the exact
 context and task — you review before sending) and/or a deep link to the right
@@ -143,6 +177,8 @@ is doing (`Searching web: …`, `Running: git log…`, `vault: set_origin`,
 `agent: repo-hunter`) — click a line for its input/output. **Stop** kills the
 turn immediately. Each reply ends with its cost and duration.
 
+![A repair in progress: context chips, the request, and the tool timeline between the assistant's notes](images/assistant-timeline.png)
+
 The history button lists recent chats; conversations survive app restarts and
 resume with full context. Multiple chats can exist; one turn runs per chat
 (two app-wide) to bound spend.
@@ -155,8 +191,9 @@ the UI live, and version history keeps the prior state restorable. Its reach is
 deliberately bounded:
 
 - **Can:** read/edit skill files in the vault, run `git` (clones, history),
-  search the web, check/apply updates, repair origins, adopt, push/pull to
-  providers, Notion push/pull, repair audit findings.
+  search the web, check/apply updates, repair origins (or clear one whose
+  source you have confirmed is dead), adopt, push/pull to providers, Notion
+  push/pull, repair audit findings.
 - **Cannot (by design):** delete skills, force-overwrite Notion, connect
   Notion OAuth, run arbitrary shell commands, or touch files outside the vault
   and your clones folder. Those stay in the UI, with you.

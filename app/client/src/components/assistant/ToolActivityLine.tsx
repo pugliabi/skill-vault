@@ -24,6 +24,8 @@ function toolIcon(name: string) {
     case "Grep":
       return Icon.search;
     case "Task":
+    case "Agent":
+    case "Skill":
       return Icon.sparkle;
     default:
       return Icon.chevron;

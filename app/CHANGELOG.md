@@ -6,6 +6,13 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
 
 ## [Unreleased]
 
+### Fixed
+- Rendered markdown lists (assistant replies, file preview) show their bullets,
+  numbers, and indentation again; the CSS reset had stripped them.
+- Assistant timeline labels on newer Claude Code CLIs: `agent: <name> — <task>`
+  for delegations (tool named `Agent`, namespaced agent names) and
+  `Loading skill: <name>` for skill loads.
+
 ### Changed
 - **Assistant bundle v2.0.0** - one comprehensive `vault-assistant` lead
   (context doctrine, skill routing, delegation + latency rules) + five thin

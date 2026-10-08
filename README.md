@@ -30,24 +30,34 @@ The **Dashboard** is home base: skill and provider counts, synced / stale / miss
 
 ### Let the AI assistant fix things for you
 
-Press **Ctrl/⌘ + J** anywhere to open the built-in AI assistant — a docked chat
+![The assistant's For you list of ranked suggestions](docs/images/assistant-for-you.png)
+
+Press **Ctrl/⌘ + J** anywhere to open the built-in AI assistant, a docked chat
 pane powered by your local [Claude Code](https://claude.com/claude-code) CLI. It
 opens already knowing what needs attention: a **For you** list of ranked
 suggestion cards (broken update sources, available updates, failed operations,
-Notion drift, integrity issues…) computed from the app's own signals at zero AI
+Notion drift, integrity issues) computed from the app's own signals at zero AI
 cost and kept fresh by a background source sweep. Every card has a **✦ Fix with
-AI** button; every failure row and skill view has an **Ask AI** entry point.
+AI** button, and every failure row and skill view has an **Ask AI** entry point.
 
-The chat routes to the right agent for the context — a vault-wide agent for bulk
-work, a per-skill agent when a skill is in focus — backed by specialist
-subagents (repo-hunter, update-fixer, notion-doctor, error-triager). The
-flagship trick: a skill whose upstream repo moved ("gone upstream") gets traced
-through git history and the web, its origin repaired, and the update applied,
-while you watch the tool timeline. Everything it does flows through the app's
-own API — audited in Activity, reversible via version history — and destructive
-operations are excluded from its toolset by design. There's a mic button for
-dictation, and a one-click **AI briefing** that turns the suggestion list into a
-prioritized plan. Full guide: [AI Assistant](docs/assistant.md).
+![The assistant returning a star-ranked table of GitHub skills, with the ones already in the vault marked](docs/images/assistant-discovery.png)
+
+Ask in plain language. *"Find the top GitHub skills for creating agents"* returns
+a verified, star-ranked table with the skills you already have marked, then
+offers to adopt the rest. *"This skill says gone upstream, fix it"* traces the
+source through git history and the web, repairs the origin, and applies the
+update while you watch the tool timeline:
+
+![A repair in progress, showing the tool timeline](docs/images/assistant-timeline.png)
+
+One lead agent runs every chat, loads the right one of ten bundled skills for the
+job, and hands heavy research or parallel repairs to five specialist subagents.
+Everything it does goes through the app's own API, so it shows up in Activity and
+can be undone from version history. Deleting skills and force-overwriting Notion
+are left out of its toolset on purpose, and when a decision is yours it stops and
+gives you numbered options. There is a mic button for dictation and a one-click
+**AI briefing** that turns the suggestion list into a prioritized plan.
+Full guide: [AI Assistant](docs/assistant.md).
 
 ### Find skills fast
 
@@ -133,7 +143,7 @@ pyproject.toml      packaging for the CLI (installs `sv` and `skill-vault`)
 
 - [Getting Started](docs/getting-started.md) — full installation and setup guide
 - [Features & Use Cases](docs/features.md) — the app and CLI feature tour, with screenshots
-- [AI Assistant](docs/assistant.md) — the built-in chat agents, proactive suggestions, and voice input
+- [AI Assistant](docs/assistant.md) — using the built-in agent: what to ask, proactive suggestions, skills and specialists, cost, and safety
 - [Configuration Reference](docs/configuration.md) — every setting: config.json, env vars, CLI flags
 - [Examples](docs/examples.md) — recipes for common workflows
 - [Troubleshooting](docs/troubleshooting.md) — common issues and fixes

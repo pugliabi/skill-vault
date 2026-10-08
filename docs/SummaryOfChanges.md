@@ -3,6 +3,36 @@
 Running log of change sets, newest first. Detailed per-release notes live in
 [changelog.md](./changelog.md) and [app/CHANGELOG.md](../app/CHANGELOG.md).
 
+## 2026-10-08 — Assistant docs: screenshots, README showcase, usage guide
+
+### Changes Made
+- Four screenshots of the assistant added (For you suggestions, GitHub skill
+  discovery, a repair with its tool timeline, a skill-scoped chat).
+- README assistant section rewritten as a showcase with three of the shots.
+- `docs/assistant.md` gained a "Using it: what to ask" section (task table,
+  how decisions are handed back, skill-scoped chats) and inline screenshots;
+  cost guidance corrected to match observed turns.
+- Fixed: bulleted and numbered lists in rendered markdown had no markers or
+  indentation (the CSS reset stripped them), so a numbered menu from the
+  assistant showed no numbers. Affects the chat and the file preview.
+- Fixed: timeline labels for newer Claude Code CLIs. Delegations now read
+  `agent: <name> — <task>` (the tool is named `Agent` there, and plugin agent
+  names arrive namespaced), skill loads read `Loading skill: <name>`.
+- Origin clearing for confirmed-dead sources: `PATCH /api/skills/:name/origin`
+  accepts `origin: null`; the `set_origin` vault tool gained `clear: true`.
+
+### Files Modified
+- `docs/images/assistant-{for-you,discovery,timeline,skill-scope}.png` — new
+- `README.md`, `docs/assistant.md`, `docs/faq.md`, `docs/changelog.md`,
+  `docs/tech_reference.md`
+- `app/client/src/index.css` — list markers in `.sv-markdown`
+- `app/server/services/assistant/streamEvents.ts` (+test),
+  `app/client/src/components/assistant/ToolActivityLine.tsx` — labels/icons
+
+### Impact
+- The README and guide now show the agent working; numbered option menus are
+  readable; the timeline names which specialist and skill are in use.
+
 ## 2026-10-08 — Assistant bundle v2: comprehensive lead + skill-backed specialists
 
 ### Changes Made

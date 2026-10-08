@@ -25,6 +25,17 @@ semver; the project is pre-1.0, so minor versions carry feature batches.
 - **Origin repair API** — `PATCH /api/skills/:name/origin` rewrites a skill's
   update source with server-side stamping and optional immediate re-check;
   `checkUpdates` gained a `pull` opt-out.
+- **Clearing a dead origin** — `PATCH /api/skills/:name/origin` accepts
+  `origin: null`, and the assistant can do it once you confirm a source is
+  retired with no successor.
+- **Assistant documentation** — screenshots, a README showcase, and a
+  "what to ask" usage section in the [guide](./assistant.md).
+
+### Fixed
+- Bulleted and numbered lists in rendered markdown (assistant replies and the
+  file preview) now show their markers and indentation.
+- Assistant timeline labels on newer Claude Code CLIs: delegations read
+  `agent: <name> — <task>` and skill loads read `Loading skill: <name>`.
 
 ### Changed
 - **Assistant bundle v2.0.0** — rebuilt around one comprehensive

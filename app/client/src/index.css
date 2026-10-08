@@ -167,6 +167,13 @@
 .sv-markdown ol {
   margin: 0.6em 0;
 }
+/* Tailwind's preflight strips list markers and indentation; rendered
+   markdown needs them back (a "reply with a number" menu is unreadable
+   without its numbers). */
+.sv-markdown ul { list-style: disc; padding-left: 1.4em; }
+.sv-markdown ol { list-style: decimal; padding-left: 1.6em; }
+.sv-markdown li { margin: 0.2em 0; }
+.sv-markdown li > p { margin: 0.2em 0; }
 .sv-markdown a {
   color: var(--accent);
   text-decoration: underline;

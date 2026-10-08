@@ -65,11 +65,22 @@ export function labelForTool(name: string, input: Record<string, unknown>): stri
       return `Finding files: ${truncate(String(input.pattern ?? ""), 60)}`;
     case "Grep":
       return `Searching for: ${truncate(String(input.pattern ?? ""), 60)}`;
-    case "Task": {
-      const agent = typeof input.subagent_type === "string" && input.subagent_type ? input.subagent_type : "subagent";
+    // The delegation tool is "Task" on older CLIs and "Agent" on newer ones;
+    // plugin agents arrive namespaced ("skill-vault-assistant:repo-hunter").
+    case "Task":
+    case "Agent": {
+      const raw = typeof input.subagent_type === "string" && input.subagent_type ? input.subagent_type : "subagent";
+      const agent = raw.includes(":") ? raw.slice(raw.lastIndexOf(":") + 1) : raw;
       const desc = typeof input.description === "string" && input.description ? ` — ${input.description}` : "";
       return truncate(`agent: ${agent}${desc}`, 90);
     }
+    case "Skill": {
+      const raw = typeof input.skill === "string" ? input.skill : "";
+      const skill = raw.includes(":") ? raw.slice(raw.lastIndexOf(":") + 1) : raw;
+      return skill ? `Loading skill: ${skill}` : "Loading skill";
+    }
+    case "ToolSearch":
+      return "Loading tools";
     case "TodoWrite":
       return "Updating plan";
     default:

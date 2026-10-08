@@ -39,7 +39,7 @@ Use Rename in the app's skill detail — it cascades through the manifest and pr
 **License?** MIT — see [LICENSE](../LICENSE).
 
 **What does the AI assistant cost to run?**
-Chat turns run through your local Claude Code CLI on your existing Claude subscription — typically $0.05–0.70 per turn depending on tool use, shown after each reply. Everything else is free: the proactive **For you** suggestions, the background source sweep, and all badges are computed deterministically with no AI calls. The only AI spends are turns you start: messages, **Fix with AI** cards you send, and the **AI briefing** button.
+Chat turns run through your local Claude Code CLI on your existing Claude subscription — roughly $0.05–0.20 for a plain answer or single check and $1–1.50 for a research-heavy turn that delegates to a specialist; the cost is shown after each reply. Everything else is free: the proactive **For you** suggestions, the background source sweep, and all badges are computed deterministically with no AI calls. The only AI spends are turns you start: messages, **Fix with AI** cards you send, and the **AI briefing** button.
 
 **Can the assistant break my vault?**
 It edits through the same audited API the UI uses, so every change appears in Activity and is restorable from version history. Deleting skills, force-overwriting Notion, arbitrary shell commands, and anything outside the vault/clones folders are excluded from its toolset by design — those remain manual, in the UI.

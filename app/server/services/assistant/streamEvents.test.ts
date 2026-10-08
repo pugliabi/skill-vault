@@ -134,6 +134,10 @@ test("labelForTool renders scannable action lines per tool", () => {
   assert.equal(labelForTool("Grep", { pattern: "origin" }), "Searching for: origin");
   assert.equal(labelForTool("Task", { subagent_type: "repo-hunter", description: "find moved repo" }), "agent: repo-hunter — find moved repo");
   assert.equal(labelForTool("Task", {}), "agent: subagent");
+  assert.equal(labelForTool("Agent", { subagent_type: "skill-vault-assistant:skill-scout", description: "find skills" }), "agent: skill-scout — find skills");
+  assert.equal(labelForTool("Skill", { skill: "skill-vault-assistant:vault-operations" }), "Loading skill: vault-operations");
+  assert.equal(labelForTool("Skill", {}), "Loading skill");
+  assert.equal(labelForTool("ToolSearch", { query: "x" }), "Loading tools");
   assert.equal(labelForTool("TodoWrite", {}), "Updating plan");
   assert.equal(labelForTool("mcp__vault__set_origin", {}), "vault: set_origin");
   assert.equal(labelForTool("SomeFutureTool", {}), "SomeFutureTool");
