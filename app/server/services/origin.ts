@@ -25,7 +25,7 @@ import type { ManifestSkill, SkillOrigin, UpdateCheckResult } from "../types/vau
 import { recordActivity } from "./activity.ts";
 import { checkUpdates } from "./updates.ts";
 import { hashSkillDirNormalized } from "./skillHash.ts";
-import { patchManifestSkill, readManifest, skillDir } from "./vault.ts";
+import { patchManifestSkill, readManifest, skillDir, writeManifest } from "./vault.ts";
 
 /** Thrown for caller mistakes — routes map it to a 4xx. */
 export class OriginError extends Error {
@@ -77,6 +77,24 @@ export interface SetOriginResult {
   entry: ManifestSkill;
   /** Present when the caller asked to verify — the fresh update check. */
   check?: UpdateCheckResult;
+}
+
+/**
+ * Remove a skill's origin entirely — for sources that are confirmed dead
+ * (upstream intentionally retired, no successor). The skill keeps working;
+ * it simply leaves the update-check universe (`no_origin`). Returns the
+ * updated entry.
+ */
+export function clearSkillOrigin(vaultPath: string, name: string): ManifestSkill {
+  const manifest = readManifest(vaultPath);
+  const existing = manifest.skills[name];
+  if (!existing) {
+    throw new OriginError(404, `skill not found: ${name}`);
+  }
+  delete existing.origin;
+  writeManifest(vaultPath, manifest);
+  recordActivity({ kind: "update", skill: name, ok: true, message: "origin cleared (source retired)" });
+  return existing;
 }
 
 export async function setSkillOrigin(

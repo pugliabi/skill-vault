@@ -19,7 +19,7 @@ import {
 import { validateSkillName } from "../services/skillName.ts";
 import { withHistory, recordVersion } from "../services/history.ts";
 import { SkillOpError, deleteVaultSkill, renameVaultSkill } from "../services/skillLifecycle.ts";
-import { OriginError, originBodyTooLarge, setSkillOrigin, type OriginInput } from "../services/origin.ts";
+import { OriginError, clearSkillOrigin, originBodyTooLarge, setSkillOrigin, type OriginInput } from "../services/origin.ts";
 import { fixSkillName, listNameMismatches } from "../services/skillNames.ts";
 import type { ProviderOutcome } from "../services/providerLinks.ts";
 
@@ -575,9 +575,12 @@ export function skillsRouter(opts: { isBusy?: () => boolean } = {}): Router {
       res.status(400).json({ error: "invalid skill name" });
       return;
     }
-    const body = (req.body ?? {}) as { origin?: OriginInput; verify?: boolean };
-    if (!body.origin || typeof body.origin !== "object") {
-      res.status(400).json({ error: "body must include an origin object" });
+    const body = (req.body ?? {}) as { origin?: OriginInput | null; verify?: boolean };
+    // `origin: null` = clear the provenance entirely (a confirmed-dead
+    // source); the skill keeps working but leaves the update-check universe.
+    const clearing = body.origin === null;
+    if (!clearing && (!body.origin || typeof body.origin !== "object")) {
+      res.status(400).json({ error: "body must include an origin object (or null to clear)" });
       return;
     }
     if (originBodyTooLarge(body)) {
@@ -585,7 +588,12 @@ export function skillsRouter(opts: { isBusy?: () => boolean } = {}): Router {
       return;
     }
     try {
-      const result = await setSkillOrigin(cfg.vault_path, req.params.name, body.origin, {
+      if (clearing) {
+        const entry = clearSkillOrigin(cfg.vault_path, req.params.name);
+        res.json({ entry, cleared: true });
+        return;
+      }
+      const result = await setSkillOrigin(cfg.vault_path, req.params.name, body.origin as OriginInput, {
         verify: body.verify === true,
       });
       res.json({ entry: result.entry, ...(result.check ? { check: result.check } : {}) });

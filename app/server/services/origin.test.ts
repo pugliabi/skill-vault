@@ -144,3 +144,16 @@ test("validation: missing skill 404s; bad shapes 400 before any write", async ()
   assert.equal((readEntry().origin as Record<string, unknown>).content_hash, "oldhash", "no write on validation failure");
   assert.equal(listActivity().length, 0);
 });
+
+test("clearSkillOrigin removes the origin, keeps the rest of the entry, and logs activity", async () => {
+  const { clearSkillOrigin } = await import("./origin.ts");
+  const entry = clearSkillOrigin(vault, "pdf-tools");
+  assert.equal(entry.origin, undefined);
+  assert.deepEqual(entry.targets, ["claude"]);
+  const onDisk = readEntry();
+  assert.ok(!("origin" in onDisk), "origin removed from skills.json");
+  assert.equal(onDisk.source, "adopted", "sibling fields untouched");
+  const acts = listActivity();
+  assert.match(acts.at(-1)?.message ?? "", /origin cleared/);
+  await assert.rejects(async () => clearSkillOrigin(vault, "nope"), (err) => err instanceof OriginError && err.status === 404);
+});

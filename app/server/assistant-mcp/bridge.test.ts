@@ -230,3 +230,11 @@ test("notion_status degrades gracefully when the summary needs a connection", as
   const out = await TOOLS.notion_status.handler({}, http, noSleep);
   assert.deepEqual(out, { status: { connected: false }, summary: null });
 });
+
+test("set_origin clear:true PATCHes origin:null; origin-less call without clear errors", async () => {
+  const http = fakeHttp([{ status: 200, json: { entry: {}, cleared: true } }]);
+  const out = await TOOLS.set_origin.handler({ name: "dead skill", clear: true }, http, noSleep);
+  assert.deepEqual(http.calls, [{ method: "PATCH", path: "/api/skills/dead%20skill/origin", body: { origin: null } }]);
+  assert.deepEqual(out, { entry: {}, cleared: true });
+  await assert.rejects(TOOLS.set_origin.handler({ name: "x" }, fakeHttp([]), noSleep), /provide origin, or clear:true/);
+});

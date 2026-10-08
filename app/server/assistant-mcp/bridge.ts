@@ -234,20 +234,29 @@ export const TOOLS: Record<string, ToolDef> = {
   },
   set_origin: {
     description:
-      "Rewrite a skill's update-from-source origin — THE fix for upstream_missing/source_missing after locating where the source moved. adopted_at/content_hash are stamped server-side. verify:true re-checks immediately and returns the fresh status.",
+      "Rewrite a skill's update-from-source origin — THE fix for upstream_missing/source_missing after locating where the source moved. adopted_at/content_hash are stamped server-side. verify:true re-checks immediately and returns the fresh status. Pass clear:true (no origin) ONLY when the user confirmed the source is dead with no successor — the skill keeps working but stops update-checking.",
     schema: {
       name: z.string(),
-      origin: z.object(originShape),
+      origin: z.object(originShape).optional(),
       verify: z.boolean().optional().describe("Recommended: confirm the repair in the same call"),
+      clear: z.boolean().optional().describe("Remove the origin entirely (user-confirmed dead source). Mutually exclusive with origin."),
     },
-    handler: async (args, http) =>
-      expectOk(
+    handler: async (args, http) => {
+      if (args.clear === true) {
+        return expectOk(
+          await http("PATCH", `/api/skills/${encodeURIComponent(String(args.name))}/origin`, { origin: null }),
+          "set_origin(clear)",
+        );
+      }
+      if (!args.origin) throw new BridgeToolError("set_origin: provide origin, or clear:true to remove it");
+      return expectOk(
         await http("PATCH", `/api/skills/${encodeURIComponent(String(args.name))}/origin`, {
           origin: args.origin,
           verify: args.verify ?? true,
         }),
         "set_origin",
-      ),
+      );
+    },
   },
   adopt_skills: {
     description:

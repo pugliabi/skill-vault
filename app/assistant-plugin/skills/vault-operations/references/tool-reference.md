@@ -60,6 +60,7 @@ Overwrites the vault copies from upstream and refreshes origin stamps. Returns `
 
 ### set_origin `{name, origin: {type: "git"|"dir"|"provider", url?, path?, provider_id?, subpath?, ref?}, verify?: boolean (default true)}`
 Rewrites a skill's update source. Rules: `git` needs `url` (or a local clone `path`); `dir` needs `path`; `provider` needs `provider_id`; `subpath` is "/"-separated relative, "" = root. Server stamps `adopted_at` + `content_hash` — never send them. With verify, the response includes `check` (a fresh UpdateCheckResult) — expect `update_available`/`up_to_date`; `upstream_missing` again = the repair is wrong.
+Clearing: `{name, clear: true}` removes the origin entirely — ONLY after the user confirms the source is dead with no successor; the skill keeps working but leaves the update-check universe (`no_origin`).
 
 ### adopt_skills `{source_path, items: [{name, path}] (min 1), overwrite?, origin_context?: {type, root, url?, ref?, provider_id?}}`
 Copies scanned skills into the vault. Returns `{imported, updated, skipped}`. ALWAYS pass `origin_context` so each skill gets an origin. `overwrite:true` only when deliberately replacing an existing skill.
