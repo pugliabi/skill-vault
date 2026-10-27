@@ -33,6 +33,7 @@ import open from "open";
 import { createApp } from "./index.ts";
 import { readCliAppBlock } from "./services/appConfig.ts";
 import { acquireLock, buildVersion, readLock, releaseLock } from "./services/instanceLock.ts";
+import { installLogFile } from "./services/logFile.ts";
 import { setServerPort } from "./services/runtime.ts";
 
 // ── CLI argument parsing ───────────────────────────────────────
@@ -42,6 +43,7 @@ interface ParsedArgs {
   host?: string;
   noOpen?: boolean;
   help?: boolean;
+  logFile?: string;
 }
 
 /**
@@ -67,6 +69,10 @@ function parseArgs(argv: string[]): ParsedArgs {
       out.host = argv[++i];
     } else if (a.startsWith("--host=")) {
       out.host = a.slice("--host=".length);
+    } else if (a === "--log-file") {
+      out.logFile = argv[++i];
+    } else if (a.startsWith("--log-file=")) {
+      out.logFile = a.slice("--log-file=".length);
     } else if (a === "--no-open") {
       out.noOpen = true;
     } else if (a === "--help") {
@@ -87,6 +93,7 @@ function printHelp(): void {
     -p, --port <port>    Port to bind (default: 9994)
     -h, --host <host>    Host to bind (default: 127.0.0.1)
         --no-open        Don't auto-open the browser
+        --log-file <path>  Also write all output to <path> (rotated at 5 MB)
         --help           Show this message
 
   Precedence (highest wins):
@@ -105,6 +112,8 @@ if (args.help) {
   printHelp();
   process.exit(0);
 }
+// Before anything else logs, so the whole run lands in the file.
+if (args.logFile) installLogFile(args.logFile);
 
 const cliAppBlock = readCliAppBlock();
 
