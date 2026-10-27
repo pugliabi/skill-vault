@@ -33,6 +33,8 @@ import open from "open";
 import { createApp } from "./index.ts";
 import { readCliAppBlock } from "./services/appConfig.ts";
 import { acquireLock, buildVersion, readLock, releaseLock } from "./services/instanceLock.ts";
+import { sseClientCount } from "./routes/events.ts";
+import { startIdleStop } from "./services/idleStop.ts";
 import { installLogFile } from "./services/logFile.ts";
 import { setServerPort } from "./services/runtime.ts";
 
@@ -44,6 +46,7 @@ interface ParsedArgs {
   noOpen?: boolean;
   help?: boolean;
   logFile?: string;
+  exitWhenIdle?: boolean;
 }
 
 /**
@@ -73,6 +76,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       out.logFile = argv[++i];
     } else if (a.startsWith("--log-file=")) {
       out.logFile = a.slice("--log-file=".length);
+    } else if (a === "--exit-when-idle") {
+      out.exitWhenIdle = true;
     } else if (a === "--no-open") {
       out.noOpen = true;
     } else if (a === "--help") {
@@ -94,6 +99,7 @@ function printHelp(): void {
     -h, --host <host>    Host to bind (default: 127.0.0.1)
         --no-open        Don't auto-open the browser
         --log-file <path>  Also write all output to <path> (rotated at 5 MB)
+        --exit-when-idle   Stop 60 s after the last app window closes (used by the Start Menu launcher)
         --help           Show this message
 
   Precedence (highest wins):
@@ -176,6 +182,12 @@ async function findFreePort(start: number, host: string): Promise<number> {
 
 // ── Main ──────────────────────────────────────────────────────
 
+/** Positive integer from an env var (tests shorten the idle timers), else the fallback. */
+function envMs(name: string, fallback: number): number {
+  const n = Number(process.env[name]);
+  return process.env[name] && Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
 async function main(): Promise<void> {
   const preferredPort = resolvePort();
   const host = resolveHost();
@@ -244,6 +256,20 @@ async function main(): Promise<void> {
     void shutdown();
   });
   process.on("exit", () => releaseLock(process.pid));
+
+  if (args.exitWhenIdle) {
+    startIdleStop({
+      clients: sseClientCount,
+      isBusy: () => (app.locals.isBusy as () => boolean)(),
+      graceMs: envMs("SKILL_VAULT_IDLE_GRACE_MS", 60_000),
+      bootGraceMs: envMs("SKILL_VAULT_IDLE_BOOT_GRACE_MS", 120_000),
+      tickMs: envMs("SKILL_VAULT_IDLE_TICK_MS", 5_000),
+      onIdle: () => {
+        console.log("[idle] no app window for a while; stopping");
+        void shutdown();
+      },
+    });
+  }
 }
 
 main().catch((err) => {

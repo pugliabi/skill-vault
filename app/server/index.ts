@@ -37,7 +37,7 @@ import {
 } from "./routes/events.ts";
 import { activityRouter } from "./routes/activity.ts";
 import { assistantRouter } from "./routes/assistant.ts";
-import { abortAllTurns } from "./services/assistant/session.ts";
+import { abortAllTurns, anyTurnRunning } from "./services/assistant/session.ts";
 import { foregroundCheckActive, startUpdateSweep } from "./services/assistant/updateSweep.ts";
 import { subscribeActivity } from "./services/activity.ts";
 import {
@@ -177,6 +177,8 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
     }
     setActiveWatcher(null);
   };
+  // Work that must not be cut off by an idle stop (launcher --exit-when-idle).
+  app.locals.isBusy = (): boolean => anyNotionJobRunning() || anyTurnRunning() || foregroundCheckActive();
 
   app.use(
     "/api",

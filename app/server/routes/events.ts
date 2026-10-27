@@ -85,6 +85,11 @@ export function closeAllSse(): void {
   clients.clear();
 }
 
+/** Open /api/events connections — one per open app window or tab. */
+export function sseClientCount(): number {
+  return clients.size;
+}
+
 export function eventsRouter(): Router {
   const router = Router();
 
