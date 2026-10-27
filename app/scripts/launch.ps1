@@ -3,8 +3,13 @@
 
   1. Reuse a running server (~/.skill-vault/app.lock + GET /api/health).
   2. Otherwise rebuild if the source is newer than dist/ (scripts/build-state.mjs
-     exits 10), then start the built server hidden with --exit-when-idle.
+     exits 10), then start the built server hidden with --exit-when-idle,
+     bound to 127.0.0.1 (a desktop app; the health probe and window use it).
   3. Open an Edge app window (default browser if Edge isn't installed).
+
+  Steps 1-3 run one launch at a time per user (a named mutex), so quick
+  double-clicks reuse the first server instead of starting a second one or
+  rebuilding dist/ twice.
 
   Steps go to ~/.skill-vault/logs/launch.log; any failure shows a message box
   naming the log. Windows PowerShell 5.1 compatible.
@@ -90,41 +95,56 @@ function Open-AppWindow([int]$Port) {
 
 try {
   Write-Log '--- launch'
-  $live = Get-LiveServer
-  if ($live) {
-    Write-Log "reusing the running server (pid $($live.pid), port $($live.port))"
-  } else {
-    $node = Get-Command node -ErrorAction SilentlyContinue
-    if (-not $node) { Stop-WithError 'Node.js was not found. Install it (winget install OpenJS.NodeJS.LTS), then run setup.cmd again.' }
+  # One launch at a time: a second click waits here, then finds the first
+  # click's server and reuses it. A launcher that died holding the mutex
+  # leaves it abandoned, which the next WaitOne reports and we take over.
+  $mutex = New-Object System.Threading.Mutex($false, 'Local\SkillVaultLauncher')
+  $owned = $false
+  try {
+    try { $owned = $mutex.WaitOne([TimeSpan]::FromSeconds(120)) } catch [System.Threading.AbandonedMutexException] { $owned = $true }
+    if (-not $owned) { Stop-WithError 'Another Skill Vault launch is still starting. Try again in a moment.' }
 
-    Push-Location $AppDir
-    try {
-      & $node.Source 'scripts/build-state.mjs'
-      if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 10) {
-        Stop-WithError "Couldn't check whether Skill Vault needs rebuilding (build-state exit $LASTEXITCODE). Run setup.cmd again."
-      }
-      if ($LASTEXITCODE -eq 10) {
-        Write-Log 'the source changed since the last build; rebuilding'
-        Remove-Item Env:NODE_ENV -ErrorAction SilentlyContinue
-        # cmd /c keeps npm's stderr from becoming a terminating PowerShell error.
-        cmd /c "npm run build >> `"$LaunchLog`" 2>&1"
-        if ($LASTEXITCODE -ne 0) { Stop-WithError 'Rebuilding Skill Vault failed.' }
-      }
-    } finally {
-      Pop-Location
-    }
+    $live = Get-LiveServer
+    if ($live) {
+      Write-Log "reusing the running server (pid $($live.pid), port $($live.port))"
+    } else {
+      $node = Get-Command node -ErrorAction SilentlyContinue
+      if (-not $node) { Stop-WithError 'Node.js was not found. Install it (winget install OpenJS.NodeJS.LTS), then run setup.cmd again.' }
 
-    $env:NODE_ENV = 'production'
-    $serverArgs = @('dist/launcher.js', '--no-open', '--exit-when-idle', '--log-file', "`"$ServerLog`"")
-    Start-Process -FilePath $node.Source -ArgumentList $serverArgs -WorkingDirectory $AppDir -WindowStyle Hidden
-    $deadline = (Get-Date).AddSeconds(20)
-    while (-not ($live = Get-LiveServer)) {
-      if ((Get-Date) -gt $deadline) { Stop-WithError "Skill Vault didn't start within 20 seconds. Server log: $ServerLog" }
-      Start-Sleep -Milliseconds 250
+      Push-Location $AppDir
+      try {
+        & $node.Source 'scripts/build-state.mjs'
+        if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 10) {
+          Stop-WithError "Couldn't check whether Skill Vault needs rebuilding (build-state exit $LASTEXITCODE). Run setup.cmd again."
+        }
+        if ($LASTEXITCODE -eq 10) {
+          Write-Log 'the source changed since the last build; rebuilding'
+          Remove-Item Env:NODE_ENV -ErrorAction SilentlyContinue
+          # cmd /c keeps npm's stderr from becoming a terminating PowerShell error.
+          cmd /c "npm run build >> `"$LaunchLog`" 2>&1"
+          if ($LASTEXITCODE -ne 0) { Stop-WithError 'Rebuilding Skill Vault failed.' }
+        }
+      } finally {
+        Pop-Location
+      }
+
+      $env:NODE_ENV = 'production'
+      # 127.0.0.1 explicitly: a HOST setting (.env or config) must not move the
+      # server somewhere the health probe below can't reach.
+      $serverArgs = @('dist/launcher.js', '--no-open', '--host', '127.0.0.1', '--exit-when-idle', '--log-file', "`"$ServerLog`"")
+      Start-Process -FilePath $node.Source -ArgumentList $serverArgs -WorkingDirectory $AppDir -WindowStyle Hidden
+      $deadline = (Get-Date).AddSeconds(20)
+      while (-not ($live = Get-LiveServer)) {
+        if ((Get-Date) -gt $deadline) { Stop-WithError "Skill Vault didn't start within 20 seconds. Server log: $ServerLog" }
+        Start-Sleep -Milliseconds 250
+      }
+      Write-Log "started the server (pid $($live.pid), port $($live.port))"
     }
-    Write-Log "started the server (pid $($live.pid), port $($live.port))"
+    Open-AppWindow ([int]$live.port)
+  } finally {
+    if ($owned) { $mutex.ReleaseMutex() }
+    $mutex.Dispose()
   }
-  Open-AppWindow ([int]$live.port)
 } catch {
   Stop-WithError "Skill Vault couldn't start: $($_.Exception.Message)"
 }

@@ -132,6 +132,8 @@ The Start Menu launcher keeps a few files in `~/.skill-vault/`:
 
 All are safe to delete while the app is closed.
 
+A server started from the Start Menu always binds `127.0.0.1` (only this computer can reach it), whatever `HOST` says; to expose the app on your LAN, run it from a terminal instead: `npm run dev -- --host 0.0.0.0`.
+
 ## Assistant state files (per machine)
 
 The AI assistant keeps its state in `~/.skill-vault/`, next to the config —
