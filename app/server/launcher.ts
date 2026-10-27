@@ -266,13 +266,27 @@ async function main(): Promise<void> {
     ];
     if (args.exitWhenIdle) next.push("--exit-when-idle");
     if (args.logFile) next.push("--log-file", args.logFile);
-    spawn(process.execPath, next, {
-      cwd: APP_ROOT,
-      detached: true,
-      stdio: "ignore",
-      windowsHide: true,
-      env: { ...process.env, NODE_ENV: "production" },
-    }).unref();
+    try {
+      const child = spawn(process.execPath, next, {
+        cwd: APP_ROOT,
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+        env: { ...process.env, NODE_ENV: "production" },
+      });
+      child.once("error", (err) => console.error("[update] the new server failed to start:", err));
+      child.unref();
+    } catch (err) {
+      // Stay up: take the lock back and let the updater report the failure.
+      acquireLock({
+        pid: process.pid,
+        port: getServerPort() ?? port,
+        started_at: new Date().toISOString(),
+        version: buildVersion(APP_ROOT, MODE),
+        mode: MODE,
+      });
+      throw err;
+    }
     setTimeout(() => void shutdown(), 500);
   }
 

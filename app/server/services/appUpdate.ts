@@ -340,6 +340,12 @@ export function createAppUpdater(deps: AppUpdaterDeps): AppUpdater {
       }
       return out;
     };
+    const rollbackFailed = (what: string, r: { stderr: string; stdout: string }) => {
+      const tail = (r.stderr || r.stdout).trim().split("\n").slice(-3).join(" ");
+      const msg = `rollback also failed: ${what}: ${tail}`;
+      applyError = `${applyError}; ${msg}`;
+      onEvent({ step, state: "error", message: msg });
+    };
     let step: ApplyEvent["step"] = "pull";
     let reinstalled = false;
     try {
@@ -368,16 +374,37 @@ export function createAppUpdater(deps: AppUpdaterDeps): AppUpdater {
       const message = (err as Error).message;
       applyError = `${step} failed: ${message}`;
       onEvent({ step, state: "error", message });
-      await run("git", ["reset", "--hard", oldSha], { cwd: repo });
-      if (reinstalled) await npmCi();
-      fs.rmSync(path.join(deps.appDir, "dist-next"), { recursive: true, force: true });
-      applying = false;
+      try {
+        const reset = await run("git", ["reset", "--hard", oldSha], { cwd: repo });
+        if (reset.code !== 0) rollbackFailed("git reset", reset);
+        else if (reinstalled) {
+          const again = await npmCi();
+          if (again.code !== 0) rollbackFailed("npm ci", again);
+        }
+      } catch (rbErr) {
+        rollbackFailed("rollback", { stderr: (rbErr as Error).message, stdout: "" });
+      } finally {
+        try {
+          fs.rmSync(path.join(deps.appDir, "dist-next"), { recursive: true, force: true });
+        } catch {
+          /* a leftover staging folder is harmless; the next build clears it */
+        }
+        applying = false;
+      }
       return false;
     }
     // Code and build now match the new commit, so a hand-over failure is
     // not rolled back: the next launch starts the new build.
     onEvent({ step: "restart", state: "start" });
-    deps.restart();
+    try {
+      deps.restart();
+    } catch (err) {
+      const message = (err as Error).message;
+      applyError = `restart failed: ${message}`;
+      onEvent({ step: "restart", state: "error", message });
+      applying = false;
+      return false;
+    }
     return true;
   }
 

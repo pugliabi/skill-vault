@@ -198,7 +198,7 @@ const BUILD = "node scripts/build.mjs --out dist-next";
 const NPM_CI = "npm ci --include=dev --no-audit --no-fund";
 
 /** A temp repo root with app/dist/old.txt; the fake build writes app/dist-next/new.txt. */
-function applyHarness(over: Record<string, Partial<RunResult>> = {}) {
+function applyHarness(over: Record<string, Partial<RunResult>> = {}, restartImpl?: () => void) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "sv-upd-"));
   const appDir = path.join(root, "app");
   fs.mkdirSync(path.join(appDir, "dist"), { recursive: true });
@@ -218,16 +218,26 @@ function applyHarness(over: Record<string, Partial<RunResult>> = {}) {
     const key = [cmd === process.execPath ? "node" : cmd, ...args].join(" ");
     calls.push(key);
     if (cmd === "npm" || cmd === process.execPath) nodeEnvs.push(opts.env?.NODE_ENV);
-    if (key === BUILD && !(BUILD in over)) {
+    if (key === BUILD) {
+      // The build stages dist-next/ whether or not it then fails.
       fs.mkdirSync(path.join(opts.cwd, "dist-next"), { recursive: true });
       fs.writeFileSync(path.join(opts.cwd, "dist-next", "new.txt"), "new");
-      return { code: 0, stdout: "", stderr: "" };
+      if (!(BUILD in over)) return { code: 0, stdout: "", stderr: "" };
     }
     const r = responses[key];
     return r ? { code: 0, stdout: "", stderr: "", ...r } : { code: 1, stdout: "", stderr: `unexpected: ${key}` };
   };
   let restarts = 0;
-  const u = createAppUpdater({ appDir, mode: "production", isBusy: () => false, restart: () => void restarts++, run });
+  const u = createAppUpdater({
+    appDir,
+    mode: "production",
+    isBusy: () => false,
+    restart: () => {
+      restarts++;
+      restartImpl?.();
+    },
+    run,
+  });
   return { appDir, calls, nodeEnvs, updater: u, restarts: () => restarts };
 }
 
@@ -291,6 +301,47 @@ test("apply refuses, with the reason, when the checkout can't be updated", async
   assert.equal(await h.updater.apply((e) => events.push(e)), false);
   assert.deepEqual(events, [{ step: "check", state: "error", message: "the checkout has uncommitted changes" }]);
   assert.ok(!h.calls.includes("git pull --ff-only origin main"));
+});
+
+test("a failed build removes dist-next and keeps dist/ as it was", async () => {
+  const h = applyHarness({ [BUILD]: { code: 1, stderr: "vite: boom" } });
+  assert.equal(await h.updater.apply(() => {}), false);
+  assert.equal(fs.existsSync(path.join(h.appDir, "dist-next")), false);
+  assert.deepEqual(fs.readdirSync(path.join(h.appDir, "dist")), ["old.txt"]);
+});
+
+test("a rollback cleanup that throws doesn't leave 'applying' stuck", async (t) => {
+  const h = applyHarness({ [BUILD]: { code: 1, stderr: "vite: boom" } });
+  const realRm = fs.rmSync;
+  t.mock.method(fs, "rmSync", (p: fs.PathLike, o?: fs.RmOptions) => {
+    if (String(p).endsWith("dist-next")) throw new Error("EBUSY: resource busy");
+    return realRm(p, o);
+  });
+  assert.equal(await h.updater.apply(() => {}), false);
+  assert.equal(h.updater.isApplying(), false);
+});
+
+test("a failed git reset during rollback is reported", async () => {
+  const h = applyHarness({ [BUILD]: { code: 1, stderr: "vite: boom" }, [`git reset --hard ${A}`]: { code: 1, stderr: "fatal: index.lock exists" } });
+  const events: ApplyEvent[] = [];
+  assert.equal(await h.updater.apply((e) => events.push(e)), false);
+  const last = events.at(-1);
+  assert.equal(last?.state, "error");
+  assert.match(last?.message ?? "", /rollback also failed/);
+  assert.match(h.updater.status().last_error ?? "", /rollback also failed/);
+  assert.equal(h.updater.isApplying(), false);
+});
+
+test("a restart hook that throws is reported and releases 'applying'", async () => {
+  const h = applyHarness({}, () => {
+    throw new Error("spawn EACCES");
+  });
+  const events: ApplyEvent[] = [];
+  assert.equal(await h.updater.apply((e) => events.push(e)), false);
+  assert.deepEqual(events.at(-1), { step: "restart", state: "error", message: "spawn EACCES" });
+  assert.equal(h.updater.isApplying(), false);
+  assert.match(h.updater.status().last_error ?? "", /^restart failed/);
+  assert.ok(!h.calls.some((c) => c.startsWith("git reset")), "code and build already match the new commit");
 });
 
 test("swapDist replaces dist/ with dist-next/", () => {
