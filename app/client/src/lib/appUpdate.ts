@@ -24,7 +24,8 @@ export interface AppUpdateStatus {
 
 export interface ApplyEvent {
   step: "check" | "pull" | "install" | "build" | "restart";
-  state: "start" | "done" | "skip" | "error";
+  /** "wait": the new build is ready; the restart is held until running jobs finish. */
+  state: "start" | "done" | "skip" | "wait" | "error";
   message?: string;
 }
 

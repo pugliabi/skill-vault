@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "./ui/primitives";
 import {
@@ -15,9 +15,14 @@ import {
  * restart and reloads once the new server answers.
  */
 export function UpdatePill() {
-  // Snapshot of the status at click time: a refetch that reports behind: 0
-  // mid-update must not unmount the dialog and its progress output.
+  const qc = useQueryClient();
+  // Snapshot of the status at click time keeps the dialog mounted: a refetch
+  // that reports behind: 0 mid-update must not unmount it and its progress.
+  // While the live status is still behind, the dialog shows that instead, so
+  // its reason and button follow eligibility (a job finishing, a cleaned
+  // checkout) rather than freezing at click time.
   const [snapshot, setSnapshot] = useState<AppUpdateStatus | null>(null);
+  const [checking, setChecking] = useState(false);
   const { data } = useQuery({
     queryKey: ["app-update"],
     queryFn: appUpdateApi.status,
@@ -28,11 +33,30 @@ export function UpdatePill() {
   });
   const showPill = !!data && data.behind > 0;
   if (!showPill && !snapshot) return null;
+
+  // Opening re-checks the checkout (the background check runs only every
+  // 6 h), so fixing what blocked the update is picked up right away.
+  const open = (current: AppUpdateStatus) => {
+    setSnapshot(current);
+    setChecking(true);
+    appUpdateApi
+      .check()
+      .then((fresh) => {
+        qc.setQueryData(["app-update"], fresh);
+        if (fresh.behind > 0) setSnapshot((s) => (s ? fresh : s));
+      })
+      .catch(() => {
+        /* keep showing the cached status */
+      })
+      .finally(() => setChecking(false));
+  };
+  const shown = data && data.behind > 0 ? data : snapshot;
+
   return (
     <>
       {showPill && (
       <button
-        onClick={() => setSnapshot(data)}
+        onClick={() => open(data)}
         title="A newer version of Skill Vault is available"
         style={{
           display: "flex",
@@ -52,7 +76,9 @@ export function UpdatePill() {
         <span style={{ fontFamily: "var(--mono)", fontSize: 9.5, color: "var(--ink-4)" }}>{data.behind}</span>
       </button>
       )}
-      {snapshot && <AppUpdateDialog status={snapshot} onClose={() => setSnapshot(null)} />}
+      {snapshot && shown && (
+        <AppUpdateDialog status={shown} checking={checking} onClose={() => setSnapshot(null)} />
+      )}
     </>
   );
 }
@@ -67,13 +93,24 @@ const STEP_LABEL: Record<ApplyEvent["step"], string> = {
   restart: "Restart",
 };
 
-const MARK: Record<ApplyEvent["state"], string> = { start: "…", done: "✓", skip: "–", error: "✗" };
+const MARK: Record<ApplyEvent["state"], string> = { start: "…", done: "✓", skip: "–", wait: "…", error: "✗" };
 
-function AppUpdateDialog({ status, onClose }: { status: AppUpdateStatus; onClose: () => void }) {
+const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])';
+
+function AppUpdateDialog({
+  status,
+  checking,
+  onClose,
+}: {
+  status: AppUpdateStatus;
+  checking: boolean;
+  onClose: () => void;
+}) {
   const qc = useQueryClient();
   const [phase, setPhase] = useState<Phase>("idle");
   const [events, setEvents] = useState<ApplyEvent[]>([]);
   const busy = phase === "running" || phase === "restarting";
+  const panel = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -82,6 +119,36 @@ function AppUpdateDialog({ status, onClose }: { status: AppUpdateStatus; onClose
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [busy, onClose]);
+
+  // Modal focus: move focus into the dialog on open, keep Tab inside it,
+  // and give it back to whatever opened the dialog on close.
+  useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    panel.current?.focus();
+    return () => {
+      if (opener?.isConnected) opener.focus();
+    };
+  }, []);
+
+  const trapTab = (e: ReactKeyboardEvent) => {
+    if (e.key !== "Tab" || !panel.current) return;
+    const items = Array.from(panel.current.querySelectorAll<HTMLElement>(FOCUSABLE));
+    if (items.length === 0) {
+      e.preventDefault();
+      panel.current.focus();
+      return;
+    }
+    const first = items[0];
+    const last = items[items.length - 1];
+    const active = document.activeElement;
+    if (!panel.current.contains(active) || (e.shiftKey && (active === first || active === panel.current))) {
+      e.preventDefault();
+      (e.shiftKey ? last : first).focus();
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  };
 
   const run = async () => {
     setPhase("running");
@@ -134,15 +201,19 @@ function AppUpdateDialog({ status, onClose }: { status: AppUpdateStatus; onClose
 
   return (
     <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Update Skill Vault"
       onClick={() => !busy && onClose()}
+      onKeyDown={trapTab}
       style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", display: "grid", placeItems: "center", zIndex: 50 }}
     >
       <div
+        ref={panel}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Update Skill Vault"
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
         style={{
+          outline: "none",
           width: "min(520px, 92vw)",
           maxHeight: "70vh",
           overflow: "auto",
@@ -167,7 +238,8 @@ function AppUpdateDialog({ status, onClose }: { status: AppUpdateStatus; onClose
             </div>
           ))}
         </div>
-        {!status.can_apply && status.reason && (
+        {checking && phase === "idle" && <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>Checking GitHub…</div>}
+        {!checking && !status.can_apply && status.reason && phase === "idle" && (
           <div style={{ fontSize: 12.5, color: "var(--warn)" }}>Can't update right now: {status.reason}.</div>
         )}
         {latest.size > 0 && (
@@ -193,7 +265,7 @@ function AppUpdateDialog({ status, onClose }: { status: AppUpdateStatus; onClose
           <Button kind="ghost" size="sm" onClick={onClose} disabled={busy}>
             Close
           </Button>
-          <Button kind="primary" size="sm" onClick={() => void run()} disabled={!status.can_apply || busy}>
+          <Button kind="primary" size="sm" onClick={() => void run()} disabled={!status.can_apply || busy || checking}>
             {busy ? "Updating…" : "Update & restart"}
           </Button>
         </div>
