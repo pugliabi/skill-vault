@@ -59,8 +59,11 @@ const APP_ROOT = path.resolve(__dirname, "..");
 export interface CreateAppOptions {
   /** "development" enables Vite middleware + HMR; "production" serves dist/public. */
   mode: "development" | "production";
-  /** Start the new build and stop this process; set by launcher.ts (used after an in-app update). */
-  restart?: () => void;
+  /**
+   * Start the new build and stop this process; set by launcher.ts (used after
+   * an in-app update). Resolves once the successor spawned; rejects if it couldn't.
+   */
+  restart?: () => void | Promise<void>;
 }
 
 export async function createApp(opts: CreateAppOptions): Promise<Express> {

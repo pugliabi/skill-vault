@@ -31,6 +31,20 @@ export type Run = (
 ) => Promise<RunResult>;
 
 /**
+ * Spawn options for every command. On macOS/Linux the child leads its own
+ * process group (as the Claude runner's do), so defaultKillTree's group kill
+ * reaches npm's build and lifecycle-script descendants on timeout; Windows
+ * kills the tree with taskkill instead.
+ */
+export function runSpawnOptions(platform: NodeJS.Platform = process.platform): {
+  windowsHide: true;
+  stdio: ["ignore", "pipe", "pipe"];
+  detached: boolean;
+} {
+  return { windowsHide: true, stdio: ["ignore", "pipe", "pipe"], detached: platform !== "win32" };
+}
+
+/**
  * Real runner. `npm` is a .cmd shim on Windows, which spawn can only start
  * through cmd.exe. Stdin is closed and git is told never to prompt, so a
  * background fetch can't hang waiting for credentials. On timeout the whole
@@ -45,12 +59,7 @@ export const defaultRun: Run = (cmd, args, opts) =>
     const baseEnv = opts.env ?? process.env;
     const env: NodeJS.ProcessEnv =
       cmd === "git" ? { ...baseEnv, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never" } : baseEnv;
-    const child = spawn(file, argv, {
-      cwd: opts.cwd,
-      env,
-      windowsHide: true,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const child = spawn(file, argv, { cwd: opts.cwd, env, ...runSpawnOptions() });
     const timeoutMs = opts.timeoutMs ?? 120_000;
     let stdout = "";
     let stderr = "";
@@ -210,7 +219,8 @@ export interface AppUpdateStatus {
 
 export interface ApplyEvent {
   step: "check" | "pull" | "install" | "build" | "restart";
-  state: "start" | "done" | "skip" | "error";
+  /** "wait": the new build is ready and the restart is held until running jobs finish. */
+  state: "start" | "done" | "skip" | "wait" | "error";
   message?: string;
 }
 
@@ -241,10 +251,11 @@ function removeQuietly(dir: string): void {
 }
 
 /**
- * Replace dist/ with the staged dist-next/. Windows can refuse to rename a
- * folder holding an open file; then copy over it instead. Throws only when
- * the swap itself failed (dist/ still holds the old build); cleaning up the
- * staging folders afterwards is best-effort.
+ * Replace dist/ with the staged dist-next/ by renaming, never by copying over
+ * the live build (a copy that fails partway would leave dist/ a mix that a
+ * git rollback can't repair). Windows refuses to rename a folder holding an
+ * open file; then this throws with dist/ untouched and the update rolls back.
+ * Cleaning up the staging folders afterwards is best-effort.
  */
 export function swapDist(appDir: string): void {
   const dist = path.join(appDir, "dist");
@@ -253,10 +264,10 @@ export function swapDist(appDir: string): void {
   removeQuietly(old);
   try {
     if (fs.existsSync(dist)) fs.renameSync(dist, old);
-  } catch {
-    fs.cpSync(next, dist, { recursive: true, force: true });
-    removeQuietly(next);
-    return;
+  } catch (err) {
+    throw new Error(
+      `couldn't move the current build aside (${(err as Error).message}); a file in app/dist may be in use, try again`,
+    );
   }
   try {
     fs.renameSync(next, dist);
@@ -277,9 +288,14 @@ export interface AppUpdaterDeps {
   appDir: string;
   mode: "development" | "production";
   isBusy: () => boolean;
-  /** Start the new build and stop this process (launcher.ts). */
-  restart: () => void;
+  /**
+   * Start the new build and stop this process (launcher.ts). Resolves once
+   * the successor has spawned; rejects (old server keeps running) if it can't.
+   */
+  restart: () => void | Promise<void>;
   run?: Run;
+  /** How often the hand-over re-checks isBusy() while jobs run (tests shorten it). */
+  busyPollMs?: number;
   now?: () => string;
   firstRunDelayMs?: number;
   intervalMs?: number;
@@ -472,10 +488,18 @@ export function createAppUpdater(deps: AppUpdaterDeps): AppUpdater {
     }
     // Code and build now match the new commit, so a hand-over failure is
     // not rolled back: the next launch starts the new build.
+    //
+    // Jobs can start while pull/install/build run; the restart would abort
+    // them (assistant turns, Notion jobs), so it waits until they finish.
+    if (deps.isBusy()) {
+      onEvent({ step: "restart", state: "wait", message: "waiting for running jobs to finish" });
+      console.log("[update] new build ready; waiting for running jobs before restarting");
+      while (deps.isBusy()) await new Promise((r) => setTimeout(r, deps.busyPollMs ?? 1000));
+    }
     onEvent({ step: "restart", state: "start" });
     console.log(`[update] built ${short(f.latest)}; handing over to the new server`);
     try {
-      deps.restart();
+      await deps.restart();
     } catch (err) {
       const message = (err as Error).message;
       applyError = `restart failed: ${message}`;

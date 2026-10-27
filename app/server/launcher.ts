@@ -246,8 +246,14 @@ async function main(): Promise<void> {
     setTimeout(() => process.exit(0), 3000).unref();
   }
 
-  /** After an in-app update: start the new build on this same port, then hand over. */
-  function restart(): void {
+  /**
+   * After an in-app update: start the new build on this same port, then hand
+   * over. Resolves once the successor has spawned, and only then schedules
+   * this server's shutdown. If it can't be spawned (a synchronous throw, or
+   * the child's async 'error' event such as ENOENT/EACCES), this server takes
+   * the lock back, stays up, and the promise rejects for the updater to report.
+   */
+  function restart(): Promise<void> {
     releaseLock(process.pid);
     const next = [
       path.join(APP_ROOT, "dist", "launcher.js"),
@@ -260,28 +266,46 @@ async function main(): Promise<void> {
     ];
     if (args.exitWhenIdle) next.push("--exit-when-idle");
     if (args.logFile) next.push("--log-file", args.logFile);
-    try {
-      const child = spawn(process.execPath, next, {
-        cwd: APP_ROOT,
-        detached: true,
-        stdio: "ignore",
-        windowsHide: true,
-        env: { ...process.env, NODE_ENV: "production" },
-      });
-      child.once("error", (err) => console.error("[update] the new server failed to start:", err));
-      child.unref();
-    } catch (err) {
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
       // Stay up: take the lock back and let the updater report the failure.
-      acquireLock({
-        pid: process.pid,
-        port: getServerPort() ?? port,
-        started_at: new Date().toISOString(),
-        version: buildVersion(APP_ROOT, MODE),
-        mode: MODE,
+      const stayUp = (err: Error) => {
+        if (settled) return;
+        settled = true;
+        acquireLock({
+          pid: process.pid,
+          port: getServerPort() ?? port,
+          started_at: new Date().toISOString(),
+          version: buildVersion(APP_ROOT, MODE),
+          mode: MODE,
+        });
+        reject(err);
+      };
+      let child: ReturnType<typeof spawn>;
+      try {
+        child = spawn(process.execPath, next, {
+          cwd: APP_ROOT,
+          detached: true,
+          stdio: "ignore",
+          windowsHide: true,
+          env: { ...process.env, NODE_ENV: "production" },
+        });
+      } catch (err) {
+        stayUp(err as Error);
+        return;
+      }
+      child.once("error", (err) => {
+        console.error("[update] the new server failed to start:", err);
+        stayUp(err);
       });
-      throw err;
-    }
-    setTimeout(() => void shutdown(), 500);
+      child.once("spawn", () => {
+        if (settled) return;
+        settled = true;
+        child.unref();
+        setTimeout(() => void shutdown(), 500);
+        resolve();
+      });
+    });
   }
 
   const app = await createApp({ mode: MODE, restart });

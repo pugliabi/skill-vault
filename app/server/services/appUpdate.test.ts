@@ -9,6 +9,7 @@ import {
   defaultRun,
   parseCommits,
   parseLeftRight,
+  runSpawnOptions,
   summarizeOutput,
   swapDist,
   type ApplyEvent,
@@ -206,7 +207,11 @@ type Responses = Record<string, Partial<RunResult>>;
  * A temp repo root with app/dist/old.txt; the fake build writes app/dist-next/new.txt.
  * `overrides` may be a function of the temp root, for answers that name it.
  */
-function applyHarness(overrides: Responses | ((root: string) => Responses) = {}, restartImpl?: () => void) {
+function applyHarness(
+  overrides: Responses | ((root: string) => Responses) = {},
+  restartImpl?: () => void | Promise<void>,
+  isBusy: () => boolean = () => false,
+) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "sv-upd-"));
   const over = typeof overrides === "function" ? overrides(root) : overrides;
   const appDir = path.join(root, "app");
@@ -240,12 +245,13 @@ function applyHarness(overrides: Responses | ((root: string) => Responses) = {},
   const u = createAppUpdater({
     appDir,
     mode: "production",
-    isBusy: () => false,
+    isBusy,
     restart: () => {
       restarts++;
-      restartImpl?.();
+      return restartImpl?.();
     },
     run,
+    busyPollMs: 5,
   });
   return { appDir, calls, nodeEnvs, updater: u, restarts: () => restarts };
 }
@@ -391,21 +397,66 @@ test("swapDist: a dist-old cleanup that throws is logged, not thrown, and dist/ 
   assert.ok(logged.mock.calls.length > 0, "the failed cleanup is logged");
 });
 
-test("swapDist: after the copy fallback, a dist-next cleanup that throws is not thrown", (t) => {
-  const appDir = stagedApp();
-  silence(t);
+/** Make renaming the live dist/ fail, as Windows does when a file in it is held open. */
+function lockDist(t: TestContext) {
   const realRename = fs.renameSync;
-  const realRm = fs.rmSync;
   t.mock.method(fs, "renameSync", (from: fs.PathLike, to: fs.PathLike) => {
     if (String(from).endsWith(`${path.sep}dist`)) throw new Error("EPERM: operation not permitted");
     return realRename(from, to);
   });
-  t.mock.method(fs, "rmSync", (p: fs.PathLike, o?: fs.RmOptions) => {
-    if (String(p).endsWith("dist-next")) throw new Error("EBUSY: resource busy or locked");
-    return realRm(p, o);
-  });
-  assert.doesNotThrow(() => swapDist(appDir));
-  assert.ok(fs.readdirSync(path.join(appDir, "dist")).includes("new.txt"));
+}
+
+test("swapDist refuses, leaving the old build untouched, when dist/ can't be moved aside (no copy over a live build)", (t) => {
+  const appDir = stagedApp();
+  lockDist(t);
+  assert.throws(() => swapDist(appDir), /couldn't move the current build aside/);
+  assert.deepEqual(fs.readdirSync(path.join(appDir, "dist")), ["old.txt"]);
+});
+
+test("apply: a refused swap rolls back like a failed build and keeps serving the old build", async (t) => {
+  const h = applyHarness();
+  silence(t);
+  lockDist(t);
+  const events: ApplyEvent[] = [];
+  assert.equal(await h.updater.apply((e) => events.push(e)), false);
+  assert.equal(events.at(-1)?.step, "build");
+  assert.equal(events.at(-1)?.state, "error");
+  assert.ok(h.calls.includes(`git reset --keep ${A}`));
+  assert.deepEqual(fs.readdirSync(path.join(h.appDir, "dist")), ["old.txt"]);
+  assert.equal(fs.existsSync(path.join(h.appDir, "dist-next")), false);
+  assert.equal(h.restarts(), 0);
+});
+
+test("a restart that fails asynchronously (rejected promise) is reported and releases 'applying'", async () => {
+  const h = applyHarness({}, () => Promise.reject(new Error("spawn ENOENT")));
+  const events: ApplyEvent[] = [];
+  assert.equal(await h.updater.apply((e) => events.push(e)), false);
+  assert.deepEqual(events.at(-1), { step: "restart", state: "error", message: "spawn ENOENT" });
+  assert.equal(h.updater.isApplying(), false);
+  assert.match(h.updater.status().last_error ?? "", /^restart failed: spawn ENOENT/);
+});
+
+test("the hand-over waits while a job is running, then restarts", async () => {
+  let calls = 0;
+  let jobRunning = true;
+  // The first isBusy() is apply's own eligibility check (idle); later ones are the hand-over wait.
+  const h = applyHarness({}, undefined, () => ++calls > 1 && jobRunning);
+  const events: ApplyEvent[] = [];
+  const done = h.updater.apply((e) => events.push(e));
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(h.restarts(), 0, "no restart while the job runs");
+  assert.deepEqual(events.at(-1), { step: "restart", state: "wait", message: "waiting for running jobs to finish" });
+  jobRunning = false;
+  assert.equal(await done, true);
+  assert.equal(h.restarts(), 1);
+  assert.deepEqual(steps(events).slice(-3), ["build:done", "restart:wait", "restart:start"]);
+});
+
+test("commands run in their own process group on macOS/Linux, so a timeout kills the whole tree", () => {
+  assert.equal(runSpawnOptions("linux").detached, true);
+  assert.equal(runSpawnOptions("darwin").detached, true);
+  assert.equal(runSpawnOptions("win32").detached, false);
+  assert.deepEqual(runSpawnOptions("win32").stdio, ["ignore", "pipe", "pipe"]);
 });
 
 test("swapDist still throws, and keeps the old build, when the swap itself fails", (t) => {
