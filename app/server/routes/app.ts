@@ -9,6 +9,9 @@
  *   POST /api/app/update/check — fetch now and return the fresh status
  *   POST /api/app/update       — apply; streams NDJSON ApplyEvents, ending
  *                                with {step:"restart"} on success
+ *
+ * POSTs under /app/ are refused (403) when a browser marks them as coming
+ * from another site (Sec-Fetch-Site other than same-origin).
  */
 import { Router } from "express";
 import type { AppUpdater } from "../services/appUpdate.ts";
@@ -23,6 +26,18 @@ export interface HealthInfo {
 
 export function appRouter(opts: { health: () => HealthInfo; updater: AppUpdater }): Router {
   const router = Router();
+
+  // Another site open in the browser must not be able to start an update on
+  // this local server. Browsers send Sec-Fetch-Site on every request; a
+  // request without it (curl, tests) isn't from a web page and is allowed.
+  router.use("/app", (req, res, next) => {
+    const site = req.get("sec-fetch-site");
+    if (req.method === "POST" && site !== undefined && site !== "same-origin") {
+      res.status(403).json({ error: "cross-site request refused" });
+      return;
+    }
+    next();
+  });
 
   router.get("/health", (_req, res) => {
     res.json(opts.health());

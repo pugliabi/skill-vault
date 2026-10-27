@@ -65,4 +65,9 @@ export function installLogFile(file: string): void {
       return write(chunk, ...rest);
     }) as typeof stream.write;
   }
+  // Node prints a fatal error straight to fd 2, past the tee above; the
+  // monitor sees it first (and doesn't change how the process dies).
+  process.on("uncaughtExceptionMonitor", (err, origin) => {
+    sink(`\n[${origin}] ${(err as Error | undefined)?.stack ?? String(err)}\n`);
+  });
 }

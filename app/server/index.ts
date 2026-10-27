@@ -162,7 +162,9 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
     isBusy: busyWithoutUpdate,
     restart: opts.restart ?? (() => console.error("[update] no restart hook; restart the app to finish the update")),
   });
-  updater.start();
+  // Background checks only for the built app: `npm run dev` never fetches on
+  // its own (its status stays "not checked yet", so no pill).
+  if (opts.mode === "production") updater.start();
 
   // Cleanup hook — launcher.ts invokes this before server.close() so
   // chokidar tears down cleanly on Ctrl+C and the SSE clients receive

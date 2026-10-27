@@ -21,7 +21,9 @@ export function UpdatePill() {
   const { data } = useQuery({
     queryKey: ["app-update"],
     queryFn: appUpdateApi.status,
-    refetchInterval: 10 * 60_000,
+    // The server's first check runs 30 s after start: poll quickly until it
+    // has one, so the pill doesn't wait for the 10-minute cadence.
+    refetchInterval: (query) => (query.state.data?.checked_at ? 10 * 60_000 : 15_000),
     staleTime: 60_000,
   });
   const showPill = !!data && data.behind > 0;
