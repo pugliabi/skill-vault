@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { Icon, NavIcon } from "./ui/icons";
 import { ActivityDrawer } from "./ActivityDrawer";
+import { UpdatePill } from "./AppUpdate";
 import { AssistantPanel } from "./assistant/AssistantPanel";
 import { toggleAssistant, useAssistantState, useAssistantWorking } from "../lib/assistantStore";
 import { assistantApi } from "../lib/assistant";
@@ -231,6 +232,7 @@ export function Layout({ children }: { children: ReactNode }) {
             gap: 8,
           }}
         >
+          <UpdatePill />
           <button
             onClick={toggleAssistant}
             style={{
