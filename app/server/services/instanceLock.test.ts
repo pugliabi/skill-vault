@@ -56,6 +56,22 @@ test("an unreadable lock file counts as no lock", () => {
   assert.equal(acquireLock(lock(111)), true);
 });
 
+test("a lock-file write failure is logged and means 'not owned', never a throw", () => {
+  // A regular file where the .skill-vault directory should be makes mkdirSync fail.
+  fs.writeFileSync(path.join(os.homedir(), ".skill-vault"), "not a directory");
+  const logged: string[] = [];
+  const orig = console.error;
+  console.error = (...a: unknown[]) => void logged.push(a.join(" "));
+  try {
+    assert.equal(acquireLock(lock(111)), false);
+    assert.doesNotThrow(() => releaseLock(111));
+  } finally {
+    console.error = orig;
+  }
+  assert.equal(logged.length, 1);
+  assert.match(logged[0], /^\[lock\] could not write /);
+});
+
 test("isProcessAlive is true for this process", () => {
   assert.equal(isProcessAlive(process.pid), true);
 });

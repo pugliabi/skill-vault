@@ -44,14 +44,24 @@ export function isProcessAlive(pid: number): boolean {
 export function acquireLock(lock: InstanceLock, alive: (pid: number) => boolean = isProcessAlive): boolean {
   const held = readLock();
   if (held && held.pid !== lock.pid && alive(held.pid)) return false;
-  fs.mkdirSync(path.dirname(lockPath()), { recursive: true });
-  fs.writeFileSync(lockPath(), JSON.stringify(lock, null, 2) + "\n");
+  try {
+    fs.mkdirSync(path.dirname(lockPath()), { recursive: true });
+    fs.writeFileSync(lockPath(), JSON.stringify(lock, null, 2) + "\n");
+  } catch (err) {
+    // The lock is a launcher convenience; never take the server down over it.
+    console.error(`[lock] could not write ${lockPath()}: ${(err as Error).message}`);
+    return false;
+  }
   return true;
 }
 
 /** Remove the lock only if `pid` still owns it. */
 export function releaseLock(pid: number): void {
-  if (readLock()?.pid === pid) fs.rmSync(lockPath(), { force: true });
+  try {
+    if (readLock()?.pid === pid) fs.rmSync(lockPath(), { force: true });
+  } catch {
+    /* runs in shutdown / exit handlers: must never throw */
+  }
 }
 
 /** The build's git SHA from dist/.build-stamp; "dev" when running from source. */
