@@ -14,7 +14,7 @@ The main way in is the **Skill Vault App**, a local web dashboard. A Python CLI 
 
 Requires Node 20+ and git. On Windows:
 
-```bash
+```powershell
 git clone https://github.com/pugliabi/skill-vault.git
 cd skill-vault
 .\setup.cmd

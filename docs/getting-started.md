@@ -6,14 +6,14 @@ This guide walks through installing the Skill Vault App, creating your first vau
 
 - **Node.js 20+** — for the Skill Vault App
 - **Python 3.10+** — only if you also want the `sv` CLI
-- **git** — required for adopting skills from git URLs and multi-device sync; optional otherwise
+- **git** — required on Windows for `setup.cmd` and in-app updates, and anywhere for adopting skills from git URLs and multi-device sync
 - At least one agent tool that loads skills from a directory (Claude Code, Cursor, OpenClaw, Codex, Copilot, Windsurf, …). Not strictly required — you can build a vault first and add providers later.
 
 ## Install and launch the app
 
 On Windows:
 
-```bash
+```powershell
 git clone https://github.com/pugliabi/skill-vault.git
 cd skill-vault
 .\setup.cmd

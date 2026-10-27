@@ -54,21 +54,21 @@
 
 **Cause**: the launcher couldn't find Node, couldn't rebuild, or the server didn't answer within 20 seconds.
 
-**Solution**: read `~/.skill-vault/logs/launch.log` (launcher steps and build output) and `~/.skill-vault/logs/server.log` (the server's own output). Re-running `setup.cmd` repairs packages, the build and the shortcuts.
+**Solution**: read `~/.skill-vault/logs/launch.log` (launcher steps and build output) and `~/.skill-vault/logs/server.log` (the server's own output). Re-running `setup.cmd` repairs packages, the build and the shortcuts. If it keeps failing, delete `~/.skill-vault/app.lock` and try again.
 
 ### Problem: "Update & restart" is greyed out
 
 **Symptoms**: the update dialog says "Can't update right now: …".
 
-**Cause**: in-app updates only fast-forward a clean `main` checkout. The reason names what's in the way: another branch, uncommitted changes, local commits not on GitHub, GitHub's main branch (origin/main) wasn't found, running from source with `npm run dev`, or a job (Notion sync, assistant reply, update check) still running.
+**Cause**: in-app updates only fast-forward a clean `main` checkout. The reason names what's in the way: another branch, uncommitted changes, local commits not on GitHub, GitHub's main branch (origin/main) wasn't found, the `app` folder isn't directly inside its git checkout, running from source with `npm run dev`, or a job (Notion sync, assistant reply, update check) still running.
 
-**Solution**: commit, stash or push your changes, or switch to `main`. When running from source, `git pull` and restart yourself.
+**Solution**: commit, stash or push your changes, or switch to `main`. When running from source, `git pull` and restart yourself. If the `app` folder was moved into another git repository, run Skill Vault from its own clone.
 
 ### Problem: Port already in use / app opens on an unexpected port
 
 **Symptoms**: Startup log shows a different port than configured.
 
-**Cause**: The launcher picks the next free port when the preferred one is busy — often a stale dev server still running.
+**Cause**: The launcher picks the next free port when the preferred one is busy — often a stale dev server still running. A port another program listens on for all addresses (`0.0.0.0` or `::`) counts as busy too, so the app never hides that program from `localhost`.
 
 **Solution**: Close the stale process, or pin a port: `npm run dev -- --port 5500`. Check precedence if a value "won't stick": CLI flag → env var → `.env` → config.json `app` block → defaults.
 
