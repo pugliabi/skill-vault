@@ -2,6 +2,8 @@
  * Assistant chat endpoints.
  *
  *   GET    /api/assistant/status         — claude CLI availability + plugin dir + vault check
+ *   GET    /api/assistant/auth           — sign-in mode (Claude login / API key); never the key itself
+ *   PUT    /api/assistant/auth           — {auth?, api_key?, workspace_id?}; "" clears a field
  *   GET    /api/assistant/sessions       — recent chats (newest first)
  *   GET    /api/assistant/sessions/:id   — one chat with its rendered turn history
  *   DELETE /api/assistant/sessions/:id   — forget a chat (aborts it if running)
@@ -18,7 +20,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { Router } from "express";
-import { readAppConfig } from "../services/appConfig.ts";
+import { readAppConfig, readAssistantBlock, writeAssistantBlock } from "../services/appConfig.ts";
+import { applyClaudeAuthPatch, claudeAuthStatus, type ClaudeAuthPatch } from "../services/claude/auth.ts";
 import { claudeAvailable } from "../services/claude/cli.ts";
 import { getServerPort } from "../services/runtime.ts";
 import { mcpConfigArg } from "../services/assistant/mcpConfig.ts";
@@ -101,6 +104,32 @@ export function assistantRouter(opts: AssistantRouterOpts): Router {
             ? "assistant plugin bundle missing"
             : undefined,
     });
+  });
+
+  router.get("/auth", (_req, res) => {
+    res.json(claudeAuthStatus(readAssistantBlock()));
+  });
+
+  router.put("/auth", (req, res) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const patch: ClaudeAuthPatch = {};
+    for (const k of ["auth", "api_key", "workspace_id"] as const) {
+      if (body[k] === undefined) continue;
+      if (typeof body[k] !== "string") {
+        res.status(400).json({ error: `${k} must be a string` });
+        return;
+      }
+      (patch as Record<string, string>)[k] = body[k] as string;
+    }
+    let next;
+    try {
+      next = applyClaudeAuthPatch(readAssistantBlock(), patch);
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+      return;
+    }
+    writeAssistantBlock(next);
+    res.json(claudeAuthStatus(next));
   });
 
   router.get("/sessions", (_req, res) => {

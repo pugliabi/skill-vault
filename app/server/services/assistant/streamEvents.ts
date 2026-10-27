@@ -14,6 +14,7 @@
  * conversation and are skipped — the Task tool_use line ("agent: repo-hunter")
  * and its eventual tool_result already represent that work in the timeline.
  */
+import { withAuthHint } from "../claude/auth.ts";
 
 export type AssistantStreamEvent =
   | { type: "session"; session_id: string }
@@ -198,7 +199,7 @@ export function parseStreamJsonLine(line: string): AssistantStreamEvent[] {
     case "result": {
       if (msg.is_error) {
         const message = typeof msg.result === "string" && msg.result ? msg.result : "claude CLI reported an error";
-        return [{ type: "error", message }];
+        return [{ type: "error", message: withAuthHint(message) }];
       }
       return [
         {

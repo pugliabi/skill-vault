@@ -384,6 +384,36 @@ test("createRunner falls back to the escaped cmd.exe invocation for newline-free
   assert.equal(capturedOptions.windowsVerbatimArguments, true);
 });
 
+test("both runners spawn with the env from deps.env (auth mode), and inherit when it's absent", async () => {
+  const seen: Array<NodeJS.ProcessEnv | undefined> = [];
+  const child = makeFakeChild();
+  const spawnFn: SpawnFn = (_command, _args, options) => {
+    seen.push((options as { env?: NodeJS.ProcessEnv }).env);
+    return child;
+  };
+  const deps = { resolveExe: () => "C:\\fake\\claude.exe", platform: "win32" as const, env: () => ({ MARK: "1" }) };
+
+  const p1 = createRunner(spawnFn, () => {}, deps)(["--version"], "", { cwd: "C:\\tmp", timeoutMs: 1000 });
+  child.emit("close", 0);
+  await p1;
+  const p2 = createStreamRunner(spawnFn, () => {}, deps)(["-p"], "", {
+    cwd: "C:\\tmp",
+    idleTimeoutMs: 1000,
+    hardTimeoutMs: 1000,
+    onLine() {},
+  });
+  child.emit("close", 0);
+  await p2;
+  const p3 = createRunner(spawnFn, () => {}, { resolveExe: deps.resolveExe, platform: "win32" })(["--version"], "", {
+    cwd: "C:\\tmp",
+    timeoutMs: 1000,
+  });
+  child.emit("close", 0);
+  await p3;
+
+  assert.deepEqual(seen, [{ MARK: "1" }, { MARK: "1" }, undefined]);
+});
+
 test("createRunner survives a stdin EPIPE (child exits before reading) and still settles via close", async () => {
   const child = makeFakeChild(303);
   const stdin = new EventEmitter() as EventEmitter & { write(c: string): void; end(): void };

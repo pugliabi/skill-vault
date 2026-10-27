@@ -43,6 +43,14 @@ export interface AssistantStatus {
   reason?: string;
 }
 
+/** How the app's claude CLI signs in. The saved key itself is never returned. */
+export interface AssistantAuth {
+  auth: "login" | "api_key";
+  has_saved_key: boolean;
+  env_key_present: boolean;
+  workspace_id: string | null;
+}
+
 export interface SessionSummary {
   id: string;
   title: string;
@@ -112,6 +120,10 @@ export const assistantApi = {
     rest<{ ok: boolean }>("POST", "/api/assistant/suggestions/dismiss", { id, fingerprint }),
   restoreSuggestion: (id: string) => rest<{ ok: boolean }>("POST", "/api/assistant/suggestions/restore", { id }),
   runSweep: () => rest<{ started: boolean; running: boolean }>("POST", "/api/assistant/suggestions/sweep"),
+  auth: () => rest<AssistantAuth>("GET", "/api/assistant/auth"),
+  /** An omitted field is kept; an empty string clears it. */
+  setAuth: (body: { auth?: AssistantAuth["auth"]; api_key?: string; workspace_id?: string }) =>
+    rest<AssistantAuth>("PUT", "/api/assistant/auth", body),
   installable: () => rest<{ skills: string[] }>("GET", "/api/assistant/install-skills"),
   installSkills: (body: { skills?: string[]; agents?: boolean; overwrite?: boolean }) =>
     rest<{

@@ -11,6 +11,7 @@
  * can only happen through the audited bridge. Never add bypassPermissions.
  */
 
+import { withAuthHint } from "../claude/auth.ts";
 import { ClaudeError, defaultStreamRunner, type ClaudeStreamRunner } from "../claude/cli.ts";
 import { parseStreamJsonLine, type AssistantStreamEvent } from "./streamEvents.ts";
 import type { AssistantSession } from "./session.ts";
@@ -140,7 +141,7 @@ export async function runTurn(opts: {
     if (!sawTerminal) {
       // CLI exited without a result record — surface whatever it said on stderr.
       const detail = stderr.trim().split("\n").slice(-3).join(" ").slice(0, 300);
-      const message = `claude CLI exited (code ${code}) without a result${detail ? `: ${detail}` : ""}`;
+      const message = withAuthHint(`claude CLI exited (code ${code}) without a result${detail ? `: ${detail}` : ""}`);
       errorMessage = message;
       flushText();
       const ev: AssistantStreamEvent = { type: "error", message };
