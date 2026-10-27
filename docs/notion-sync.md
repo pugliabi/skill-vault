@@ -248,6 +248,11 @@ as an informational note but never blocks anything on its own.
 - **Table cells containing a pipe (`|`) inside inline code can be
   truncated** by Notion when it converts a table back to Markdown. Double-
   check tables with code-in-cells after a pull.
+- **Single-file skills download as text, not an archive.** For a skill that
+  is just a `SKILL.md`, Notion returns the file inline instead of an archive
+  link; the app handles both. Older versions failed on these with "returned
+  no archive" and could leave a newly created page linked but never synced —
+  after updating, run **Link skills** once to repair those links.
 - **Uploading to a Notion page never deletes files it previously held.** If
   you remove a supporting file from the vault side, the old copy stays
   attached to the Notion page after your next push — this is a limitation

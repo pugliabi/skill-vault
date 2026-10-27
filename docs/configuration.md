@@ -81,6 +81,19 @@ Sensitive values (API keys) are masked in `sv config show` output.
   "ai_scanner": { "provider": "anthropic-sdk", "api_key_env": "ANTHROPIC_API_KEY" }
   ```
 
+### assistant
+
+- **Purpose**: How the app's `claude` CLI calls sign in — the AI assistant, AI tagging and Claude merge. Edited in **Settings → AI assistant → Sign in with**.
+- **Type**: object
+- **Fields**:
+  - `auth` — `"login"` (default: Claude Code's own login; `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` are removed from the CLI's environment so a key set for another tool can't take over) or `"api_key"`
+  - `api_key` — saved key for `"api_key"` mode (optional; without it the environment's `ANTHROPIC_API_KEY` is used). Stored in plain text; the app never sends it back to the browser
+  - `workspace_id` — sent as the `anthropic-workspace-id` header, for keys not scoped to a workspace
+- **Example**:
+  ```json
+  "assistant": { "auth": "api_key", "workspace_id": "wrkspc_…" }
+  ```
+
 ### app
 
 - **Purpose**: Runtime fallback settings for the web app — the lowest-precedence source before built-in defaults
@@ -120,7 +133,7 @@ If the chosen port is busy, the launcher picks the next free one automatically.
 ### NODE_ENV
 
 - **Where**: env / `.env`
-- **Default**: unset (dev). Set `production` only after `npm run build` to serve the bundled client from `dist/`.
+- **Default**: unset (dev). Set `production` only after `npm run build` to serve the bundled client from `dist/`. The Start Menu launcher sets it for you.
 
 ## Launcher files (per machine)
 

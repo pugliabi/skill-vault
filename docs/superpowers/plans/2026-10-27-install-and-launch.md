@@ -3214,8 +3214,8 @@ In the existing `### Fixed` list under `[Unreleased]`, add:
 
 - [ ] **Step 6: Check for personal information, then commit**
 
-Run (bash, repo root): `git diff --cached --stat; git diff | grep -n -i -E "pugli|tommy|PUGLIA-|C:\\\\Users\\\\[a-z]" || echo "clean"`
-Expected: `clean` (the README's public GitHub URL `pugliabi/skill-vault` was already there and is fine; any other hit must be fixed).
+Run (bash, repo root): `git diff --cached --stat; git diff | grep -n -i -E "<your name>|<your machine name>|C:\\\\Users\\\\[a-z]" || echo "clean"`
+Expected: `clean` (the README's public GitHub URL was already there and is fine; any other hit must be fixed).
 
 ```bash
 git add README.md docs/getting-started.md docs/troubleshooting.md docs/configuration.md app/CHANGELOG.md

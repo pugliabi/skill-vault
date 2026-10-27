@@ -3,6 +3,82 @@
 Running log of change sets, newest first. Detailed per-release notes live in
 [changelog.md](./changelog.md) and [app/CHANGELOG.md](../app/CHANGELOG.md).
 
+## 2026-10-27 — Install & launch: one-script Windows setup, hidden launcher, in-app updates
+
+### Changes Made
+- **Setup**: `setup.cmd` / `setup.ps1` at the repo root check Node 20+ and git
+  (printing the `winget` fix when missing), run `npm ci --include=dev` and the
+  build, and create a per-user **Start Menu → Skill Vault** folder (plus an
+  Uninstall shortcut). Options `-Desktop`, `-Uninstall`, `-NoLaunch`, `-WhatIf`;
+  safe to re-run; removes the old hand-made `Apps\Skill Vault App` shortcut
+  when it points at the same checkout.
+- **Launcher**: the shortcut runs `app/scripts/launch.ps1` through
+  `conhost.exe --headless` (no console window, even with Windows Terminal as
+  the default console). One launch at a time (named mutex); reuses a running
+  server (`~/.skill-vault/app.lock` + `GET /api/health`); rebuilds when the
+  source is newer than `dist/`; starts the built server hidden on `127.0.0.1`
+  with idle stop and a log file; opens an Edge app window. Every failure
+  shows a message box naming `~/.skill-vault/logs/launch.log`.
+- **Server lifecycle**: `scripts/build.mjs` (one build, `dist/.build-stamp`),
+  `scripts/build-state.mjs` (exit 0 fresh / 10 stale), instance lock,
+  `GET /api/health`, `--log-file` (rotating 5 MB × 3, crash output included),
+  `--exit-when-idle` (stop ~60 s after the last window closes unless a job
+  runs), `--strict-port` (same-port restart), a connect-based port probe that
+  never shadows another local server, and a chunked startup history scan.
+- **In-app updates**: a background `git fetch` (built app only) drives an
+  **Update available** pill; the dialog re-checks when opened. Apply = pull
+  (ff-only) → `npm ci` only if the lockfile changed → staged build in
+  `dist-next/` swapped in by rename → wait for running jobs → restart on the
+  same port. Any failure before the hand-over rolls back (`git reset --keep`),
+  logs the failing step in full, and keeps the running build. Cross-site
+  POSTs to `/api/app/*` are refused (Sec-Fetch-Site and Origin).
+- **Startup speed**: cold start to skills data ~1.55 s (was ~12 s + 2.7 s in
+  dev mode); warm launch ~0.43 s (was ~5 s).
+
+### Files Modified
+- `setup.cmd`, `setup.ps1`, `app/scripts/{build.mjs,build-state.mjs,launch.ps1}` — new
+- `app/server/services/{instanceLock,logFile,idleStop,portProbe,appUpdate}.ts`,
+  `app/server/routes/app.ts` (+ tests, incl. real-process launcher tests) — new
+- `app/server/{launcher,index}.ts`, `routes/events.ts`,
+  `services/historyRecorder.ts`, `services/assistant/session.ts`
+- `app/client/src/lib/appUpdate.ts`, `components/AppUpdate.tsx` — new;
+  `components/Layout.tsx`
+- `app/package.json`, `app/.gitignore`
+- Docs: `README.md`, `docs/{getting-started,configuration,troubleshooting,faq,features,tech_reference,changelog}.md`, `app/CHANGELOG.md`
+
+### Impact
+- Anyone can install with one command and launch from the Start Menu without
+  a terminal; launching is roughly ten times faster; installed copies keep
+  themselves up to date and never end up half-updated.
+
+## 2026-10-27 — Fixes: Notion single-file skills; assistant sign-in
+
+### Changes Made
+- Notion now returns a skill that is just a `SKILL.md` as inline text rather
+  than an archive link. Downloads accept both, so push, pull, linking and the
+  background Notion check work for single-file skills again; skills left
+  half-linked by the old failure are repaired by running **Link skills** once.
+- Assistant sign-in: **Settings → AI assistant → Sign in with** Claude login
+  (default — `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` are removed from the
+  `claude` CLI's environment) or API key (saved, or from the environment, plus
+  an optional workspace ID sent via `ANTHROPIC_CUSTOM_HEADERS`). Fixes chats
+  failing with "This API key is not scoped to a workspace" when a user-level
+  key is set. Covers the assistant, AI tagging and Claude merge.
+- Dev mode: Vite is pointed at `app/vite.config.ts` explicitly, and `tsx watch`
+  ignores Vite's timestamp files.
+
+### Files Modified
+- `app/server/services/notion/{api,archive,sync,linker,checker}.ts`,
+  `app/server/routes/{notion,notionSync}.ts` (+ tests)
+- `app/server/services/claude/{auth.ts (new),cli.ts}`, `services/appConfig.ts`,
+  `routes/assistant.ts`, `services/assistant/{streamEvents,turn}.ts`,
+  `app/client/src/{lib/assistant.ts,pages/Settings.tsx}`
+- `app/server/index.ts`, `app/package.json`
+
+### Impact
+- Notion sync works for every skill again; the assistant works regardless of
+  stray API keys in the environment.
+
 ## 2026-10-08 — Assistant docs: screenshots, README showcase, usage guide
 
 ### Changes Made

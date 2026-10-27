@@ -21,9 +21,15 @@ cd skill-vault
 
 Setup checks for Node 20+ and git (and prints the `winget` command if one is missing), installs packages, builds the app, and creates **Start Menu → Skill Vault**. Options: `-Desktop` (also a desktop shortcut), `-WhatIf` (show what it would do), `-Uninstall` (remove the shortcuts only: your clone, vault and `~/.skill-vault` are never touched).
 
-The shortcut opens Skill Vault in its own window. Clicking it again reuses the running app, and the app stops about a minute after its last window closes.
+The shortcut opens Skill Vault in its own window (Microsoft Edge in app mode, or your default browser if Edge isn't installed). There's no console window to keep open:
 
-**Updating.** When GitHub has newer commits on `main`, an **Update available** button appears at the bottom of the sidebar. **Update & restart** pulls, rebuilds and restarts the app. It only runs on a clean `main` checkout, and if any step fails the previous version keeps running.
+- **First click** starts the app in the background, usually in about a second. If the app's code changed since the last build (after you pull, say), it rebuilds first, which takes 10–20 seconds.
+- **Clicking again** while it's running just opens another window onto the same app; quick double-clicks never start a second copy.
+- **Closing the last window** stops the app about a minute later, unless something is still running (a Notion sync, an assistant reply, an update check), in which case it waits for that to finish.
+- The Start Menu app only listens on this computer (`127.0.0.1`). To reach it from another device, run it from a terminal instead (see below).
+- If something goes wrong, a message box says so and names the log: `~/.skill-vault/logs/launch.log`, with the app's own output in `server.log` next to it.
+
+**Updating.** When GitHub has newer commits on `main`, an **Update available** button appears at the bottom of the sidebar. Opening it checks GitHub again and lists what's new; **Update & restart** pulls the changes, reinstalls packages if they changed, rebuilds, and restarts the app in place — the window reloads itself when the new version is ready. If a Notion sync or assistant reply is running, the restart waits for it. Updates only run on a clean `main` checkout (the dialog says what's in the way otherwise), and if any step fails, the checkout is put back and the version you had keeps running.
 
 **Developing / macOS / Linux.** `cd app && npm install && npm run dev` runs from source with hot reload (→ http://localhost:9994); on Windows, `app\run.bat` does the same. Port, host and browser auto-open are configurable; see [Configuration](./configuration.md).
 

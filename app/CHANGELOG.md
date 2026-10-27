@@ -39,11 +39,19 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
 - `setup.cmd` installs the app on Windows (checks Node 20+ and git, installs,
   builds) and adds a **Skill Vault** Start Menu folder; `-Uninstall` removes it.
 - The Start Menu shortcut opens the built app in its own Edge window with no
-  console, reuses a running server, and stops it about a minute after the last
-  window closes.
-- In-app updates: an **Update available** button when GitHub's `main` is ahead,
-  with one-click pull, rebuild and restart (rolled back if any step fails).
+  console, reuses a running server (one launch at a time, so double-clicks
+  never start a second copy), and stops it about a minute after the last
+  window closes. Shortcut-started servers always bind `127.0.0.1`.
+- In-app updates: an **Update available** button when GitHub's `main` is ahead;
+  the dialog re-checks when opened. **Update & restart** pulls, rebuilds into a
+  staging folder swapped in by rename, waits for running jobs, and restarts on
+  the same port; any failure rolls the checkout back and keeps the running
+  build, with the failed step's full output in `server.log`.
 - `GET /api/health`; launcher flags `--exit-when-idle`, `--log-file`, `--strict-port`.
+- Choosing a port checks for other local servers by connecting (it never binds
+  all interfaces, so no Windows Firewall prompt) and won't shadow a server on
+  `0.0.0.0`, `[::]` or `[::1]`.
+- Update requests from other sites are refused (`Sec-Fetch-Site` and `Origin`).
 - **Voice input in the assistant** — a mic button in the chat composer
   dictates into the draft (browser Web Speech API; Chrome/Edge — hidden
   where unsupported). Final phrases append to the draft, the in-flight

@@ -62,7 +62,23 @@
 
 **Cause**: in-app updates only fast-forward a clean `main` checkout. The reason names what's in the way: another branch, uncommitted changes, local commits not on GitHub, GitHub's main branch (origin/main) wasn't found, the `app` folder isn't directly inside its git checkout, running from source with `npm run dev`, or a job (Notion sync, assistant reply, update check) still running.
 
-**Solution**: commit, stash or push your changes, or switch to `main`. When running from source, `git pull` and restart yourself. If the `app` folder was moved into another git repository, run Skill Vault from its own clone.
+**Solution**: commit, stash or push your changes, or switch to `main`. When running from source, `git pull` and restart yourself. If the `app` folder was moved into another git repository, run Skill Vault from its own clone. The dialog checks again each time you open it, so close and reopen it after fixing the cause.
+
+### Problem: An update says "waiting for running jobs to finish"
+
+**Symptoms**: the update dialog shows the Restart step waiting, and the window doesn't reload.
+
+**Cause**: the new version is built, but a Notion sync, an assistant reply or a skill update check is still running; restarting now would cut it off.
+
+**Solution**: let it finish (or stop the assistant reply); the restart then happens by itself and the window reloads.
+
+### Problem: An update failed with "couldn't move the current build aside"
+
+**Symptoms**: the dialog shows `✗ Build: couldn't move the current build aside …`.
+
+**Cause**: Windows wouldn't rename the `app\dist` folder because something had a file in it open (an antivirus scan, an Explorer preview pane, an editor).
+
+**Solution**: nothing was changed — the checkout was put back and your current version is still running. Close anything showing that folder and try **Update & restart** again. Full details are in `~/.skill-vault/logs/server.log`.
 
 ### Problem: Port already in use / app opens on an unexpected port
 
@@ -122,6 +138,16 @@ Or set the ANTHROPIC_API_KEY environment variable.
 
 **Solution**: `sv fix` audits and repairs manifest/disk drift. For a skill folder you added manually, `sv add <vault>/skills/<name>` registers it.
 
+## Notion
+
+### Problem: Pushing to Notion fails with "returned no archive"
+
+**Symptoms**: pushing (or pulling) a skill that is only a `SKILL.md` fails with `download-skill returned no archive for <page id>`; such skills may also sit in "changed in vault" forever.
+
+**Cause**: Notion returns single-file skills as inline text rather than an archive link, which older versions of the app rejected. A first push could then leave the new page linked but never marked synced.
+
+**Solution**: update the app (the current version handles both forms), then run **Link skills** once from the Notion menu: it re-checks those links and marks the ones whose content matches as in sync. See [notion-sync.md](./notion-sync.md#known-notion-limitations).
+
 ## The AI assistant
 
 ### Problem: The panel says "Assistant unavailable"
@@ -132,6 +158,14 @@ The reason line tells you which prerequisite failed:
 - **assistant plugin bundle missing** — the app's `assistant-plugin/` folder is gone; re-pull or reinstall the app.
 
 Use the Retry button after fixing; status is cached for 60 seconds.
+
+### Problem: Chats fail with "This API key is not scoped to a workspace"
+
+**Symptoms**: every assistant reply fails at once with that API error, at $0.
+
+**Cause**: an `ANTHROPIC_API_KEY` set in your environment (often user-wide, for another tool) was used instead of your Claude login, and that key needs a workspace ID.
+
+**Solution**: in **Settings → AI assistant → Sign in with**, choose **Claude login** (the app then ignores the environment key), or choose **API key** and enter the key's workspace ID.
 
 ### Problem: A chat turn errors with "a turn is already running"
 
