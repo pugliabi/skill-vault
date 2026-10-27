@@ -31,6 +31,18 @@ test("an existing file's size counts toward the limit", () => {
   assert.equal(read(file), "xx");
 });
 
+test("a sink under an unusable path never throws, on creation or on write", () => {
+  const blocker = tmpLog();
+  fs.mkdirSync(path.dirname(blocker), { recursive: true });
+  fs.writeFileSync(path.join(path.dirname(blocker), "x"), "not a directory");
+  const file = path.join(path.dirname(blocker), "x", "logs", "server.log");
+  let sink: (chunk: string) => void = () => {};
+  assert.doesNotThrow(() => {
+    sink = createLogSink(file);
+  });
+  assert.doesNotThrow(() => sink("hello"));
+});
+
 test("rotateLog shifts files and drops the oldest", () => {
   const file = tmpLog();
   fs.mkdirSync(path.dirname(file), { recursive: true });

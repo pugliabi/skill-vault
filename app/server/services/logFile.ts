@@ -22,12 +22,12 @@ export function createLogSink(
   maxBytes = LOG_MAX_BYTES,
   keep = LOG_KEEP,
 ): (chunk: string | Uint8Array) => void {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
   let size = 0;
   try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
     size = fs.statSync(file).size;
   } catch {
-    /* new file */
+    /* unusable directory or new file: writes below fail quietly */
   }
   return (chunk) => {
     const len = typeof chunk === "string" ? Buffer.byteLength(chunk) : chunk.byteLength;
@@ -46,8 +46,18 @@ export function createLogSink(
 
 /** Tee process.stdout and process.stderr into a rotating log file. */
 export function installLogFile(file: string): void {
+  const header = `\n=== ${new Date().toISOString()} pid ${process.pid} ===\n`;
+  try {
+    // Probe the file directly: the sink swallows its own errors, so this is
+    // the only place an unwritable --log-file path is noticed.
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, header);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`[log] can't write ${file}: ${msg}; continuing with console output only\n`);
+    return;
+  }
   const sink = createLogSink(file);
-  sink(`\n=== ${new Date().toISOString()} pid ${process.pid} ===\n`);
   for (const stream of [process.stdout, process.stderr]) {
     const write = stream.write.bind(stream) as (...args: unknown[]) => boolean;
     stream.write = ((chunk: string | Uint8Array, ...rest: unknown[]) => {
