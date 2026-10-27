@@ -48,7 +48,7 @@ import {
   type VaultWatcher,
 } from "./services/watcher.ts";
 import { readAppConfig } from "./services/appConfig.ts";
-import { createHistoryRecorder, scanForUnrecordedChanges } from "./services/historyRecorder.ts";
+import { createHistoryRecorder, scanForUnrecordedChangesAsync } from "./services/historyRecorder.ts";
 import { startNotionChecker } from "./services/notion/checker.ts";
 import { findFreePort } from "./services/freePort.ts";
 
@@ -135,21 +135,16 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
     setActiveWatcher(null);
   }
 
-  // Startup scan: catch skill edits/deletes made while the app was
-  // closed (e.g. an agent editing the vault directly, or git pull).
-  // Deferred with setImmediate so it never blocks server boot.
+  // Startup scan: catch skill edits/deletes made while the app was closed
+  // (e.g. an agent editing the vault directly, or git pull). Chunked: it
+  // yields to the event loop between skills so it never holds up the first
+  // page load.
   if (initialCfg.vault_path) {
-    const vp = initialCfg.vault_path;
-    setImmediate(() => {
-      try {
-        const r = scanForUnrecordedChanges(vp);
-        console.log(
-          `[history] startup scan: ${r.recorded} recorded, ${r.deleted} deletions, ${r.gc} objects collected`,
-        );
-      } catch (err) {
-        console.error("[history] startup scan failed:", err);
-      }
-    });
+    scanForUnrecordedChangesAsync(initialCfg.vault_path)
+      .then((r) =>
+        console.log(`[history] startup scan: ${r.recorded} recorded, ${r.deleted} deletions, ${r.gc} objects collected`),
+      )
+      .catch((err) => console.error("[history] startup scan failed:", err));
   }
 
   const unsubActivity = subscribeActivity((entry) =>

@@ -66,13 +66,10 @@ export function createHistoryRecorder(opts: {
   };
 }
 
-export function scanForUnrecordedChanges(vaultPath: string): {
-  recorded: number;
-  deleted: number;
-  gc: number;
-} {
-  let recorded = 0;
-  let deleted = 0;
+type ScanResult = { recorded: number; deleted: number; gc: number };
+
+/** The startup scan as steps: one per skill, then deletions and gc. */
+function* scanSteps(vaultPath: string, out: ScanResult): Generator<void, void, void> {
   const skillsRoot = path.join(vaultPath, "skills");
   const present = fs.existsSync(skillsRoot)
     ? fs.readdirSync(skillsRoot, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith(".temp-")).map((e) => e.name)
@@ -90,14 +87,33 @@ export function scanForUnrecordedChanges(vaultPath: string): {
       source: "external-edit",
       note: hasHistory ? "changed while the app was closed" : "baseline",
     });
-    if (v) recorded++;
+    if (v) out.recorded++;
+    yield;
   }
   const histSkills = path.join(vaultPath, ".history", "skills");
   if (fs.existsSync(histSkills)) {
     for (const name of fs.readdirSync(histSkills)) {
       if (present.includes(name)) continue;
-      if (recordDeletionMarker(vaultPath, name, "deleted while the app was closed")) deleted++;
+      if (recordDeletionMarker(vaultPath, name, "deleted while the app was closed")) out.deleted++;
     }
   }
-  return { recorded, deleted, gc: gcObjects(vaultPath) };
+  yield;
+  out.gc = gcObjects(vaultPath);
+}
+
+export function scanForUnrecordedChanges(vaultPath: string): ScanResult {
+  const out: ScanResult = { recorded: 0, deleted: 0, gc: 0 };
+  const steps = scanSteps(vaultPath, out);
+  while (!steps.next().done) {
+    /* run every step now */
+  }
+  return out;
+}
+
+/** Same scan, yielding to the event loop between skills so boot-time requests aren't held up. */
+export async function scanForUnrecordedChangesAsync(vaultPath: string): Promise<ScanResult> {
+  const out: ScanResult = { recorded: 0, deleted: 0, gc: 0 };
+  const steps = scanSteps(vaultPath, out);
+  while (!steps.next().done) await new Promise<void>((resolve) => setImmediate(resolve));
+  return out;
 }

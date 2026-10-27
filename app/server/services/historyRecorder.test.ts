@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createHistoryRecorder, scanForUnrecordedChanges } from "./historyRecorder.ts";
+import { createHistoryRecorder, scanForUnrecordedChanges, scanForUnrecordedChangesAsync } from "./historyRecorder.ts";
 import { listVersions, recordVersion } from "./history.ts";
 
 let vault: string;
@@ -73,6 +73,25 @@ test("startup scan records baseline and changed-while-closed skills", () => {
   assert.equal(r.recorded, 2);
   assert.equal(listVersions(vault, "a")[0].note, "baseline");
   assert.equal(listVersions(vault, "b")[0].note, "changed while the app was closed");
+  assert.equal(scanForUnrecordedChanges(vault).recorded, 0);
+});
+
+test("the async startup scan matches the sync one and yields between skills", async () => {
+  write("a", "1");
+  write("b", "1");
+  write("c", "1");
+  let turns = 0;
+  let spinning = true;
+  const spin = () => {
+    if (!spinning) return;
+    turns++;
+    setImmediate(spin);
+  };
+  setImmediate(spin);
+  const r = await scanForUnrecordedChangesAsync(vault);
+  spinning = false;
+  assert.equal(r.recorded, 3);
+  assert.ok(turns >= 3, `the event loop ran ${turns} times during the scan`);
   assert.equal(scanForUnrecordedChanges(vault).recorded, 0);
 });
 
