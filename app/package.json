@@ -9,9 +9,7 @@
   "scripts": {
     "test": "node --import tsx --test \"server/**/*.test.ts\"",
     "dev": "tsx watch --clear-screen=false --exclude \"**/*.timestamp-*.mjs\" server/launcher.ts",
-    "build:client": "vite build",
-    "build:server": "esbuild server/launcher.ts server/index.ts --bundle --platform=node --target=node20 --format=esm --packages=external --outdir=dist && esbuild server/assistant-mcp/main.ts --bundle --platform=node --target=node20 --format=esm --packages=external --outfile=dist/assistant-mcp.js",
-    "build": "npm run build:client && npm run build:server",
+    "build": "node scripts/build.mjs",
     "start": "node dist/launcher.js",
     "typecheck": "tsc --noEmit"
   },

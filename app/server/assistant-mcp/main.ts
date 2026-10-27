@@ -5,7 +5,7 @@
  *
  * Kept separate from bridge.ts so the tool table stays importable by unit
  * tests without touching a transport, and so esbuild gets a clean entry
- * (built to dist/assistant-mcp.js by `npm run build:server`).
+ * (built to dist/assistant-mcp.js by `npm run build` (scripts/build.mjs)).
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";

@@ -4,7 +4,7 @@
  *
  * Dev runs the TypeScript source through tsx (the app itself runs under
  * tsx, so it is guaranteed present); production runs the esbuild bundle
- * `dist/assistant-mcp.js` (see the build:server entry in package.json).
+ * `dist/assistant-mcp.js` (built by scripts/build.mjs).
  * Everything here is pure given (mode, appRoot, port) so tests can assert
  * the exact JSON without an app server or filesystem.
  */

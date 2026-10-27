@@ -252,7 +252,7 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
     const dist = path.join(APP_ROOT, "dist/public");
     if (!fs.existsSync(dist)) {
       throw new Error(
-        `Production bundle not found at ${dist}. Run 'npm run build:client' first.`,
+        `Production bundle not found at ${dist}. Run 'npm run build' first.`,
       );
     }
     app.use(express.static(dist));
