@@ -92,7 +92,7 @@ Sensitive values (API keys) are masked in `sv config show` output.
 
 Precedence, highest wins:
 
-1. **CLI flags** — `--port`/`-p`, `--host`/`-h`, `--no-open`, `--help`. Pass after `--` with npm: `npm run dev -- --port 5500 --host 0.0.0.0 --no-open`
+1. **CLI flags** — `--port`/`-p`, `--host`/`-h`, `--no-open`, `--help`, plus the launcher's `--exit-when-idle` (stop about 60 s after the last window closes), `--log-file <path>` (also write output to a file, rotated at 5 MB, 3 kept) and `--strict-port` (use exactly `--port`; wait up to 10 s, else exit). Pass after `--` with npm: `npm run dev -- --port 5500 --host 0.0.0.0 --no-open`
 2. **Environment variables** — `PORT`, `HOST`, `OPEN_BROWSER` (`1`/`0`)
 3. **`.env` file** in `app/` — copy [`app/.env.example`](../app/.env.example) to `app/.env`
 4. **`app` block** in `~/.skill-vault/config.json`
@@ -121,6 +121,16 @@ If the chosen port is busy, the launcher picks the next free one automatically.
 
 - **Where**: env / `.env`
 - **Default**: unset (dev). Set `production` only after `npm run build` to serve the bundled client from `dist/`.
+
+## Launcher files (per machine)
+
+The Start Menu launcher keeps a few files in `~/.skill-vault/`:
+
+- `app.lock` — the running server's pid, port and version, so a second click reuses it. Removed when that server stops.
+- `logs/server.log` (+ `.1`–`.3`) — output of the server started by the launcher.
+- `logs/launch.log` — the launcher's own steps and any rebuild output.
+
+All are safe to delete while the app is closed.
 
 ## Assistant state files (per machine)
 

@@ -7,6 +7,10 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
 ## [Unreleased]
 
 ### Fixed
+- Notion push/pull of single-file skills: Notion now returns these as inline
+  text instead of an archive link, which failed with "returned no archive".
+- The assistant failing with "API key is not scoped to a workspace": choose
+  Claude login or an API key (with workspace ID) in Settings → AI assistant.
 - Rendered markdown lists (assistant replies, file preview) show their bullets,
   numbers, and indentation again; the CSS reset had stripped them.
 - Assistant timeline labels on newer Claude Code CLIs: `agent: <name> — <task>`
@@ -16,6 +20,10 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
   the pane.
 
 ### Changed
+- The app starts from a production build: about 0.4 s to listening instead of
+  5–12 s in development mode, and the client ships as one bundle.
+- The startup history scan no longer blocks the first page load.
+- `npm run build` is now `node scripts/build.mjs` (writes `dist/.build-stamp`).
 - **Assistant bundle v2.0.0** - one comprehensive `vault-assistant` lead
   (context doctrine, skill routing, delegation + latency rules) + five thin
   skill-backed subagents (repo-hunter, update-fixer, new skill-scout,
@@ -28,6 +36,14 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
   prompt in the empty state.
 
 ### Added
+- `setup.cmd` installs the app on Windows (checks Node 20+ and git, installs,
+  builds) and adds a **Skill Vault** Start Menu folder; `-Uninstall` removes it.
+- The Start Menu shortcut opens the built app in its own Edge window with no
+  console, reuses a running server, and stops it about a minute after the last
+  window closes.
+- In-app updates: an **Update available** button when GitHub's `main` is ahead,
+  with one-click pull, rebuild and restart (rolled back if any step fails).
+- `GET /api/health`; launcher flags `--exit-when-idle`, `--log-file`, `--strict-port`.
 - **Voice input in the assistant** — a mic button in the chat composer
   dictates into the draft (browser Web Speech API; Chrome/Edge — hidden
   where unsupported). Final phrases append to the draft, the in-flight

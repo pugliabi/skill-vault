@@ -48,6 +48,22 @@
 
 ## The app
 
+### Problem: Clicking the Skill Vault shortcut doesn't open a window
+
+**Symptoms**: nothing happens, or a "Skill Vault" message box appears.
+
+**Cause**: the launcher couldn't find Node, couldn't rebuild, or the server didn't answer within 20 seconds.
+
+**Solution**: read `~/.skill-vault/logs/launch.log` (launcher steps and build output) and `~/.skill-vault/logs/server.log` (the server's own output). Re-running `setup.cmd` repairs packages, the build and the shortcuts.
+
+### Problem: "Update & restart" is greyed out
+
+**Symptoms**: the update dialog says "Can't update right now: …".
+
+**Cause**: in-app updates only fast-forward a clean `main` checkout. The reason names what's in the way: another branch, uncommitted changes, local commits not on GitHub, GitHub's main branch (origin/main) wasn't found, running from source with `npm run dev`, or a job (Notion sync, assistant reply, update check) still running.
+
+**Solution**: commit, stash or push your changes, or switch to `main`. When running from source, `git pull` and restart yourself.
+
 ### Problem: Port already in use / app opens on an unexpected port
 
 **Symptoms**: Startup log shows a different port than configured.

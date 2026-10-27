@@ -11,15 +11,21 @@ This guide walks through installing the Skill Vault App, creating your first vau
 
 ## Install and launch the app
 
+On Windows:
+
 ```bash
 git clone https://github.com/pugliabi/skill-vault.git
-cd skill-vault/app
-npm install
-npm run dev
-# → opens http://localhost:9994
+cd skill-vault
+.\setup.cmd
 ```
 
-On Windows, `app\run.bat` does the same and prints the resolved port/host first. Port, host, and browser auto-open are configurable — see [Configuration](./configuration.md).
+Setup checks for Node 20+ and git (and prints the `winget` command if one is missing), installs packages, builds the app, and creates **Start Menu → Skill Vault**. Options: `-Desktop` (also a desktop shortcut), `-WhatIf` (show what it would do), `-Uninstall` (remove the shortcuts only: your clone, vault and `~/.skill-vault` are never touched).
+
+The shortcut opens Skill Vault in its own window. Clicking it again reuses the running app, and the app stops about a minute after its last window closes.
+
+**Updating.** When GitHub has newer commits on `main`, an **Update available** button appears at the bottom of the sidebar. **Update & restart** pulls, rebuilds and restarts the app. It only runs on a clean `main` checkout, and if any step fails the previous version keeps running.
+
+**Developing / macOS / Linux.** `cd app && npm install && npm run dev` runs from source with hot reload (→ http://localhost:9994); on Windows, `app\run.bat` does the same. Port, host and browser auto-open are configurable; see [Configuration](./configuration.md).
 
 ## First-run setup
 
