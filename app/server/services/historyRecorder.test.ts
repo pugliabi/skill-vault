@@ -95,6 +95,20 @@ test("the async startup scan matches the sync one and yields between skills", as
   assert.equal(scanForUnrecordedChanges(vault).recorded, 0);
 });
 
+test("a skill created while the async scan is running is not marked deleted", async () => {
+  write("a", "1");
+  write("b", "1");
+  write("c", "1");
+  const p = scanForUnrecordedChangesAsync(vault);
+  setImmediate(() => {
+    write("late", "1");
+    recordVersion(vault, "late", { source: "vault-edit" });
+  });
+  const r = await p;
+  assert.equal(r.deleted, 0);
+  assert.notEqual(listVersions(vault, "late")[0].source, "delete");
+});
+
 test("startup scan skips a skill whose versions.json is unreadable and keeps going", () => {
   write("broken", "x");
   write("fine", "y");

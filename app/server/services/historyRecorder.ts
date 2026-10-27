@@ -93,7 +93,8 @@ function* scanSteps(vaultPath: string, out: ScanResult): Generator<void, void, v
   const histSkills = path.join(vaultPath, ".history", "skills");
   if (fs.existsSync(histSkills)) {
     for (const name of fs.readdirSync(histSkills)) {
-      if (present.includes(name)) continue;
+      // A skill created after the snapshot above is live, not deleted.
+      if (present.includes(name) || fs.existsSync(path.join(skillsRoot, name))) continue;
       if (recordDeletionMarker(vaultPath, name, "deleted while the app was closed")) out.deleted++;
     }
   }
