@@ -13,6 +13,10 @@ import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { configRouter } from "./routes/config.ts";
+import { appRouter } from "./routes/app.ts";
+import { buildVersion } from "./services/instanceLock.ts";
+import { createAppUpdater } from "./services/appUpdate.ts";
+import { getServerPort } from "./services/runtime.ts";
 import { skillsRouter } from "./routes/skills.ts";
 import { historyRouter } from "./routes/history.ts";
 import { adoptRouter } from "./routes/adopt.ts";
@@ -34,7 +38,7 @@ import {
 } from "./routes/events.ts";
 import { activityRouter } from "./routes/activity.ts";
 import { assistantRouter } from "./routes/assistant.ts";
-import { abortAllTurns } from "./services/assistant/session.ts";
+import { abortAllTurns, anyTurnRunning } from "./services/assistant/session.ts";
 import { foregroundCheckActive, startUpdateSweep } from "./services/assistant/updateSweep.ts";
 import { subscribeActivity } from "./services/activity.ts";
 import {
@@ -45,7 +49,7 @@ import {
   type VaultWatcher,
 } from "./services/watcher.ts";
 import { readAppConfig } from "./services/appConfig.ts";
-import { createHistoryRecorder, scanForUnrecordedChanges } from "./services/historyRecorder.ts";
+import { createHistoryRecorder, scanForUnrecordedChangesAsync } from "./services/historyRecorder.ts";
 import { startNotionChecker } from "./services/notion/checker.ts";
 import { findFreePort } from "./services/freePort.ts";
 
@@ -55,6 +59,11 @@ const APP_ROOT = path.resolve(__dirname, "..");
 export interface CreateAppOptions {
   /** "development" enables Vite middleware + HMR; "production" serves dist/public. */
   mode: "development" | "production";
+  /**
+   * Start the new build and stop this process; set by launcher.ts (used after
+   * an in-app update). Resolves once the successor spawned; rejects if it couldn't.
+   */
+  restart?: () => void | Promise<void>;
 }
 
 export async function createApp(opts: CreateAppOptions): Promise<Express> {
@@ -132,26 +141,33 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
     setActiveWatcher(null);
   }
 
-  // Startup scan: catch skill edits/deletes made while the app was
-  // closed (e.g. an agent editing the vault directly, or git pull).
-  // Deferred with setImmediate so it never blocks server boot.
+  // Startup scan: catch skill edits/deletes made while the app was closed
+  // (e.g. an agent editing the vault directly, or git pull). Chunked: it
+  // yields to the event loop between skills so it never holds up the first
+  // page load.
   if (initialCfg.vault_path) {
-    const vp = initialCfg.vault_path;
-    setImmediate(() => {
-      try {
-        const r = scanForUnrecordedChanges(vp);
-        console.log(
-          `[history] startup scan: ${r.recorded} recorded, ${r.deleted} deletions, ${r.gc} objects collected`,
-        );
-      } catch (err) {
-        console.error("[history] startup scan failed:", err);
-      }
-    });
+    scanForUnrecordedChangesAsync(initialCfg.vault_path)
+      .then((r) =>
+        console.log(`[history] startup scan: ${r.recorded} recorded, ${r.deleted} deletions, ${r.gc} objects collected`),
+      )
+      .catch((err) => console.error("[history] startup scan failed:", err));
   }
 
   const unsubActivity = subscribeActivity((entry) =>
     broadcastSse({ type: "activity", entry }),
   );
+
+  // In-app updates (git checkout installs): background check + one-click apply.
+  const busyWithoutUpdate = (): boolean => anyNotionJobRunning() || anyTurnRunning() || foregroundCheckActive();
+  const updater = createAppUpdater({
+    appDir: APP_ROOT,
+    mode: opts.mode,
+    isBusy: busyWithoutUpdate,
+    restart: opts.restart ?? (() => console.error("[update] no restart hook; restart the app to finish the update")),
+  });
+  // Background checks only for the built app: `npm run dev` never fetches on
+  // its own (its status stays "not checked yet", so no pill).
+  if (opts.mode === "production") updater.start();
 
   // Cleanup hook — launcher.ts invokes this before server.close() so
   // chokidar tears down cleanly on Ctrl+C and the SSE clients receive
@@ -164,6 +180,7 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
     historyRecorder.flush();
     notionChecker.stop();
     updateSweeper.stop();
+    updater.stop();
     const current = getActiveWatcher();
     if (current) {
       try {
@@ -174,7 +191,22 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
     }
     setActiveWatcher(null);
   };
+  // Work that must not be cut off by an idle stop (launcher --exit-when-idle).
+  app.locals.isBusy = (): boolean => busyWithoutUpdate() || updater.isApplying();
 
+  app.use(
+    "/api",
+    appRouter({
+      health: () => ({
+        ok: true,
+        pid: process.pid,
+        port: getServerPort(),
+        version: buildVersion(APP_ROOT, opts.mode),
+        mode: opts.mode,
+      }),
+      updater,
+    }),
+  );
   app.use("/api/config", configRouter());
   app.use("/api/skills", skillsRouter({ isBusy: anyNotionJobRunning }));
   app.use("/api/history", historyRouter());
@@ -233,6 +265,10 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
     const hmrPort = await findFreePort();
     const vite = await createViteServer({
       root: path.join(APP_ROOT, "client"),
+      // Vite looks for its config in `root` (client/), but ours lives in
+      // app/. Point at it explicitly or the `@` alias and react plugin
+      // silently vanish in dev while `vite build` still works.
+      configFile: path.join(APP_ROOT, "vite.config.ts"),
       // allowedHosts: true disables the host-header check so the dev
       // server is reachable via LAN IP / hostname when --host 0.0.0.0
       // is used. Without this, Vite rejects non-localhost requests with
@@ -248,7 +284,7 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
     const dist = path.join(APP_ROOT, "dist/public");
     if (!fs.existsSync(dist)) {
       throw new Error(
-        `Production bundle not found at ${dist}. Run 'npm run build:client' first.`,
+        `Production bundle not found at ${dist}. Run 'npm run build' first.`,
       );
     }
     app.use(express.static(dist));

@@ -166,6 +166,17 @@ test("downloadSkill and addLastEditedProperty call the right tools", async () =>
   });
 });
 
+test("downloadSkill accepts a single-file skill returned inline (markdown, no archive url)", async () => {
+  const md = "---\nname: |-\n  x\nnotion_page_id: p\n---\nbody\n";
+  const api = new NotionApi(async () => ({ id: "p", version_id: "v1", markdown: md }));
+  assert.deepEqual(await api.downloadSkill("p"), { versionId: "v1", markdown: md });
+});
+
+test("downloadSkill rejects a response with neither an archive url nor inline markdown", async () => {
+  const api = new NotionApi(async () => ({ id: "p", version_id: "v1" }));
+  await assert.rejects(api.downloadSkill("p"), /no archive or inline SKILL\.md for p/);
+});
+
 test("isBlankPage is true only when notion-fetch reports the blank-page marker", async () => {
   const texts: Record<string, string> = {
     "p-blank": "<page><blank-page>This page is blank and has no content.</blank-page></page>",

@@ -206,6 +206,12 @@ export function abortAllTurns(): void {
   }
 }
 
+/** True while any chat turn's CLI process is running. */
+export function anyTurnRunning(): boolean {
+  loadOnce();
+  return [...sessions.values()].some((s) => s.running);
+}
+
 /** TEST-ONLY: reset in-memory state (the store file is left to the test's tmp HOME). */
 export function __resetSessionsForTests(): void {
   sessions.clear();

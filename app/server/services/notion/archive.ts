@@ -4,6 +4,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import * as tar from "tar";
+import type { SkillDownload } from "./api.ts";
 
 /** Largest archive we download (compressed bytes). */
 export const MAX_ARCHIVE_BYTES = 50 * 1024 * 1024;
@@ -30,6 +31,22 @@ async function readCapped(res: Response, cap: number): Promise<Buffer> {
     chunks.push(Buffer.from(value));
   }
   return Buffer.concat(chunks);
+}
+
+/**
+ * Materialize a download-skill result as a skill folder in a temp dir. An
+ * archive URL goes through `extract` (downloadAndExtract, or a test fake);
+ * a single-file skill Notion returned inline becomes `<tmp>/SKILL.md`.
+ */
+export async function openDownload(
+  dl: SkillDownload,
+  extract: (url: string) => Promise<{ skillRoot: string; cleanup(): void }>,
+): Promise<{ skillRoot: string; cleanup(): void }> {
+  if (dl.url) return extract(dl.url);
+  if (typeof dl.markdown !== "string") throw new Error("download has neither an archive url nor inline SKILL.md");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sv-notion-"));
+  fs.writeFileSync(path.join(dir, "SKILL.md"), dl.markdown);
+  return { skillRoot: dir, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
 }
 
 /**

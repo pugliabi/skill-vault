@@ -81,6 +81,19 @@ Sensitive values (API keys) are masked in `sv config show` output.
   "ai_scanner": { "provider": "anthropic-sdk", "api_key_env": "ANTHROPIC_API_KEY" }
   ```
 
+### assistant
+
+- **Purpose**: How the app's `claude` CLI calls sign in — the AI assistant, AI tagging and Claude merge. Edited in **Settings → AI assistant → Sign in with**.
+- **Type**: object
+- **Fields**:
+  - `auth` — `"login"` (default: Claude Code's own login; `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` are removed from the CLI's environment so a key set for another tool can't take over) or `"api_key"`
+  - `api_key` — saved key for `"api_key"` mode (optional; without it the environment's `ANTHROPIC_API_KEY` is used). Stored in plain text; the app never sends it back to the browser
+  - `workspace_id` — sent as the `anthropic-workspace-id` header, for keys not scoped to a workspace
+- **Example**:
+  ```json
+  "assistant": { "auth": "api_key", "workspace_id": "wrkspc_…" }
+  ```
+
 ### app
 
 - **Purpose**: Runtime fallback settings for the web app — the lowest-precedence source before built-in defaults
@@ -92,7 +105,7 @@ Sensitive values (API keys) are masked in `sv config show` output.
 
 Precedence, highest wins:
 
-1. **CLI flags** — `--port`/`-p`, `--host`/`-h`, `--no-open`, `--help`. Pass after `--` with npm: `npm run dev -- --port 5500 --host 0.0.0.0 --no-open`
+1. **CLI flags** — `--port`/`-p`, `--host`/`-h`, `--no-open`, `--help`, plus the launcher's `--exit-when-idle` (stop about 60 s after the last window closes), `--log-file <path>` (also write output to a file, rotated at 5 MB, 3 kept) and `--strict-port` (use exactly `--port`; wait up to 10 s, else exit). Pass after `--` with npm: `npm run dev -- --port 5500 --host 0.0.0.0 --no-open`
 2. **Environment variables** — `PORT`, `HOST`, `OPEN_BROWSER` (`1`/`0`)
 3. **`.env` file** in `app/` — copy [`app/.env.example`](../app/.env.example) to `app/.env`
 4. **`app` block** in `~/.skill-vault/config.json`
@@ -120,7 +133,19 @@ If the chosen port is busy, the launcher picks the next free one automatically.
 ### NODE_ENV
 
 - **Where**: env / `.env`
-- **Default**: unset (dev). Set `production` only after `npm run build` to serve the bundled client from `dist/`.
+- **Default**: unset (dev). Set `production` only after `npm run build` to serve the bundled client from `dist/`. The Start Menu launcher sets it for you.
+
+## Launcher files (per machine)
+
+The Start Menu launcher keeps a few files in `~/.skill-vault/`:
+
+- `app.lock` — the running server's pid, port and version, so a second click reuses it. Removed when that server stops.
+- `logs/server.log` (+ `.1`–`.3`) — output of the server started by the launcher.
+- `logs/launch.log` — the launcher's own steps and any rebuild output.
+
+All are safe to delete while the app is closed.
+
+A server started from the Start Menu always binds `127.0.0.1` (only this computer can reach it), whatever `HOST` says; to expose the app on your LAN, run it from a terminal instead: `npm run dev -- --host 0.0.0.0`.
 
 ## Assistant state files (per machine)
 

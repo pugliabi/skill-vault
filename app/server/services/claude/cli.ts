@@ -25,6 +25,8 @@ import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { readAssistantBlock } from "../appConfig.ts";
+import { claudeChildEnv } from "./auth.ts";
 
 export type ClaudeRunner = (
   args: string[],
@@ -196,18 +198,22 @@ function buildSpawnInvocation(
   cwd: string,
   resolveExe: () => string | null,
   platform: NodeJS.Platform,
+  env?: NodeJS.ProcessEnv,
 ): SpawnInvocation {
+  // No env → the child inherits ours (tests); the default runners pass the
+  // auth-mode env from services/claude/auth.ts.
+  const envOpt = env ? { env } : {};
   if (platform !== "win32") {
     // `detached: true` makes the child the leader of its own process
     // group, so a timeout can kill the whole tree via `process.kill(-pid, …)`.
-    return { command: "claude", args, options: { cwd, detached: true } };
+    return { command: "claude", args, options: { cwd, detached: true, ...envOpt } };
   }
 
   const resolvedExe = resolveExe();
   if (resolvedExe) {
     // A real .exe: no shell, no cmd.exe line parsing, plain argv — safe
     // for multi-line prompts, quotes, and every other special character.
-    return { command: resolvedExe, args, options: { cwd } };
+    return { command: resolvedExe, args, options: { cwd, ...envOpt } };
   }
 
   if (args.some((a) => a.includes("\n"))) {
@@ -220,7 +226,7 @@ function buildSpawnInvocation(
   return {
     command: shellInvocation.command,
     args: shellInvocation.args,
-    options: { cwd, windowsVerbatimArguments: true },
+    options: { cwd, windowsVerbatimArguments: true, ...envOpt },
   };
 }
 
@@ -290,7 +296,7 @@ const realSpawn: SpawnFn = (command, args, options) => nodeSpawn(command, args, 
 export function createRunner(
   spawnFn: SpawnFn,
   killTreeFn: KillTreeFn,
-  deps: { resolveExe?: () => string | null; platform?: NodeJS.Platform } = {},
+  deps: { resolveExe?: () => string | null; platform?: NodeJS.Platform; env?: () => NodeJS.ProcessEnv } = {},
 ): ClaudeRunner {
   const resolveExe = deps.resolveExe ?? resolveClaudeExe;
   const platform = deps.platform ?? process.platform;
@@ -303,7 +309,7 @@ export function createRunner(
       }
       let invocation: SpawnInvocation;
       try {
-        invocation = buildSpawnInvocation(args, opts.cwd, resolveExe, platform);
+        invocation = buildSpawnInvocation(args, opts.cwd, resolveExe, platform, deps.env?.());
       } catch (err) {
         reject(err);
         return;
@@ -359,7 +365,10 @@ export function createRunner(
 }
 
 /** Default runner: spawns the real `claude` binary. Never used in tests. */
-export const defaultRunner: ClaudeRunner = createRunner(realSpawn, defaultKillTree);
+/** The env every real claude spawn gets: the saved auth mode, re-read per call so a Settings change applies immediately. */
+const authEnv = (): NodeJS.ProcessEnv => claudeChildEnv(readAssistantBlock());
+
+export const defaultRunner: ClaudeRunner = createRunner(realSpawn, defaultKillTree, { env: authEnv });
 
 // ── Streaming runner (assistant chat turns) ──────────────────────────────
 
@@ -391,7 +400,7 @@ export type ClaudeStreamRunner = (
 export function createStreamRunner(
   spawnFn: SpawnFn,
   killTreeFn: KillTreeFn,
-  deps: { resolveExe?: () => string | null; platform?: NodeJS.Platform } = {},
+  deps: { resolveExe?: () => string | null; platform?: NodeJS.Platform; env?: () => NodeJS.ProcessEnv } = {},
 ): ClaudeStreamRunner {
   const resolveExe = deps.resolveExe ?? resolveClaudeExe;
   const platform = deps.platform ?? process.platform;
@@ -404,7 +413,7 @@ export function createStreamRunner(
       }
       let invocation: SpawnInvocation;
       try {
-        invocation = buildSpawnInvocation(args, opts.cwd, resolveExe, platform);
+        invocation = buildSpawnInvocation(args, opts.cwd, resolveExe, platform, deps.env?.());
       } catch (err) {
         reject(err);
         return;
@@ -488,7 +497,7 @@ export function createStreamRunner(
 }
 
 /** Default stream runner: spawns the real `claude` binary. Never used in tests. */
-export const defaultStreamRunner: ClaudeStreamRunner = createStreamRunner(realSpawn, defaultKillTree);
+export const defaultStreamRunner: ClaudeStreamRunner = createStreamRunner(realSpawn, defaultKillTree, { env: authEnv });
 
 let availabilityCache: { at: number; value: { available: boolean; version?: string; reason?: string } } | null = null;
 const AVAILABILITY_CACHE_MS = 60_000;

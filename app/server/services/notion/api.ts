@@ -6,6 +6,17 @@ import type { NotionCacheRow } from "./store.ts";
 
 export type ToolCaller = (name: string, args: Record<string, unknown>) => Promise<any>;
 
+/**
+ * notion-download-skill's result: a signed tar.gz `url` for a multi-file
+ * skill, or the SKILL.md text inline as `markdown` for a single-file skill
+ * (exactly one of the two is set). Open it with archive.ts's openDownload.
+ */
+export interface SkillDownload {
+  versionId: string;
+  url?: string;
+  markdown?: string;
+}
+
 export function pageIdFromUrl(url: string): string {
   const base = url.split(/[?#]/)[0];
   const hex = base.replace(/-/g, "").match(/[0-9a-f]{32}(?=[^0-9a-f]*$)/i)?.[0];
@@ -130,10 +141,13 @@ export class NotionApi {
     return out;
   }
 
-  async downloadSkill(pageId: string): Promise<{ versionId: string; url: string }> {
+  async downloadSkill(pageId: string): Promise<SkillDownload> {
     const r = await this.call("notion-download-skill", { id: pageId });
-    if (!r?.version_id || !r?.url) throw new Error(`download-skill returned no archive for ${pageId}`);
-    return { versionId: String(r.version_id), url: String(r.url) };
+    if (r?.version_id && r?.url) return { versionId: String(r.version_id), url: String(r.url) };
+    if (r?.version_id && typeof r?.markdown === "string") {
+      return { versionId: String(r.version_id), markdown: r.markdown };
+    }
+    throw new Error(`download-skill returned no archive or inline SKILL.md for ${pageId}`);
   }
 
   async addLastEditedProperty(dataSourceId: string, name: string): Promise<void> {

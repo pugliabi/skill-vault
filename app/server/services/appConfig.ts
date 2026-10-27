@@ -29,6 +29,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import type { AppConfig, Provider } from "../types/vault.ts";
+import type { ClaudeAuthConfig } from "./claude/auth.ts";
 
 const CLI_CONFIG_DIR = path.join(os.homedir(), ".skill-vault");
 const CLI_CONFIG_FILE = path.join(CLI_CONFIG_DIR, "config.json");
@@ -187,4 +188,25 @@ export function setClaudeDesktopStage(stagePath: string): AppConfig {
   raw.claude_desktop_stage = stagePath;
   writeRaw(raw);
   return readAppConfig();
+}
+
+/**
+ * The `assistant` block: how the app's claude CLI calls authenticate (see
+ * services/claude/auth.ts). Holds the saved API key — never return it to
+ * the client. Missing or unreadable config → {} (Claude login).
+ */
+export function readAssistantBlock(): ClaudeAuthConfig {
+  try {
+    const block = readRaw().assistant;
+    return block && typeof block === "object" ? (block as ClaudeAuthConfig) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Replace the `assistant` block, preserving all other config keys. */
+export function writeAssistantBlock(block: ClaudeAuthConfig): void {
+  const raw = readRaw();
+  raw.assistant = block;
+  writeRaw(raw);
 }

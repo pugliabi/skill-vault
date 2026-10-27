@@ -31,6 +31,13 @@ $0.05–0.20 for a plain answer or a single check, and $1–1.50 for a
 research-heavy turn that delegates to a specialist (a GitHub discovery sweep, a
 multi-skill repair).
 
+**Signing in.** By default the assistant uses your Claude Code login, even if
+`ANTHROPIC_API_KEY` is set in your environment. To bill an API account
+instead, open **Settings → AI assistant → Sign in with**, choose **API key**,
+paste a key (or leave it blank to use the environment's), and add a workspace
+ID if the key isn't scoped to one. The same setting covers AI tagging and
+Claude merge. See [configuration](./configuration.md#assistant).
+
 ## Opening the assistant
 
 Three ways in:

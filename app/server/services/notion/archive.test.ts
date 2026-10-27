@@ -4,7 +4,31 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import * as tar from "tar";
-import { downloadAndExtract } from "./archive.ts";
+import { downloadAndExtract, openDownload } from "./archive.ts";
+
+test("openDownload writes an inline single-file skill to a temp skill root", async () => {
+  const md = "---\nname: demo\n---\nbody\n";
+  const out = await openDownload({ versionId: "v1", markdown: md }, async () => {
+    throw new Error("an inline download is never extracted");
+  });
+  try {
+    assert.deepEqual(fs.readdirSync(out.skillRoot), ["SKILL.md"]);
+    assert.equal(fs.readFileSync(path.join(out.skillRoot, "SKILL.md"), "utf8"), md);
+  } finally {
+    out.cleanup();
+  }
+  assert.equal(fs.existsSync(out.skillRoot), false);
+});
+
+test("openDownload hands an archive url to the extractor", async () => {
+  const seen: string[] = [];
+  const out = await openDownload({ versionId: "v1", url: "https://x.test/a.tar.gz" }, async (url) => {
+    seen.push(url);
+    return { skillRoot: "/tmp/x", cleanup() {} };
+  });
+  assert.deepEqual(seen, ["https://x.test/a.tar.gz"]);
+  assert.equal(out.skillRoot, "/tmp/x");
+});
 
 test("extracts a single-folder archive and finds the skill root", async () => {
   const src = fs.mkdtempSync(path.join(os.tmpdir(), "sv-arc-src-"));

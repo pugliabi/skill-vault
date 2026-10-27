@@ -27,11 +27,17 @@ Per skill × provider: `configured` (provider is set as a target), `synced` (con
 **Is my skill content sent anywhere?**
 No. Everything is local file operations. The only network calls are ones you invoke explicitly: `sv adopt-remote` (git clone) and the optional AI scanner for `sv scan` (Claude CLI or Anthropic API, if you configure it).
 
+**How do I install it on Windows?**
+Clone the repo and run `.\setup.cmd` (needs Node 20+ and git; it prints the `winget` command for anything missing). It installs packages, builds the app, and adds **Start Menu → Skill Vault**. No admin rights are needed — the shortcuts are per-user — and `.\setup.cmd -Uninstall` removes only the shortcuts, never your clone, vault or settings. See [Getting Started](./getting-started.md#install-and-launch-the-app).
+
+**How does the app update itself — is it safe?**
+It checks GitHub in the background and shows **Update available** when `main` has new commits. **Update & restart** pulls them, rebuilds into a separate folder, swaps the new build in only once it's complete, waits for any running job, then restarts in place. If any step fails, the checkout is put back and your current version keeps running. It only updates a clean `main` checkout — if you've edited or committed locally, it tells you and leaves things alone.
+
 **Is it safe to expose the app on my network?**
-The app binds `127.0.0.1` by default. Binding `0.0.0.0` makes the dashboard — which can modify your vault and agent directories — reachable by anyone on the LAN. There is no authentication. Only do this on networks you trust.
+The app binds `127.0.0.1` by default, and the Start Menu app always does. Binding `0.0.0.0` (from a terminal: `npm run dev -- --host 0.0.0.0`) makes the dashboard — which can modify your vault and agent directories — reachable by anyone on the LAN. There is no authentication. Only do this on networks you trust.
 
 **Does the app work without the dev toolchain?**
-`npm run build` then `npm run start` runs the bundled server (`dist/launcher.js`) — no tsx/Vite at runtime. Once published to npm, `npx skill-vault-app` is the intended one-liner.
+Yes. On Windows, `setup.cmd` builds it and the Start Menu shortcut runs the bundled server (`dist/launcher.js`) — no tsx/Vite at runtime. Elsewhere: `npm run build`, then start `node dist/launcher.js` with `NODE_ENV=production`. Once published to npm, `npx skill-vault-app` is the intended one-liner.
 
 **How do I rename a skill everywhere?**
 Use Rename in the app's skill detail — it cascades through the manifest and provider directories. Renaming a folder by hand leaves stale entries; run `sv fix` if you did.
@@ -40,6 +46,9 @@ Use Rename in the app's skill detail — it cascades through the manifest and pr
 
 **What does the AI assistant cost to run?**
 Chat turns run through your local Claude Code CLI on your existing Claude subscription — roughly $0.05–0.20 for a plain answer or single check and $1–1.50 for a research-heavy turn that delegates to a specialist; the cost is shown after each reply. Everything else is free: the proactive **For you** suggestions, the background source sweep, and all badges are computed deterministically with no AI calls. The only AI spends are turns you start: messages, **Fix with AI** cards you send, and the **AI briefing** button.
+
+**Does the assistant use my Claude login or an API key?**
+Your Claude login by default — even if `ANTHROPIC_API_KEY` is set in your environment for some other tool. To bill an API account instead, choose **API key** under **Settings → AI assistant → Sign in with**, paste a key (or use the environment's), and add a workspace ID if the key isn't scoped to one. A saved key is stored in plain text in `~/.skill-vault/config.json`.
 
 **Can the assistant break my vault?**
 It edits through the same audited API the UI uses, so every change appears in Activity and is restorable from version history. Deleting skills, force-overwriting Notion, arbitrary shell commands, and anything outside the vault/clones folders are excluded from its toolset by design — those remain manual, in the UI.

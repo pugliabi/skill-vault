@@ -6,7 +6,7 @@ Start at the [README](../README.md) for the overview and quickstart tour.
 
 | Doc | What's in it |
 |---|---|
-| [getting-started.md](./getting-started.md) | Installation and first-run setup for the app and the `sv` CLI |
+| [getting-started.md](./getting-started.md) | Installation (one-script Windows setup, Start Menu launcher, in-app updates) and first-run setup for the app and the `sv` CLI |
 | [features.md](./features.md) | The full feature tour, with screenshots |
 | [assistant.md](./assistant.md) | The AI assistant: chat agents, proactive "For you" suggestions, voice input, safety model |
 | [examples.md](./examples.md) | Recipes for common workflows |
@@ -16,10 +16,10 @@ Start at the [README](../README.md) for the overview and quickstart tour.
 
 | Doc | What's in it |
 |---|---|
-| [configuration.md](./configuration.md) | Every setting: `config.json`, env vars, CLI flags, assistant state files |
+| [configuration.md](./configuration.md) | Every setting: `config.json` (incl. assistant sign-in), env vars, CLI and launcher flags, launcher and assistant state files |
 | [vault-format.md](./vault-format.md) | The on-disk contract both tools implement (authoritative spec) |
 | [brand.md](./brand.md) | Logo, colours, type and icon files for Skill Vault |
-| [tech_reference.md](./tech_reference.md) | Architecture notes and the app's HTTP API surface |
+| [tech_reference.md](./tech_reference.md) | Architecture notes, the app's HTTP API surface, and how install, launch and self-update work |
 
 ## Support
 

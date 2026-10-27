@@ -4,9 +4,22 @@ User-facing history of the Skill Vault project (app + CLI). The app keeps a
 more detailed log in [app/CHANGELOG.md](../app/CHANGELOG.md). Versions follow
 semver; the project is pre-1.0, so minor versions carry feature batches.
 
-## [Unreleased] - 2026-10-06
+## [Unreleased] - 2026-10-27
 
 ### Added
+- **One-script Windows install** — `.\setup.cmd` checks Node 20+ and git,
+  installs, builds, and adds **Start Menu → Skill Vault**; `-Uninstall`
+  removes only the shortcuts. ([getting started](./getting-started.md#install-and-launch-the-app))
+- **Start Menu launcher** — opens the built app in its own Edge window with
+  no console, reuses a running server, and stops it about a minute after the
+  last window closes. Logs in `~/.skill-vault/logs/`.
+- **In-app updates** — an **Update available** button when GitHub's `main` is
+  ahead; **Update & restart** pulls, rebuilds, waits for running jobs, and
+  restarts in place, rolling back cleanly if any step fails.
+- **Assistant sign-in choice** — Settings → AI assistant: Claude login
+  (default) or an API key with an optional workspace ID.
+- `GET /api/health`; launcher flags `--exit-when-idle`, `--log-file`,
+  `--strict-port`.
 - **AI assistant** — docked chat pane on every page (Ctrl/⌘+J) powered by the
   local Claude Code CLI: context-routed agents (vault-wide / per-skill) with
   specialist subagents, streaming replies with a tool timeline and per-turn
@@ -32,6 +45,13 @@ semver; the project is pre-1.0, so minor versions carry feature batches.
   "what to ask" usage section in the [guide](./assistant.md).
 
 ### Fixed
+- **Notion sync for single-file skills** — Notion returns these as inline
+  text instead of an archive link; push, pull, linking and the background
+  check now handle both. Re-run **Link skills** once to repair skills left
+  half-linked by the old error ("returned no archive").
+- **Assistant "API key is not scoped to a workspace"** — a user-level
+  `ANTHROPIC_API_KEY` no longer overrides your Claude login (see the new
+  sign-in choice above).
 - Bulleted and numbered lists in rendered markdown (assistant replies and the
   file preview) now show their markers and indentation.
 - Assistant timeline labels on newer Claude Code CLIs: delegations read
@@ -40,6 +60,10 @@ semver; the project is pre-1.0, so minor versions carry feature batches.
   running off the edge.
 
 ### Changed
+- **Startup runs from a production build** — about 1.5 s from a cold start
+  to your skills (was ~12 s plus ~2.7 s in dev mode), ~0.4 s when the app is
+  already running. `npm run build` is now `node scripts/build.mjs` and writes
+  `dist/.build-stamp`.
 - **Assistant bundle v2.0.0** — rebuilt around one comprehensive
   `vault-assistant` lead agent plus five thin, skill-backed specialist
   subagents (repo-hunter, update-fixer, new skill-scout, read-only

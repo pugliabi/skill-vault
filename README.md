@@ -12,15 +12,17 @@ The main way in is the **Skill Vault App**, a local web dashboard. A Python CLI 
 
 ## Quickstart
 
-Requires Node 20+.
+Requires Node 20+ and git. On Windows:
 
-```bash
+```powershell
 git clone https://github.com/pugliabi/skill-vault.git
-cd skill-vault/app
-npm install
-npm run dev
-# → opens http://localhost:9994
+cd skill-vault
+.\setup.cmd
 ```
+
+`setup.cmd` installs and builds the app and adds a **Skill Vault** folder to the Start Menu. The shortcut opens the app in its own window and stops the app about a minute after you close it. Re-run `setup.cmd` any time to repair the install; `.\setup.cmd -Uninstall` removes the shortcuts. The app tells you when a newer version is on GitHub and updates itself in one click.
+
+On macOS or Linux, or to work on the app itself: `cd app && npm install && npm run dev` (opens http://localhost:9994).
 
 First run shows a Setup page: pick a vault directory, then add your agent tools as providers under **Settings**. Full walkthrough in [Getting Started](docs/getting-started.md); the optional `sv` CLI is covered there too.
 
