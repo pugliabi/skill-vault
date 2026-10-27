@@ -233,6 +233,10 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
     const hmrPort = await findFreePort();
     const vite = await createViteServer({
       root: path.join(APP_ROOT, "client"),
+      // Vite looks for its config in `root` (client/), but ours lives in
+      // app/. Point at it explicitly or the `@` alias and react plugin
+      // silently vanish in dev while `vite build` still works.
+      configFile: path.join(APP_ROOT, "vite.config.ts"),
       // allowedHosts: true disables the host-header check so the dev
       // server is reachable via LAN IP / hostname when --host 0.0.0.0
       // is used. Without this, Vite rejects non-localhost requests with
