@@ -92,6 +92,22 @@ test("same-origin and header-less POSTs are allowed; GETs are never checked", as
   assert.equal(health.status, 200);
 });
 
+test("a POST whose Origin isn't this server is refused even without Sec-Fetch-Site (plain-HTTP LAN pages omit it)", async () => {
+  let applied = 0;
+  const updater: AppUpdater = { ...stubUpdater(), apply: async () => (applied++, true) };
+  const base = await serve(appRouter({ health: () => HEALTH, updater }));
+  for (const origin of ["http://evil.example", "null", `${base.replace("127.0.0.1", "localhost")}`]) {
+    const res = await fetch(`${base}/api/app/update`, { method: "POST", headers: { Origin: origin } });
+    assert.equal(res.status, 403, origin);
+    assert.deepEqual(await res.json(), { error: "cross-site request refused" });
+  }
+  assert.equal(applied, 0);
+  const same = await fetch(`${base}/api/app/update`, { method: "POST", headers: { Origin: base } });
+  assert.equal(same.status, 200);
+  await same.text();
+  assert.equal(applied, 1);
+});
+
 test("POST /api/app/update streams one JSON event per line", async () => {
   const base = await serve(appRouter({ health: () => HEALTH, updater: stubUpdater() }));
   const res = await fetch(`${base}/api/app/update`, { method: "POST" });
