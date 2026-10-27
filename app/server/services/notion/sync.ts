@@ -24,6 +24,7 @@ import { NameMismatchError, assertNameAgreement, frontmatterValueOf, skillMdName
 import { readManifest, skillDir, skillsDir, upsertManifestSkill } from "../vault.ts";
 import type { NotionLink } from "../../types/vault.ts";
 import type { NotionApi } from "./api.ts";
+import { openDownload } from "./archive.ts";
 import { readSkillFiles } from "./linker.ts";
 import { isNotionNative, isValidSkillName, normalizeName } from "./matching.ts";
 import { mergeSkillMd, overlayNotionSkillMd, stripNotionPageId } from "./patch.ts";
@@ -274,7 +275,7 @@ export async function pushSkill(
     const awaitingFirstUpload = !link.synced_at && !link.notion_version_id;
     const current = await deps.api.downloadSkill(pageId);
     if (opts.force) {
-      const ex = await deps.extract(current.url);
+      const ex = await openDownload(current, deps.extract);
       try {
         recordVersion(vaultPath, skill, {
           side: "notion",
@@ -376,7 +377,7 @@ async function finishUpload(
   pageId: string,
 ): Promise<{ versionId: string }> {
   const dl = await deps.api.downloadSkill(pageId);
-  const ex = await deps.extract(dl.url);
+  const ex = await openDownload(dl, deps.extract);
   try {
     recordVersion(vaultPath, skill, { side: "notion", source: "push-notion-copy", dir: ex.skillRoot });
   } finally {
@@ -410,7 +411,7 @@ export async function upgradeLegacySkill(
   const pageId = link.page_id;
 
   const current = await deps.api.downloadSkill(pageId);
-  const ex = await deps.extract(current.url);
+  const ex = await openDownload(current, deps.extract);
   try {
     recordVersion(vaultPath, skill, {
       side: "notion",
@@ -449,7 +450,7 @@ export async function pullSkill(
 ): Promise<PullResult> {
   const link = requireLinked(vaultPath, skill);
   const dl = await deps.api.downloadSkill(link.page_id);
-  const ex = await deps.extract(dl.url);
+  const ex = await openDownload(dl, deps.extract);
   try {
     const notionFiles = readSkillFiles(ex.skillRoot);
     const notionMd = notionFiles.get("SKILL.md");
@@ -520,7 +521,7 @@ export async function adoptFromNotion(deps: SyncDeps, vaultPath: string, row: No
   if (isNotionNative(row)) throw new Error(`"${row.title}" is a Notion-native skill and cannot be adopted as a folder`);
 
   const dl = await deps.api.downloadSkill(row.page_id);
-  const ex = await deps.extract(dl.url);
+  const ex = await openDownload(dl, deps.extract);
   let name: string;
   try {
     const files = readSkillFiles(ex.skillRoot);

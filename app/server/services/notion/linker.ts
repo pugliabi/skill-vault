@@ -11,6 +11,7 @@ import { hashSkillDirNormalized } from "../skillHash.ts";
 import { readManifest, skillDir } from "../vault.ts";
 import type { NotionLink } from "../../types/vault.ts";
 import type { NotionApi } from "./api.ts";
+import { openDownload } from "./archive.ts";
 import { isLegacyConversion, isNotionNative, matchSkills, skillDirsEquivalent } from "./matching.ts";
 import {
   readNotionCache,
@@ -229,7 +230,7 @@ export async function runFirstLink(
       }
 
       const dl = await deps.api.downloadSkill(row.page_id);
-      const ex = await deps.extract(dl.url);
+      const ex = await openDownload(dl, deps.extract);
       try {
         const now = new Date().toISOString();
         const vaultDir = skillDir(vaultPath, name);

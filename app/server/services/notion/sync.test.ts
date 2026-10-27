@@ -149,6 +149,28 @@ test("pushSkill uploads the vault folder and updates the link bookkeeping", asyn
   assert.equal(manifest().skills.alpha.targets[0], "claude");
 });
 
+test("pushSkill handles a single-file skill Notion returns inline (no archive url)", async () => {
+  const { pushSkill } = await import("./sync.ts");
+  seedLinked();
+  fs.rmSync(path.join(skillPath(), "references"), { recursive: true });
+  fs.rmSync(path.join(notionDir, "references"), { recursive: true });
+  fs.writeFileSync(path.join(skillPath(), "SKILL.md"), VAULT_MD.replace("l3", "l3 edited"));
+  const d = deps();
+  d.api.downloadSkill = async (id: string) => {
+    calls.push(["downloadSkill", id]);
+    return { versionId: `v${state.version}`, markdown: fs.readFileSync(path.join(notionDir, "SKILL.md"), "utf8") };
+  };
+  d.extract = async () => {
+    throw new Error("an inline download is never extracted");
+  };
+  const r = await pushSkill(d, vault, "alpha");
+  assert.equal(r.versionId, "v2");
+  assert.equal(uploads.length, 1);
+  assert.equal(link().notion_version_id, "v2");
+  assert.equal(link().synced_at, NOW);
+  assert.equal(listVersions(vault, "alpha").find((v) => v.side === "notion")!.source, "push-notion-copy");
+});
+
 test("pushSkill sets the Notion title to the skill name when it differs (names must agree)", async () => {
   const { pushSkill } = await import("./sync.ts");
   seedLinked({ notion_title: "Alpha Skill" });

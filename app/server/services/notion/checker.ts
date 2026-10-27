@@ -18,7 +18,7 @@ import simpleGit, { type SimpleGit } from "simple-git";
 import { recordVersion } from "../history.ts";
 import { readManifest } from "../vault.ts";
 import { NotionApi } from "./api.ts";
-import { downloadAndExtract } from "./archive.ts";
+import { downloadAndExtract, openDownload } from "./archive.ts";
 import { getNotionClient, callToolJson } from "./connection.ts";
 import { refreshNotionCache } from "./linker.ts";
 import { readNotionAuth, readNotionCache, readNotionSettings, type NotionCache } from "./store.ts";
@@ -230,7 +230,7 @@ export function startNotionChecker(deps: NotionCheckerDeps): NotionChecker {
         if (!skill || !row.version_id || row.version_id === prevByPage.get(row.page_id)) continue;
         try {
           const dl = await conn.api.downloadSkill(row.page_id);
-          const ex = await extract(dl.url);
+          const ex = await openDownload(dl, extract);
           try {
             // A foreground job (e.g. the user ran a pull) may have started
             // since the tick began — don't race its own history writes.

@@ -15,6 +15,7 @@ import type { Request, Response, Router } from "express";
 import crypto from "node:crypto";
 import { recordActivity } from "../services/activity.ts";
 import { computeFilesDiff } from "../services/diff.ts";
+import { openDownload } from "../services/notion/archive.ts";
 import { gitGuard as realGitGuard, type GuardStatus } from "../services/notion/checker.ts";
 import { readSkillFiles, refreshNotionCache } from "../services/notion/linker.ts";
 import { CacheStaleError } from "../services/notion/plan.ts";
@@ -195,7 +196,7 @@ export function mountSyncRoutes(router: Router, ctx: SyncRouteCtx): void {
       if (row.page_id && !notionGone) {
         await ctx.withApi(req, async (api) => {
           const dl = await api.downloadSkill(row.page_id!);
-          const ex = await ctx.extract(dl.url);
+          const ex = await openDownload(dl, ctx.extract);
           try {
             notionFiles = readSkillFiles(ex.skillRoot);
           } finally {
@@ -463,7 +464,7 @@ export function mountSyncRoutes(router: Router, ctx: SyncRouteCtx): void {
       let notionVersion = "";
       await ctx.withApi(req, async (api) => {
         const dl = await api.downloadSkill(link.page_id);
-        const ex = await ctx.extract(dl.url);
+        const ex = await openDownload(dl, ctx.extract);
         try {
           notionFiles = readSkillFiles(ex.skillRoot);
         } finally {

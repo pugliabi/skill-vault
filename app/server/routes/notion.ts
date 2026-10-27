@@ -5,7 +5,7 @@ import { recordActivity } from "../services/activity.ts";
 import { listSkills, readManifest, skillDir } from "../services/vault.ts";
 import { hashSkillDirNormalized } from "../services/skillHash.ts";
 import { NotionApi } from "../services/notion/api.ts";
-import { downloadAndExtract } from "../services/notion/archive.ts";
+import { downloadAndExtract, openDownload } from "../services/notion/archive.ts";
 import { gitGuard as realGitGuard, type GuardStatus } from "../services/notion/checker.ts";
 import {
   NotionNotConnectedError,
@@ -489,7 +489,7 @@ async function loadSnapshot(
   link: NotionLink,
 ) {
   const dl = await api.downloadSkill(link.page_id);
-  const ex = await extract(dl.url);
+  const ex = await openDownload(dl, extract);
   try {
     return buildSnapshot(vp, name, link, dl.versionId, readSkillFiles(ex.skillRoot));
   } finally {
@@ -638,7 +638,7 @@ function mountConflictRoutes(
         } else if (mode === "keep-notion") {
           await keepNotion(d, vp, name);
         } else {
-          const ex = await extract(current.url);
+          const ex = await openDownload(current, extract);
           let files: Map<string, Buffer>;
           try {
             files = buildResolvedFiles(readSkillFiles(skillDir(vp, name)), readSkillFiles(ex.skillRoot), resolution!);
