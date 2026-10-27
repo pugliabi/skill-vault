@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { configRouter } from "./routes/config.ts";
 import { appRouter } from "./routes/app.ts";
 import { buildVersion } from "./services/instanceLock.ts";
+import { createAppUpdater } from "./services/appUpdate.ts";
 import { getServerPort } from "./services/runtime.ts";
 import { skillsRouter } from "./routes/skills.ts";
 import { historyRouter } from "./routes/history.ts";
@@ -58,6 +59,8 @@ const APP_ROOT = path.resolve(__dirname, "..");
 export interface CreateAppOptions {
   /** "development" enables Vite middleware + HMR; "production" serves dist/public. */
   mode: "development" | "production";
+  /** Start the new build and stop this process; set by launcher.ts (used after an in-app update). */
+  restart?: () => void;
 }
 
 export async function createApp(opts: CreateAppOptions): Promise<Express> {
@@ -151,6 +154,16 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
     broadcastSse({ type: "activity", entry }),
   );
 
+  // In-app updates (git checkout installs): background check + one-click apply.
+  const busyWithoutUpdate = (): boolean => anyNotionJobRunning() || anyTurnRunning() || foregroundCheckActive();
+  const updater = createAppUpdater({
+    appDir: APP_ROOT,
+    mode: opts.mode,
+    isBusy: busyWithoutUpdate,
+    restart: opts.restart ?? (() => console.error("[update] no restart hook; restart the app to finish the update")),
+  });
+  updater.start();
+
   // Cleanup hook — launcher.ts invokes this before server.close() so
   // chokidar tears down cleanly on Ctrl+C and the SSE clients receive
   // a final FIN. The "active" watcher may have been swapped by
@@ -162,6 +175,7 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
     historyRecorder.flush();
     notionChecker.stop();
     updateSweeper.stop();
+    updater.stop();
     const current = getActiveWatcher();
     if (current) {
       try {
@@ -173,7 +187,7 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
     setActiveWatcher(null);
   };
   // Work that must not be cut off by an idle stop (launcher --exit-when-idle).
-  app.locals.isBusy = (): boolean => anyNotionJobRunning() || anyTurnRunning() || foregroundCheckActive();
+  app.locals.isBusy = (): boolean => busyWithoutUpdate() || updater.isApplying();
 
   app.use(
     "/api",
@@ -185,6 +199,7 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
         version: buildVersion(APP_ROOT, opts.mode),
         mode: opts.mode,
       }),
+      updater,
     }),
   );
   app.use("/api/config", configRouter());

@@ -1,12 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import os from "node:os";
+import path from "node:path";
 import {
   createAppUpdater,
   decideCanApply,
   defaultRun,
   parseCommits,
   parseLeftRight,
+  swapDist,
+  type ApplyEvent,
   type GitFacts,
   type Run,
   type RunResult,
@@ -187,4 +191,116 @@ test("defaultRun resolves, not throws, when the command doesn't exist", async ()
   const r = await defaultRun("sv-no-such-command-xyz", [], { cwd: os.tmpdir() });
   assert.equal(r.code, -1);
   assert.ok(r.stderr.length > 0);
+});
+
+const LOCK_DIFF = `git diff --name-only ${A} HEAD -- app/package-lock.json`;
+const BUILD = "node scripts/build.mjs --out dist-next";
+const NPM_CI = "npm ci --include=dev --no-audit --no-fund";
+
+/** A temp repo root with app/dist/old.txt; the fake build writes app/dist-next/new.txt. */
+function applyHarness(over: Record<string, Partial<RunResult>> = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sv-upd-"));
+  const appDir = path.join(root, "app");
+  fs.mkdirSync(path.join(appDir, "dist"), { recursive: true });
+  fs.writeFileSync(path.join(appDir, "dist", "old.txt"), "old");
+  const responses: Record<string, Partial<RunResult>> = {
+    ...BEHIND,
+    "git rev-parse --show-toplevel": { stdout: `${root}\n` },
+    "git pull --ff-only origin main": {},
+    [LOCK_DIFF]: { stdout: "" },
+    [`git reset --hard ${A}`]: {},
+    [NPM_CI]: {},
+    ...over,
+  };
+  const calls: string[] = [];
+  const nodeEnvs: Array<string | undefined> = [];
+  const run: Run = async (cmd, args, opts) => {
+    const key = [cmd === process.execPath ? "node" : cmd, ...args].join(" ");
+    calls.push(key);
+    if (cmd === "npm" || cmd === process.execPath) nodeEnvs.push(opts.env?.NODE_ENV);
+    if (key === BUILD && !(BUILD in over)) {
+      fs.mkdirSync(path.join(opts.cwd, "dist-next"), { recursive: true });
+      fs.writeFileSync(path.join(opts.cwd, "dist-next", "new.txt"), "new");
+      return { code: 0, stdout: "", stderr: "" };
+    }
+    const r = responses[key];
+    return r ? { code: 0, stdout: "", stderr: "", ...r } : { code: 1, stdout: "", stderr: `unexpected: ${key}` };
+  };
+  let restarts = 0;
+  const u = createAppUpdater({ appDir, mode: "production", isBusy: () => false, restart: () => void restarts++, run });
+  return { appDir, calls, nodeEnvs, updater: u, restarts: () => restarts };
+}
+
+const steps = (events: ApplyEvent[]) => events.map((e) => `${e.step}:${e.state}`);
+
+test("apply: pull → skip install → staged build → swap → restart", async () => {
+  const h = applyHarness();
+  const events: ApplyEvent[] = [];
+  assert.equal(await h.updater.apply((e) => events.push(e)), true);
+  assert.deepEqual(steps(events), ["pull:start", "pull:done", "install:skip", "build:start", "build:done", "restart:start"]);
+  assert.ok(!h.calls.includes(NPM_CI));
+  assert.deepEqual(fs.readdirSync(path.join(h.appDir, "dist")), ["new.txt"]);
+  assert.equal(fs.existsSync(path.join(h.appDir, "dist-next")), false);
+  assert.equal(h.restarts(), 1);
+  assert.equal(h.updater.isApplying(), true, "stays applying until the process hands over");
+});
+
+test("apply reinstalls packages only when package-lock.json changed, without NODE_ENV", async () => {
+  const prev = process.env.NODE_ENV;
+  process.env.NODE_ENV = "production";
+  try {
+    const h = applyHarness({ [LOCK_DIFF]: { stdout: "app/package-lock.json\n" } });
+    assert.equal(await h.updater.apply(() => {}), true);
+    assert.ok(h.calls.includes(NPM_CI));
+    assert.deepEqual(h.nodeEnvs, [undefined, undefined], "npm ci and the build never see NODE_ENV");
+  } finally {
+    if (prev === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = prev;
+  }
+});
+
+test("a failed build resets the checkout and keeps the current build", async () => {
+  const h = applyHarness({ [BUILD]: { code: 1, stderr: "vite: boom" } });
+  const events: ApplyEvent[] = [];
+  assert.equal(await h.updater.apply((e) => events.push(e)), false);
+  assert.deepEqual(events.at(-1), { step: "build", state: "error", message: "vite: boom" });
+  assert.ok(h.calls.includes(`git reset --hard ${A}`));
+  assert.deepEqual(fs.readdirSync(path.join(h.appDir, "dist")), ["old.txt"]);
+  assert.equal(h.restarts(), 0);
+  assert.equal(h.updater.isApplying(), false);
+  assert.match(h.updater.status().last_error ?? "", /^build failed: vite: boom/);
+});
+
+test("a failed pull resets without building", async () => {
+  const h = applyHarness({ "git pull --ff-only origin main": { code: 1, stderr: "fatal: Not possible to fast-forward" } });
+  assert.equal(await h.updater.apply(() => {}), false);
+  assert.ok(!h.calls.includes(BUILD));
+  assert.ok(h.calls.includes(`git reset --hard ${A}`));
+});
+
+test("a failed reinstall resets and reinstalls the old packages", async () => {
+  const h = applyHarness({ [LOCK_DIFF]: { stdout: "app/package-lock.json\n" }, [NPM_CI]: { code: 1, stderr: "EPERM" } });
+  assert.equal(await h.updater.apply(() => {}), false);
+  assert.ok(h.calls.includes(`git reset --hard ${A}`));
+  assert.equal(h.calls.filter((c) => c === NPM_CI).length, 2, "tried once, then restored the old lockfile's packages");
+});
+
+test("apply refuses, with the reason, when the checkout can't be updated", async () => {
+  const h = applyHarness({ "git status --porcelain": { stdout: " M app/server/index.ts\n" } });
+  const events: ApplyEvent[] = [];
+  assert.equal(await h.updater.apply((e) => events.push(e)), false);
+  assert.deepEqual(events, [{ step: "check", state: "error", message: "the checkout has uncommitted changes" }]);
+  assert.ok(!h.calls.includes("git pull --ff-only origin main"));
+});
+
+test("swapDist replaces dist/ with dist-next/", () => {
+  const appDir = fs.mkdtempSync(path.join(os.tmpdir(), "sv-swap-"));
+  fs.mkdirSync(path.join(appDir, "dist"));
+  fs.writeFileSync(path.join(appDir, "dist", "old.txt"), "old");
+  fs.mkdirSync(path.join(appDir, "dist-next"));
+  fs.writeFileSync(path.join(appDir, "dist-next", "new.txt"), "new");
+  swapDist(appDir);
+  assert.deepEqual(fs.readdirSync(path.join(appDir, "dist")), ["new.txt"]);
+  assert.equal(fs.existsSync(path.join(appDir, "dist-next")), false);
+  assert.equal(fs.existsSync(path.join(appDir, "dist-old")), false);
 });

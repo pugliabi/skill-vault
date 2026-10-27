@@ -184,6 +184,43 @@ export interface AppUpdateStatus {
   applying: boolean;
 }
 
+export interface ApplyEvent {
+  step: "check" | "pull" | "install" | "build" | "restart";
+  state: "start" | "done" | "skip" | "error";
+  message?: string;
+}
+
+/**
+ * Replace dist/ with the staged dist-next/. Windows can refuse to rename a
+ * folder holding an open file; then copy over it instead.
+ */
+export function swapDist(appDir: string): void {
+  const dist = path.join(appDir, "dist");
+  const next = path.join(appDir, "dist-next");
+  const old = path.join(appDir, "dist-old");
+  fs.rmSync(old, { recursive: true, force: true });
+  try {
+    if (fs.existsSync(dist)) fs.renameSync(dist, old);
+  } catch {
+    fs.cpSync(next, dist, { recursive: true, force: true });
+    fs.rmSync(next, { recursive: true, force: true });
+    return;
+  }
+  try {
+    fs.renameSync(next, dist);
+  } catch (err) {
+    if (fs.existsSync(old) && !fs.existsSync(dist)) fs.renameSync(old, dist);
+    throw err;
+  }
+  fs.rmSync(old, { recursive: true, force: true });
+}
+
+/** The environment for npm ci and the build: dev dependencies must be installed and usable. */
+function buildEnv(): NodeJS.ProcessEnv {
+  const { NODE_ENV: _drop, ...rest } = process.env;
+  return rest;
+}
+
 export interface AppUpdaterDeps {
   appDir: string;
   mode: "development" | "production";
@@ -200,6 +237,7 @@ export interface AppUpdater {
   status(): AppUpdateStatus;
   check(): Promise<AppUpdateStatus>;
   isApplying(): boolean;
+  apply(onEvent: (e: ApplyEvent) => void): Promise<boolean>;
   start(): void;
   stop(): void;
 }
@@ -278,9 +316,75 @@ export function createAppUpdater(deps: AppUpdaterDeps): AppUpdater {
     if (!applying && !deps.isBusy()) void check();
   };
 
+  async function apply(onEvent: (e: ApplyEvent) => void): Promise<boolean> {
+    const f = await readGitFacts(run, deps.appDir, { fetch: true });
+    facts = f;
+    checkedAt = now();
+    const decision = decideCanApply(f, { mode: deps.mode, busy: deps.isBusy(), applying });
+    if (!decision.can_apply || !f.repoRoot || !f.current) {
+      onEvent({ step: "check", state: "error", message: decision.reason ?? "can't read the checkout" });
+      return false;
+    }
+    applying = true;
+    applyError = undefined;
+    const repo = f.repoRoot;
+    const oldSha = f.current;
+    const env = buildEnv();
+    const npmCi = () =>
+      run("npm", ["ci", "--include=dev", "--no-audit", "--no-fund"], { cwd: deps.appDir, env, timeoutMs: 600_000 });
+    const must = async (r: Promise<RunResult>): Promise<RunResult> => {
+      const out = await r;
+      if (out.code !== 0) {
+        const tail = (out.stderr || out.stdout).trim().split("\n").slice(-3).join(" ");
+        throw new Error(tail || `exited with code ${out.code}`);
+      }
+      return out;
+    };
+    let step: ApplyEvent["step"] = "pull";
+    let reinstalled = false;
+    try {
+      onEvent({ step, state: "start" });
+      await must(run("git", ["pull", "--ff-only", "origin", "main"], { cwd: repo, timeoutMs: 120_000 }));
+      onEvent({ step, state: "done" });
+
+      step = "install";
+      const lockRel = path.relative(repo, path.join(deps.appDir, "package-lock.json")).split(path.sep).join("/");
+      const changed = await must(run("git", ["diff", "--name-only", oldSha, "HEAD", "--", lockRel], { cwd: repo }));
+      if (changed.stdout.trim()) {
+        onEvent({ step, state: "start" });
+        reinstalled = true;
+        await must(npmCi());
+        onEvent({ step, state: "done" });
+      } else {
+        onEvent({ step, state: "skip", message: "packages unchanged" });
+      }
+
+      step = "build";
+      onEvent({ step, state: "start" });
+      await must(run(process.execPath, ["scripts/build.mjs", "--out", "dist-next"], { cwd: deps.appDir, env, timeoutMs: 600_000 }));
+      swapDist(deps.appDir);
+      onEvent({ step, state: "done" });
+    } catch (err) {
+      const message = (err as Error).message;
+      applyError = `${step} failed: ${message}`;
+      onEvent({ step, state: "error", message });
+      await run("git", ["reset", "--hard", oldSha], { cwd: repo });
+      if (reinstalled) await npmCi();
+      fs.rmSync(path.join(deps.appDir, "dist-next"), { recursive: true, force: true });
+      applying = false;
+      return false;
+    }
+    // Code and build now match the new commit, so a hand-over failure is
+    // not rolled back: the next launch starts the new build.
+    onEvent({ step: "restart", state: "start" });
+    deps.restart();
+    return true;
+  }
+
   return {
     status,
     check,
+    apply,
     isApplying: () => applying,
     start() {
       const first = setTimeout(tick, deps.firstRunDelayMs ?? FIRST_CHECK_DELAY_MS);

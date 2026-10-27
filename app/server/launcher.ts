@@ -26,6 +26,8 @@
 
 import "dotenv/config";
 
+import type { Server } from "node:http";
+import { spawn } from "node:child_process";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,7 +38,7 @@ import { acquireLock, buildVersion, readLock, releaseLock } from "./services/ins
 import { sseClientCount } from "./routes/events.ts";
 import { startIdleStop } from "./services/idleStop.ts";
 import { installLogFile } from "./services/logFile.ts";
-import { setServerPort } from "./services/runtime.ts";
+import { getServerPort, setServerPort } from "./services/runtime.ts";
 
 // ── CLI argument parsing ───────────────────────────────────────
 
@@ -47,6 +49,7 @@ interface ParsedArgs {
   help?: boolean;
   logFile?: string;
   exitWhenIdle?: boolean;
+  strictPort?: boolean;
 }
 
 /**
@@ -78,6 +81,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       out.logFile = a.slice("--log-file=".length);
     } else if (a === "--exit-when-idle") {
       out.exitWhenIdle = true;
+    } else if (a === "--strict-port") {
+      out.strictPort = true;
     } else if (a === "--no-open") {
       out.noOpen = true;
     } else if (a === "--help") {
@@ -100,6 +105,7 @@ function printHelp(): void {
         --no-open        Don't auto-open the browser
         --log-file <path>  Also write all output to <path> (rotated at 5 MB)
         --exit-when-idle   Stop 60 s after the last app window closes (used by the Start Menu launcher)
+        --strict-port      Use exactly --port; wait up to 10 s for it, else exit
         --help           Show this message
 
   Precedence (highest wins):
@@ -162,22 +168,35 @@ const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 
 // ── Free-port selection ────────────────────────────────────────
 
+async function isPortFree(p: number, host: string): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const server = net.createServer();
+    server.once("error", () => resolve(false));
+    server.once("listening", () => {
+      server.close(() => resolve(true));
+    });
+    server.listen(p, host);
+  });
+}
+
 async function findFreePort(start: number, host: string): Promise<number> {
   // Try up to 10 ports starting at `start`. Returns 0 on exhaustion so
   // the caller can fall back to OS-assigned ports instead of crashing
   // on a fresh machine where 9994 happens to be taken.
   for (let p = start; p < start + 10; p++) {
-    const free = await new Promise<boolean>((resolve) => {
-      const server = net.createServer();
-      server.once("error", () => resolve(false));
-      server.once("listening", () => {
-        server.close(() => resolve(true));
-      });
-      server.listen(p, host);
-    });
-    if (free) return p;
+    if (await isPortFree(p, host)) return p;
   }
   return 0;
+}
+
+/** --strict-port: wait for exactly this port (the previous server releasing it after an update). */
+async function waitForPortFree(p: number, host: string, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (await isPortFree(p, host)) return true;
+    if (Date.now() > deadline) return false;
+    await new Promise((r) => setTimeout(r, 250));
+  }
 }
 
 // ── Main ──────────────────────────────────────────────────────
@@ -193,13 +212,76 @@ async function main(): Promise<void> {
   const host = resolveHost();
   const shouldOpen = resolveOpenBrowser();
 
-  const port = await findFreePort(preferredPort, host);
-  const app = await createApp({ mode: MODE });
+  let port: number;
+  if (args.strictPort) {
+    // Restart after an in-app update: the open window points at this exact
+    // port, so wait for the old server to let go of it instead of moving on.
+    if (!(await waitForPortFree(preferredPort, host, 10_000))) {
+      console.error(`[skill-vault-app] port ${preferredPort} is still in use; giving up`);
+      process.exit(1);
+    }
+    port = preferredPort;
+  } else {
+    port = await findFreePort(preferredPort, host);
+  }
 
-  const server = app.listen(port, host, () => {
+  let server: Server | undefined;
+  let shuttingDown = false;
+  async function shutdown(): Promise<void> {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    releaseLock(process.pid);
+    // Run the live-updates cleanup BEFORE closing the HTTP server so
+    // chokidar and the SSE client set tear down while the event loop
+    // still has them. createApp() hangs the cleanup off app.locals so
+    // tests can exercise it without booting a real port.
+    try {
+      const cleanup = (
+        app as unknown as {
+          locals: { cleanupLiveUpdates?: () => Promise<void> };
+        }
+      ).locals.cleanupLiveUpdates;
+      if (cleanup) await cleanup();
+    } catch (err) {
+      console.error("[shutdown] cleanupLiveUpdates threw:", err);
+    }
+    if (server) server.close(() => process.exit(0));
+    else process.exit(0);
+    // Safety net: if a stray socket keeps the server open past 3s,
+    // exit anyway. Matches the previous synchronous behavior.
+    setTimeout(() => process.exit(0), 3000).unref();
+  }
+
+  /** After an in-app update: start the new build on this same port, then hand over. */
+  function restart(): void {
+    releaseLock(process.pid);
+    const next = [
+      path.join(APP_ROOT, "dist", "launcher.js"),
+      "--no-open",
+      "--port",
+      String(getServerPort() ?? port),
+      "--host",
+      host,
+      "--strict-port",
+    ];
+    if (args.exitWhenIdle) next.push("--exit-when-idle");
+    if (args.logFile) next.push("--log-file", args.logFile);
+    spawn(process.execPath, next, {
+      cwd: APP_ROOT,
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+      env: { ...process.env, NODE_ENV: "production" },
+    }).unref();
+    setTimeout(() => void shutdown(), 500);
+  }
+
+  const app = await createApp({ mode: MODE, restart });
+
+  server = app.listen(port, host, () => {
     const effective =
       port ||
-      (server.address() as { port: number } | null)?.port ||
+      (server?.address() as { port: number } | null)?.port ||
       preferredPort;
     // The assistant's MCP bridge needs the *bound* port, not the preferred one.
     setServerPort(effective);
@@ -228,27 +310,6 @@ async function main(): Promise<void> {
     }
   });
 
-  const shutdown = async (): Promise<void> => {
-    releaseLock(process.pid);
-    // Run the live-updates cleanup BEFORE closing the HTTP server so
-    // chokidar and the SSE client set tear down while the event loop
-    // still has them. createApp() hangs the cleanup off app.locals so
-    // tests can exercise it without booting a real port.
-    try {
-      const cleanup = (
-        app as unknown as {
-          locals: { cleanupLiveUpdates?: () => Promise<void> };
-        }
-      ).locals.cleanupLiveUpdates;
-      if (cleanup) await cleanup();
-    } catch (err) {
-      console.error("[shutdown] cleanupLiveUpdates threw:", err);
-    }
-    server.close(() => process.exit(0));
-    // Safety net: if a stray socket keeps the server open past 3s,
-    // exit anyway. Matches the previous synchronous behavior.
-    setTimeout(() => process.exit(0), 3000).unref();
-  };
   process.on("SIGINT", () => {
     void shutdown();
   });
