@@ -27,9 +27,12 @@
 import "dotenv/config";
 
 import net from "node:net";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import open from "open";
 import { createApp } from "./index.ts";
 import { readCliAppBlock } from "./services/appConfig.ts";
+import { acquireLock, buildVersion, readLock, releaseLock } from "./services/instanceLock.ts";
 import { setServerPort } from "./services/runtime.ts";
 
 // ── CLI argument parsing ───────────────────────────────────────
@@ -139,6 +142,9 @@ const MODE =
   (process.env.NODE_ENV as "development" | "production" | undefined) ??
   "development";
 
+/** app/ — the same root index.ts computes (this file is server/launcher.ts or dist/launcher.js). */
+const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
 // ── Free-port selection ────────────────────────────────────────
 
 async function findFreePort(start: number, host: string): Promise<number> {
@@ -176,6 +182,16 @@ async function main(): Promise<void> {
       preferredPort;
     // The assistant's MCP bridge needs the *bound* port, not the preferred one.
     setServerPort(effective);
+    const owned = acquireLock({
+      pid: process.pid,
+      port: effective,
+      started_at: new Date().toISOString(),
+      version: buildVersion(APP_ROOT, MODE),
+      mode: MODE,
+    });
+    if (!owned) {
+      console.log(`  [lock] another Skill Vault server (pid ${readLock()?.pid}) owns the app lock; this one runs without it.`);
+    }
     const displayHost =
       host === "0.0.0.0" || host === "::" ? "localhost" : host;
     const url = `http://${displayHost}:${effective}`;
@@ -192,6 +208,7 @@ async function main(): Promise<void> {
   });
 
   const shutdown = async (): Promise<void> => {
+    releaseLock(process.pid);
     // Run the live-updates cleanup BEFORE closing the HTTP server so
     // chokidar and the SSE client set tear down while the event loop
     // still has them. createApp() hangs the cleanup off app.locals so
@@ -217,6 +234,7 @@ async function main(): Promise<void> {
   process.on("SIGTERM", () => {
     void shutdown();
   });
+  process.on("exit", () => releaseLock(process.pid));
 }
 
 main().catch((err) => {

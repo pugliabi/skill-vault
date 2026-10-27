@@ -13,6 +13,9 @@ import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { configRouter } from "./routes/config.ts";
+import { appRouter } from "./routes/app.ts";
+import { buildVersion } from "./services/instanceLock.ts";
+import { getServerPort } from "./services/runtime.ts";
 import { skillsRouter } from "./routes/skills.ts";
 import { historyRouter } from "./routes/history.ts";
 import { adoptRouter } from "./routes/adopt.ts";
@@ -175,6 +178,18 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
     setActiveWatcher(null);
   };
 
+  app.use(
+    "/api",
+    appRouter({
+      health: () => ({
+        ok: true,
+        pid: process.pid,
+        port: getServerPort(),
+        version: buildVersion(APP_ROOT, opts.mode),
+        mode: opts.mode,
+      }),
+    }),
+  );
   app.use("/api/config", configRouter());
   app.use("/api/skills", skillsRouter({ isBusy: anyNotionJobRunning }));
   app.use("/api/history", historyRouter());
