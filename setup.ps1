@@ -118,9 +118,12 @@ if (Test-Path -LiteralPath $LegacyLnk) {
 Write-Host ''
 Write-Host '  Skill Vault is installed. Open it from the Start Menu: Skill Vault.' -ForegroundColor Green
 Write-Host ''
-if (-not $NoLaunch -and -not $WhatIfPreference) {
+if (-not $NoLaunch -and -not $WhatIfPreference -and [Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
   $answer = Read-Host '  Open Skill Vault now? [Y/n]'
   if ($answer -eq '' -or $answer -match '^[Yy]') {
     & $Conhost --headless $WinPS -NoProfile -ExecutionPolicy Bypass -File $Launch
+    if ($LASTEXITCODE -ne 0) {
+      Write-Warn ("Skill Vault didn't open. Details: " + (Join-Path $env:USERPROFILE '.skill-vault\logs\launch.log'))
+    }
   }
 }
