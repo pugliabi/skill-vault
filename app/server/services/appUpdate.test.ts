@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -9,6 +9,7 @@ import {
   defaultRun,
   parseCommits,
   parseLeftRight,
+  summarizeOutput,
   swapDist,
   type ApplyEvent,
   type GitFacts,
@@ -50,6 +51,7 @@ const facts = (over: Partial<GitFacts> = {}): GitFacts => ({
   isRepo: true,
   hasOrigin: true,
   repoRoot: "/repo",
+  appInRoot: true,
   branch: "main",
   current: A,
   latest: B,
@@ -78,6 +80,7 @@ test("decideCanApply allows a clean main checkout that is behind", () => {
 test("decideCanApply refuses, with a reason, for each blocking state", () => {
   const cases: Array<[Partial<GitFacts>, Partial<Ctx>, RegExp]> = [
     [{ isRepo: false }, {}, /isn't a git checkout/],
+    [{ appInRoot: false }, {}, /the app folder isn't directly inside its git checkout/],
     [{ hasOrigin: false }, {}, /no origin remote/],
     [{ latest: null }, {}, /GitHub's main branch \(origin\/main\) wasn't found/],
     [{}, { mode: "development" }, /running from source/],
@@ -197,9 +200,15 @@ const LOCK_DIFF = `git diff --name-only ${A} HEAD -- app/package-lock.json`;
 const BUILD = "node scripts/build.mjs --out dist-next";
 const NPM_CI = "npm ci --include=dev --no-audit --no-fund";
 
-/** A temp repo root with app/dist/old.txt; the fake build writes app/dist-next/new.txt. */
-function applyHarness(over: Record<string, Partial<RunResult>> = {}, restartImpl?: () => void) {
+type Responses = Record<string, Partial<RunResult>>;
+
+/**
+ * A temp repo root with app/dist/old.txt; the fake build writes app/dist-next/new.txt.
+ * `overrides` may be a function of the temp root, for answers that name it.
+ */
+function applyHarness(overrides: Responses | ((root: string) => Responses) = {}, restartImpl?: () => void) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "sv-upd-"));
+  const over = typeof overrides === "function" ? overrides(root) : overrides;
   const appDir = path.join(root, "app");
   fs.mkdirSync(path.join(appDir, "dist"), { recursive: true });
   fs.writeFileSync(path.join(appDir, "dist", "old.txt"), "old");
@@ -208,7 +217,7 @@ function applyHarness(over: Record<string, Partial<RunResult>> = {}, restartImpl
     "git rev-parse --show-toplevel": { stdout: `${root}\n` },
     "git pull --ff-only origin main": {},
     [LOCK_DIFF]: { stdout: "" },
-    [`git reset --hard ${A}`]: {},
+    [`git reset --keep ${A}`]: {},
     [NPM_CI]: {},
     ...over,
   };
@@ -274,7 +283,7 @@ test("a failed build resets the checkout and keeps the current build", async () 
   const events: ApplyEvent[] = [];
   assert.equal(await h.updater.apply((e) => events.push(e)), false);
   assert.deepEqual(events.at(-1), { step: "build", state: "error", message: "vite: boom" });
-  assert.ok(h.calls.includes(`git reset --hard ${A}`));
+  assert.ok(h.calls.includes(`git reset --keep ${A}`));
   assert.deepEqual(fs.readdirSync(path.join(h.appDir, "dist")), ["old.txt"]);
   assert.equal(h.restarts(), 0);
   assert.equal(h.updater.isApplying(), false);
@@ -285,13 +294,13 @@ test("a failed pull resets without building", async () => {
   const h = applyHarness({ "git pull --ff-only origin main": { code: 1, stderr: "fatal: Not possible to fast-forward" } });
   assert.equal(await h.updater.apply(() => {}), false);
   assert.ok(!h.calls.includes(BUILD));
-  assert.ok(h.calls.includes(`git reset --hard ${A}`));
+  assert.ok(h.calls.includes(`git reset --keep ${A}`));
 });
 
 test("a failed reinstall resets and reinstalls the old packages", async () => {
   const h = applyHarness({ [LOCK_DIFF]: { stdout: "app/package-lock.json\n" }, [NPM_CI]: { code: 1, stderr: "EPERM" } });
   assert.equal(await h.updater.apply(() => {}), false);
-  assert.ok(h.calls.includes(`git reset --hard ${A}`));
+  assert.ok(h.calls.includes(`git reset --keep ${A}`));
   assert.equal(h.calls.filter((c) => c === NPM_CI).length, 2, "tried once, then restored the old lockfile's packages");
 });
 
@@ -322,7 +331,7 @@ test("a rollback cleanup that throws doesn't leave 'applying' stuck", async (t) 
 });
 
 test("a failed git reset during rollback is reported", async () => {
-  const h = applyHarness({ [BUILD]: { code: 1, stderr: "vite: boom" }, [`git reset --hard ${A}`]: { code: 1, stderr: "fatal: index.lock exists" } });
+  const h = applyHarness({ [BUILD]: { code: 1, stderr: "vite: boom" }, [`git reset --keep ${A}`]: { code: 1, stderr: "fatal: index.lock exists" } });
   const events: ApplyEvent[] = [];
   assert.equal(await h.updater.apply((e) => events.push(e)), false);
   const last = events.at(-1);
@@ -354,4 +363,167 @@ test("swapDist replaces dist/ with dist-next/", () => {
   assert.deepEqual(fs.readdirSync(path.join(appDir, "dist")), ["new.txt"]);
   assert.equal(fs.existsSync(path.join(appDir, "dist-next")), false);
   assert.equal(fs.existsSync(path.join(appDir, "dist-old")), false);
+});
+
+// ── Final-review fixes ──
+
+const silence = (t: TestContext) => t.mock.method(console, "error", () => {});
+
+function stagedApp(): string {
+  const appDir = fs.mkdtempSync(path.join(os.tmpdir(), "sv-swap-"));
+  fs.mkdirSync(path.join(appDir, "dist"));
+  fs.writeFileSync(path.join(appDir, "dist", "old.txt"), "old");
+  fs.mkdirSync(path.join(appDir, "dist-next"));
+  fs.writeFileSync(path.join(appDir, "dist-next", "new.txt"), "new");
+  return appDir;
+}
+
+test("swapDist: a dist-old cleanup that throws is logged, not thrown, and dist/ holds the new build", (t) => {
+  const appDir = stagedApp();
+  const logged = silence(t);
+  const realRm = fs.rmSync;
+  t.mock.method(fs, "rmSync", (p: fs.PathLike, o?: fs.RmOptions) => {
+    if (String(p).endsWith("dist-old")) throw new Error("EBUSY: resource busy or locked");
+    return realRm(p, o);
+  });
+  assert.doesNotThrow(() => swapDist(appDir));
+  assert.deepEqual(fs.readdirSync(path.join(appDir, "dist")), ["new.txt"]);
+  assert.ok(logged.mock.calls.length > 0, "the failed cleanup is logged");
+});
+
+test("swapDist: after the copy fallback, a dist-next cleanup that throws is not thrown", (t) => {
+  const appDir = stagedApp();
+  silence(t);
+  const realRename = fs.renameSync;
+  const realRm = fs.rmSync;
+  t.mock.method(fs, "renameSync", (from: fs.PathLike, to: fs.PathLike) => {
+    if (String(from).endsWith(`${path.sep}dist`)) throw new Error("EPERM: operation not permitted");
+    return realRename(from, to);
+  });
+  t.mock.method(fs, "rmSync", (p: fs.PathLike, o?: fs.RmOptions) => {
+    if (String(p).endsWith("dist-next")) throw new Error("EBUSY: resource busy or locked");
+    return realRm(p, o);
+  });
+  assert.doesNotThrow(() => swapDist(appDir));
+  assert.ok(fs.readdirSync(path.join(appDir, "dist")).includes("new.txt"));
+});
+
+test("swapDist still throws, and keeps the old build, when the swap itself fails", (t) => {
+  const appDir = stagedApp();
+  const realRename = fs.renameSync;
+  t.mock.method(fs, "renameSync", (from: fs.PathLike, to: fs.PathLike) => {
+    if (String(from).endsWith("dist-next")) throw new Error("EPERM: operation not permitted");
+    return realRename(from, to);
+  });
+  assert.throws(() => swapDist(appDir), /EPERM/);
+  assert.deepEqual(fs.readdirSync(path.join(appDir, "dist")), ["old.txt"]);
+});
+
+test("apply: a cleanup failure after a successful swap doesn't trigger a rollback", async (t) => {
+  const h = applyHarness();
+  silence(t);
+  const realRm = fs.rmSync;
+  t.mock.method(fs, "rmSync", (p: fs.PathLike, o?: fs.RmOptions) => {
+    if (String(p).endsWith("dist-old")) throw new Error("EBUSY: resource busy or locked");
+    return realRm(p, o);
+  });
+  const events: ApplyEvent[] = [];
+  assert.equal(await h.updater.apply((e) => events.push(e)), true);
+  assert.ok(!h.calls.some((c) => c.startsWith("git reset")), "no rollback");
+  assert.deepEqual(fs.readdirSync(path.join(h.appDir, "dist")), ["new.txt"]);
+  assert.equal(h.restarts(), 1);
+  assert.deepEqual(events.at(-1), { step: "restart", state: "start" });
+});
+
+const NODE_CRASH = [
+  "file:///C:/src/skill-vault/app/scripts/build.mjs:22",
+  "await viteBuild({",
+  "^",
+  "",
+  'Error: [vite]: Rollup failed to resolve import "x" from "client/src/main.tsx".',
+  "    at viteLog (file:///C:/src/skill-vault/app/node_modules/vite/dist/node/chunks/dep.js:1:1)",
+  "{",
+  "  code: 'PLUGIN_ERROR'",
+  "}",
+  "",
+  "Node.js v24.16.0",
+  "",
+].join("\r\n");
+
+test("a failed step is logged in full and summarized by its error line, not its last line", async (t) => {
+  const h = applyHarness({ [BUILD]: { code: 1, stdout: "vite v5 building for production...\n", stderr: NODE_CRASH } });
+  const logged = silence(t);
+  const events: ApplyEvent[] = [];
+  assert.equal(await h.updater.apply((e) => events.push(e)), false);
+  const failure = events.find((e) => e.step === "build" && e.state === "error");
+  assert.match(failure?.message ?? "", /Rollup failed to resolve import/);
+  assert.doesNotMatch(failure?.message ?? "", /Node\.js/);
+  assert.match(h.updater.status().last_error ?? "", /^build failed: Error: \[vite\]: Rollup failed/);
+  const log = logged.mock.calls.map((c) => c.arguments.map(String).join(" ")).join("\n");
+  assert.match(log, /build/);
+  assert.ok(log.includes("Node.js v24.16.0"), "the full stderr reaches the log");
+  assert.ok(log.includes("vite v5 building for production"), "and so does stdout");
+});
+
+test("summarizeOutput picks the first error-looking line, else the first non-empty one, capped", () => {
+  assert.match(summarizeOutput({ code: 1, stdout: "", stderr: NODE_CRASH }), /^Error: \[vite\]/);
+  assert.equal(summarizeOutput({ code: 1, stdout: "", stderr: "\n  vite: boom  \nlast line\n" }), "vite: boom");
+  assert.equal(summarizeOutput({ code: 1, stdout: "npm ERR_SOMETHING bad\n", stderr: "" }), "npm ERR_SOMETHING bad");
+  assert.equal(summarizeOutput({ code: 1, stdout: "ok\n", stderr: "warn: x\r\nBuild failed in 2s\r\n" }), "Build failed in 2s");
+  assert.equal(summarizeOutput({ code: 7, stdout: "", stderr: "" }), "exited with code 7");
+  const long = summarizeOutput({ code: 1, stdout: "", stderr: `error: ${"x".repeat(500)}` });
+  assert.ok(long.length <= 200, `length ${long.length}`);
+});
+
+test("apply refuses when the app folder isn't directly inside the git checkout", async () => {
+  const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), "sv-other-"));
+  const h = applyHarness({ "git rev-parse --show-toplevel": { stdout: `${elsewhere}\n` } });
+  const events: ApplyEvent[] = [];
+  assert.equal(await h.updater.apply((e) => events.push(e)), false);
+  assert.deepEqual(events, [
+    { step: "check", state: "error", message: "the app folder isn't directly inside its git checkout" },
+  ]);
+  assert.ok(!h.calls.includes("git pull --ff-only origin main"));
+  assert.ok(!h.calls.some((c) => c.startsWith("git reset")));
+  assert.equal(h.updater.isApplying(), false);
+});
+
+test("check() reports a checkout whose root isn't the app's parent as not updatable", async () => {
+  const s = await updater(fakeRun(BEHIND).run, { appDir: "/elsewhere/app" }).check();
+  assert.equal(s.can_apply, false);
+  assert.match(s.reason ?? "", /isn't directly inside its git checkout/);
+});
+
+test(
+  "the checkout-root comparison ignores case and slash style on Windows",
+  { skip: process.platform !== "win32" && "Windows only" },
+  async () => {
+    const h = applyHarness((root) => ({
+      "git rev-parse --show-toplevel": { stdout: `${root.toUpperCase().split(path.sep).join("/")}\n` },
+    }));
+    const s = await h.updater.check();
+    assert.equal(s.can_apply, true, s.reason);
+  },
+);
+
+test("a second apply while one is running is refused at once, and only one pull runs", async () => {
+  const h = applyHarness();
+  const first: ApplyEvent[] = [];
+  const second: ApplyEvent[] = [];
+  const p1 = h.updater.apply((e) => first.push(e));
+  const r2 = await h.updater.apply((e) => second.push(e));
+  assert.equal(r2, false);
+  assert.deepEqual(second, [{ step: "check", state: "error", message: "an update is already running" }]);
+  assert.equal(await p1, true);
+  assert.equal(h.calls.filter((c) => c === "git pull --ff-only origin main").length, 1);
+  assert.equal(h.calls.filter((c) => c === "git fetch origin --quiet").length, 1, "the refused call doesn't even fetch");
+});
+
+test("a refused apply releases 'applying', so a later apply is judged afresh", async () => {
+  const h = applyHarness({ "git status --porcelain": { stdout: " M app/server/index.ts\n" } });
+  assert.equal(await h.updater.apply(() => {}), false);
+  assert.equal(h.updater.isApplying(), false);
+  const events: ApplyEvent[] = [];
+  assert.equal(await h.updater.apply((e) => events.push(e)), false);
+  assert.deepEqual(events, [{ step: "check", state: "error", message: "the checkout has uncommitted changes" }]);
 });

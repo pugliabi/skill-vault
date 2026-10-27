@@ -1,5 +1,8 @@
 node_modules/
 dist/
+# in-app update staging (server/services/appUpdate.ts swapDist)
+/dist-next/
+/dist-old/
 .env
 .env.local
 *.log

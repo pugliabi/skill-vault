@@ -6,8 +6,10 @@
  * HEAD with origin/main. Apply (below): pull --ff-only → `npm ci` only when
  * package-lock.json changed → build into dist-next/ and swap it into dist/
  * → hand over to a fresh server (deps.restart). Any failure before the
- * hand-over resets the checkout to the old commit (safe: a clean tree is
- * required) and the running server keeps serving its build.
+ * hand-over resets the checkout to the old commit (`git reset --keep`: a
+ * clean tree is required to start, and edits made meanwhile are never
+ * discarded), logs the failed step's full output, and the running server
+ * keeps serving its build. Only one apply runs at a time.
  *
  * Every command goes through an injectable Run, so tests never touch git or npm.
  */
@@ -73,6 +75,8 @@ export interface GitFacts {
   isRepo: boolean;
   hasOrigin: boolean;
   repoRoot: string | null;
+  /** The checkout's root is the app folder's parent (this repo's layout), so pull/reset act on this app. */
+  appInRoot: boolean;
   branch: string | null;
   current: string | null;
   latest: string | null;
@@ -87,6 +91,7 @@ const NO_FACTS: GitFacts = {
   isRepo: false,
   hasOrigin: false,
   repoRoot: null,
+  appInRoot: false,
   branch: null,
   current: null,
   latest: null,
@@ -95,6 +100,21 @@ const NO_FACTS: GitFacts = {
   dirty: false,
   commits: [],
 };
+
+/** Real path (symlinks, junctions, 8.3 names resolved) for comparing folders; case-folded on Windows. */
+function canonicalDir(p: string): string {
+  let real: string;
+  try {
+    real = fs.realpathSync.native(p);
+  } catch {
+    real = path.resolve(p);
+  }
+  return process.platform === "win32" ? real.toLowerCase() : real;
+}
+
+export function isSameDir(a: string, b: string): boolean {
+  return canonicalDir(a) === canonicalDir(b);
+}
 
 export function parseLeftRight(out: string): { ahead: number; behind: number } {
   const [a, b] = out.trim().split(/\s+/).map(Number);
@@ -117,7 +137,8 @@ export async function readGitFacts(run: Run, appDir: string, opts: { fetch: bool
   const top = await git("rev-parse", "--show-toplevel");
   if (top.code !== 0) return NO_FACTS;
   const repoRoot = top.stdout.trim();
-  if ((await git("remote", "get-url", "origin")).code !== 0) return { ...NO_FACTS, isRepo: true, repoRoot };
+  const appInRoot = isSameDir(repoRoot, path.dirname(appDir));
+  if ((await git("remote", "get-url", "origin")).code !== 0) return { ...NO_FACTS, isRepo: true, repoRoot, appInRoot };
   let fetchError: string | undefined;
   if (opts.fetch) {
     const f = await git("fetch", "origin", "--quiet");
@@ -140,6 +161,7 @@ export async function readGitFacts(run: Run, appDir: string, opts: { fetch: bool
     isRepo: true,
     hasOrigin: true,
     repoRoot,
+    appInRoot,
     branch,
     current,
     latest: hasMain ? latestRes.stdout.trim() : null,
@@ -156,6 +178,8 @@ export function decideCanApply(
 ): { can_apply: boolean; reason?: string } {
   const no = (reason: string) => ({ can_apply: false, reason });
   if (!f.isRepo) return no("this copy isn't a git checkout");
+  // pull and the rollback's reset act on the checkout root: it must be this app's own repo.
+  if (!f.appInRoot) return no("the app folder isn't directly inside its git checkout");
   if (!f.hasOrigin) return no("the checkout has no origin remote");
   if (f.latest === null) return no("GitHub's main branch (origin/main) wasn't found");
   if (ctx.mode !== "production") return no("running from source (npm run dev); pull and restart yourself");
@@ -190,20 +214,48 @@ export interface ApplyEvent {
   message?: string;
 }
 
+const SUMMARY_MAX = 200;
+
+/**
+ * One line for the UI and last_error from a failed command: the first line
+ * that looks like an error (a Node crash ends with "Node.js vX", so the last
+ * line says nothing), else the first non-empty line; stderr before stdout.
+ */
+export function summarizeOutput(out: RunResult): string {
+  const lines = [out.stderr, out.stdout]
+    .flatMap((s) => s.split(/\r?\n/))
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const line = lines.find((l) => /error|failed|ERR_/i.test(l)) ?? lines[0];
+  if (!line) return `exited with code ${out.code}`;
+  return line.length > SUMMARY_MAX ? `${line.slice(0, SUMMARY_MAX - 1)}…` : line;
+}
+
+/** Remove a staging folder; a leftover one is harmless (git ignores it, the next update clears it). */
+function removeQuietly(dir: string): void {
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+  } catch (err) {
+    console.error(`[update] couldn't remove ${dir}: ${(err as Error).message}`);
+  }
+}
+
 /**
  * Replace dist/ with the staged dist-next/. Windows can refuse to rename a
- * folder holding an open file; then copy over it instead.
+ * folder holding an open file; then copy over it instead. Throws only when
+ * the swap itself failed (dist/ still holds the old build); cleaning up the
+ * staging folders afterwards is best-effort.
  */
 export function swapDist(appDir: string): void {
   const dist = path.join(appDir, "dist");
   const next = path.join(appDir, "dist-next");
   const old = path.join(appDir, "dist-old");
-  fs.rmSync(old, { recursive: true, force: true });
+  removeQuietly(old);
   try {
     if (fs.existsSync(dist)) fs.renameSync(dist, old);
   } catch {
     fs.cpSync(next, dist, { recursive: true, force: true });
-    fs.rmSync(next, { recursive: true, force: true });
+    removeQuietly(next);
     return;
   }
   try {
@@ -212,7 +264,7 @@ export function swapDist(appDir: string): void {
     if (fs.existsSync(old) && !fs.existsSync(dist)) fs.renameSync(old, dist);
     throw err;
   }
-  fs.rmSync(old, { recursive: true, force: true });
+  removeQuietly(old);
 }
 
 /** The environment for npm ci and the build: dev dependencies must be installed and usable. */
@@ -316,37 +368,59 @@ export function createAppUpdater(deps: AppUpdaterDeps): AppUpdater {
     if (!applying && !deps.isBusy()) void check();
   };
 
+  /** Full output of a failed command into the server log (--log-file tees it to server.log). */
+  const logFailure = (what: string, out: RunResult) => {
+    console.error(
+      `[update] ${what} failed (exit ${out.code})\n--- stdout ---\n${out.stdout.trimEnd()}\n--- stderr ---\n${out.stderr.trimEnd()}\n---`,
+    );
+  };
+
   async function apply(onEvent: (e: ApplyEvent) => void): Promise<boolean> {
-    const f = await readGitFacts(run, deps.appDir, { fetch: true });
-    facts = f;
-    checkedAt = now();
-    const decision = decideCanApply(f, { mode: deps.mode, busy: deps.isBusy(), applying });
-    if (!decision.can_apply || !f.repoRoot || !f.current) {
-      onEvent({ step: "check", state: "error", message: decision.reason ?? "can't read the checkout" });
+    // Claimed before the first await, so a second request can't slip past
+    // while this one is still fetching.
+    if (applying) {
+      onEvent({ step: "check", state: "error", message: "an update is already running" });
       return false;
     }
     applying = true;
+    let f: GitFacts;
+    try {
+      f = await readGitFacts(run, deps.appDir, { fetch: true });
+    } catch (err) {
+      applying = false;
+      onEvent({ step: "check", state: "error", message: `can't read the checkout: ${(err as Error).message}` });
+      return false;
+    }
+    facts = f;
+    checkedAt = now();
+    const decision = decideCanApply(f, { mode: deps.mode, busy: deps.isBusy(), applying: false });
+    if (!decision.can_apply || !f.repoRoot || !f.current) {
+      applying = false;
+      onEvent({ step: "check", state: "error", message: decision.reason ?? "can't read the checkout" });
+      return false;
+    }
     applyError = undefined;
     const repo = f.repoRoot;
     const oldSha = f.current;
+    console.log(`[update] updating ${short(oldSha)} → ${short(f.latest)} (${f.behind} commit${f.behind === 1 ? "" : "s"})`);
     const env = buildEnv();
     const npmCi = () =>
       run("npm", ["ci", "--include=dev", "--no-audit", "--no-fund"], { cwd: deps.appDir, env, timeoutMs: 600_000 });
+    let step: ApplyEvent["step"] = "pull";
     const must = async (r: Promise<RunResult>): Promise<RunResult> => {
       const out = await r;
       if (out.code !== 0) {
-        const tail = (out.stderr || out.stdout).trim().split("\n").slice(-3).join(" ");
-        throw new Error(tail || `exited with code ${out.code}`);
+        logFailure(`${step} step`, out);
+        throw new Error(summarizeOutput(out));
       }
       return out;
     };
-    const rollbackFailed = (what: string, r: { stderr: string; stdout: string }) => {
-      const tail = (r.stderr || r.stdout).trim().split("\n").slice(-3).join(" ");
-      const msg = `rollback also failed: ${what}: ${tail}`;
+    const rollbackFailed = (what: string, r: RunResult) => {
+      logFailure(`rollback (${what})`, r);
+      const msg = `rollback also failed: ${what}: ${summarizeOutput(r)}`;
       applyError = `${applyError}; ${msg}`;
       onEvent({ step, state: "error", message: msg });
     };
-    let step: ApplyEvent["step"] = "pull";
     let reinstalled = false;
     try {
       onEvent({ step, state: "start" });
@@ -373,16 +447,19 @@ export function createAppUpdater(deps: AppUpdaterDeps): AppUpdater {
     } catch (err) {
       const message = (err as Error).message;
       applyError = `${step} failed: ${message}`;
+      console.error(`[update] ${step} failed: ${message}; rolling back to ${short(oldSha)}`);
       onEvent({ step, state: "error", message });
       try {
-        const reset = await run("git", ["reset", "--hard", oldSha], { cwd: repo });
+        // --keep, not --hard: it refuses (and the failure is reported) rather
+        // than discard edits made to tracked files while the update ran.
+        const reset = await run("git", ["reset", "--keep", oldSha], { cwd: repo });
         if (reset.code !== 0) rollbackFailed("git reset", reset);
         else if (reinstalled) {
           const again = await npmCi();
           if (again.code !== 0) rollbackFailed("npm ci", again);
         }
       } catch (rbErr) {
-        rollbackFailed("rollback", { stderr: (rbErr as Error).message, stdout: "" });
+        rollbackFailed("rollback", { code: -1, stderr: (rbErr as Error).message, stdout: "" });
       } finally {
         try {
           fs.rmSync(path.join(deps.appDir, "dist-next"), { recursive: true, force: true });
@@ -396,11 +473,13 @@ export function createAppUpdater(deps: AppUpdaterDeps): AppUpdater {
     // Code and build now match the new commit, so a hand-over failure is
     // not rolled back: the next launch starts the new build.
     onEvent({ step: "restart", state: "start" });
+    console.log(`[update] built ${short(f.latest)}; handing over to the new server`);
     try {
       deps.restart();
     } catch (err) {
       const message = (err as Error).message;
       applyError = `restart failed: ${message}`;
+      console.error(`[update] ${applyError}`);
       onEvent({ step: "restart", state: "error", message });
       applying = false;
       return false;
