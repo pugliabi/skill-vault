@@ -28,7 +28,6 @@ import "dotenv/config";
 
 import type { Server } from "node:http";
 import { spawn } from "node:child_process";
-import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import open from "open";
@@ -38,6 +37,7 @@ import { acquireLock, buildVersion, readLock, releaseLock } from "./services/ins
 import { sseClientCount } from "./routes/events.ts";
 import { startIdleStop } from "./services/idleStop.ts";
 import { installLogFile } from "./services/logFile.ts";
+import { isPortFree } from "./services/portProbe.ts";
 import { getServerPort, setServerPort } from "./services/runtime.ts";
 
 // ── CLI argument parsing ───────────────────────────────────────
@@ -168,16 +168,8 @@ const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 
 // ── Free-port selection ────────────────────────────────────────
 
-async function isPortFree(p: number, host: string): Promise<boolean> {
-  return new Promise<boolean>((resolve) => {
-    const server = net.createServer();
-    server.once("error", () => resolve(false));
-    server.once("listening", () => {
-      server.close(() => resolve(true));
-    });
-    server.listen(p, host);
-  });
-}
+// isPortFree (services/portProbe.ts): for a loopback host a port also has to
+// be bindable on 0.0.0.0 and ::, so the app never shadows another server.
 
 async function findFreePort(start: number, host: string): Promise<number> {
   // Try up to 10 ports starting at `start`. Returns 0 on exhaustion so
@@ -324,12 +316,13 @@ async function main(): Promise<void> {
     }
   });
 
-  process.on("SIGINT", () => {
-    void shutdown();
-  });
-  process.on("SIGTERM", () => {
-    void shutdown();
-  });
+  // SIGHUP: the console window closing (Windows) or the terminal hanging up;
+  // SIGBREAK: Ctrl+Break on Windows. All of them release the lock on the way out.
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGBREAK"] as const) {
+    process.on(signal, () => {
+      void shutdown();
+    });
+  }
   process.on("exit", () => releaseLock(process.pid));
 
   if (args.exitWhenIdle) {

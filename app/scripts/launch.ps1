@@ -29,11 +29,34 @@ function Stop-WithError([string]$Message) {
   exit 1
 }
 
+# A lock left by a server that never got to remove it (logoff, crash, taskkill)
+# can name a pid Windows has since given to another process. It is stale when
+# that process isn't node, or started after the lock was written. When unsure
+# (StartTime or started_at unreadable) a node process is trusted.
+function Test-StaleLock($Lock, $Process) {
+  if ($Process.ProcessName -ne 'node') { return $true }
+  try {
+    $written = $Lock.started_at
+    if (-not ($written -is [DateTime])) {
+      $written = [DateTime]::Parse([string]$written, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+    }
+    return ($Process.StartTime.ToUniversalTime() -gt $written.ToUniversalTime())
+  } catch {
+    return $false
+  }
+}
+
 function Get-LiveServer {
   if (-not (Test-Path -LiteralPath $LockFile)) { return $null }
   try { $lock = Get-Content -LiteralPath $LockFile -Raw | ConvertFrom-Json } catch { return $null }
   if (-not $lock -or -not ($lock.pid -is [int] -or $lock.pid -is [long]) -or -not ($lock.port -is [int] -or $lock.port -is [long])) { return $null }
-  if (-not (Get-Process -Id $lock.pid -ErrorAction SilentlyContinue)) { return $null }
+  $process = Get-Process -Id $lock.pid -ErrorAction SilentlyContinue
+  if (-not $process) { return $null }
+  if (Test-StaleLock $lock $process) {
+    Write-Log "removing a stale app.lock (pid $($lock.pid) is now $($process.ProcessName), not the server that wrote it)"
+    Remove-Item -LiteralPath $LockFile -Force -ErrorAction SilentlyContinue
+    return $null
+  }
   try {
     $health = Invoke-RestMethod -Uri "http://127.0.0.1:$($lock.port)/api/health" -TimeoutSec 2
     if ($health.ok -and $health.pid -eq $lock.pid) { return $lock }
