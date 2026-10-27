@@ -15,18 +15,22 @@ import {
  * restart and reloads once the new server answers.
  */
 export function UpdatePill() {
-  const [open, setOpen] = useState(false);
+  // Snapshot of the status at click time: a refetch that reports behind: 0
+  // mid-update must not unmount the dialog and its progress output.
+  const [snapshot, setSnapshot] = useState<AppUpdateStatus | null>(null);
   const { data } = useQuery({
     queryKey: ["app-update"],
     queryFn: appUpdateApi.status,
     refetchInterval: 10 * 60_000,
     staleTime: 60_000,
   });
-  if (!data || data.behind <= 0) return null;
+  const showPill = !!data && data.behind > 0;
+  if (!showPill && !snapshot) return null;
   return (
     <>
+      {showPill && (
       <button
-        onClick={() => setOpen(true)}
+        onClick={() => setSnapshot(data)}
         title="A newer version of Skill Vault is available"
         style={{
           display: "flex",
@@ -45,7 +49,8 @@ export function UpdatePill() {
         <span style={{ flex: 1, textAlign: "left" }}>Update available</span>
         <span style={{ fontFamily: "var(--mono)", fontSize: 9.5, color: "var(--ink-4)" }}>{data.behind}</span>
       </button>
-      {open && <AppUpdateDialog status={data} onClose={() => setOpen(false)} />}
+      )}
+      {snapshot && <AppUpdateDialog status={snapshot} onClose={() => setSnapshot(null)} />}
     </>
   );
 }
@@ -82,17 +87,33 @@ function AppUpdateDialog({ status, onClose }: { status: AppUpdateStatus; onClose
     const before = await getHealth();
     let restarting = false;
     let failed = false;
+    let sawError = false;
+    let dropped: string | null = null;
     try {
       await appUpdateApi.apply((e) => {
         setEvents((xs) => [...xs, e]);
-        if (e.state === "error") failed = true;
+        if (e.state === "error") {
+          failed = true;
+          sawError = true;
+        }
         if (e.step === "restart" && e.state === "start") restarting = true;
       });
     } catch (err) {
       // The old server closing the stream after "restart" is expected.
       if (!restarting) {
         failed = true;
-        setEvents((xs) => [...xs, { step: "check", state: "error", message: (err as Error).message }]);
+        dropped = (err as Error).message;
+      }
+    }
+    // The stream can drop before the restart event arrives even though the
+    // restart happened; confirm through /api/health before calling it failed.
+    if (!restarting && !sawError) {
+      const now = await getHealth();
+      if (before && now && now.pid !== before.pid) {
+        restarting = true;
+        failed = false;
+      } else if (dropped !== null) {
+        setEvents((xs) => [...xs, { step: "check", state: "error", message: dropped! }]);
       }
     }
     if (failed || !restarting) {
