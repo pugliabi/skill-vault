@@ -1,8 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import os from "node:os";
 import {
   createAppUpdater,
   decideCanApply,
+  defaultRun,
   parseCommits,
   parseLeftRight,
   type GitFacts,
@@ -73,6 +75,7 @@ test("decideCanApply refuses, with a reason, for each blocking state", () => {
   const cases: Array<[Partial<GitFacts>, Partial<Ctx>, RegExp]> = [
     [{ isRepo: false }, {}, /isn't a git checkout/],
     [{ hasOrigin: false }, {}, /no origin remote/],
+    [{ latest: null }, {}, /GitHub's main branch \(origin\/main\) wasn't found/],
     [{}, { mode: "development" }, /running from source/],
     [{ branch: "feature" }, {}, /on branch "feature"/],
     [{ dirty: true }, {}, /uncommitted changes/],
@@ -122,6 +125,29 @@ test("a failed fetch is reported, and the last known origin/main still counts", 
   assert.match(s.last_error ?? "", /unable to access/);
 });
 
+test("a missing origin/main is refused, not reported as up to date", async () => {
+  const responses = { ...BEHIND };
+  delete (responses as Record<string, unknown>)["git rev-parse origin/main"];
+  const s = await updater(fakeRun(responses).run).check();
+  assert.equal(s.can_apply, false);
+  assert.match(s.reason ?? "", /origin\/main\) wasn't found/);
+  assert.match(s.last_error ?? "", /origin\/main not found/);
+  assert.equal(s.behind, 0);
+});
+
+test("a failed git status counts as dirty, so an update is refused", async () => {
+  const { run } = fakeRun({ ...BEHIND, "git status --porcelain": { code: 1, stderr: "index locked" } });
+  const s = await updater(run).check();
+  assert.equal(s.dirty, true);
+  assert.equal(s.can_apply, false);
+});
+
+test("a failed rev-parse HEAD leaves the current commit unknown", async () => {
+  const { run } = fakeRun({ ...BEHIND, "git rev-parse HEAD": { code: 1, stdout: "", stderr: "bad" } });
+  const s = await updater(run).check();
+  assert.equal(s.current, null);
+});
+
 test("the scheduled check waits while a job is running", async () => {
   let busy = true;
   const { run, calls } = fakeRun(BEHIND);
@@ -133,4 +159,32 @@ test("the scheduled check waits while a job is running", async () => {
   await new Promise((r) => setTimeout(r, 50));
   u.stop();
   assert.ok(calls.includes("git fetch origin --quiet"));
+});
+
+// ── The real runner. These use node itself, so no git or npm is needed. ──
+
+test("defaultRun returns the exit code, stdout and stderr", async () => {
+  const r = await defaultRun(
+    process.execPath,
+    ["-e", "process.stdout.write('out'); process.stderr.write('err'); process.exit(3)"],
+    { cwd: os.tmpdir() },
+  );
+  assert.deepEqual(r, { code: 3, stdout: "out", stderr: "err" });
+});
+
+test("defaultRun gives up on a hung command and resolves promptly", async () => {
+  const started = Date.now();
+  const r = await defaultRun(process.execPath, ["-e", "setTimeout(() => {}, 10000)"], {
+    cwd: os.tmpdir(),
+    timeoutMs: 300,
+  });
+  assert.ok(Date.now() - started < 5000, `took ${Date.now() - started}ms`);
+  assert.equal(r.code, -1);
+  assert.match(r.stderr, /timed out/);
+});
+
+test("defaultRun resolves, not throws, when the command doesn't exist", async () => {
+  const r = await defaultRun("sv-no-such-command-xyz", [], { cwd: os.tmpdir() });
+  assert.equal(r.code, -1);
+  assert.ok(r.stderr.length > 0);
 });

@@ -14,6 +14,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { defaultKillTree, type ChildProcessLike } from "./claude/cli.ts";
 
 export interface RunResult {
   code: number;
@@ -27,26 +28,45 @@ export type Run = (
   opts: { cwd: string; env?: NodeJS.ProcessEnv; timeoutMs?: number },
 ) => Promise<RunResult>;
 
-/** Real runner. `npm` is a .cmd shim on Windows, which spawn can only start through cmd.exe. */
+/**
+ * Real runner. `npm` is a .cmd shim on Windows, which spawn can only start
+ * through cmd.exe. Stdin is closed and git is told never to prompt, so a
+ * background fetch can't hang waiting for credentials. On timeout the whole
+ * process tree is killed and the promise resolves at once; a late `close` or
+ * `error` is ignored.
+ */
 export const defaultRun: Run = (cmd, args, opts) =>
   new Promise((resolve) => {
     const viaCmd = cmd === "npm" && process.platform === "win32";
     const file = viaCmd ? process.env.ComSpec || "cmd.exe" : cmd;
     const argv = viaCmd ? ["/d", "/s", "/c", "npm", ...args] : args;
-    const child = spawn(file, argv, { cwd: opts.cwd, env: opts.env ?? process.env, windowsHide: true });
+    const baseEnv = opts.env ?? process.env;
+    const env: NodeJS.ProcessEnv =
+      cmd === "git" ? { ...baseEnv, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never" } : baseEnv;
+    const child = spawn(file, argv, {
+      cwd: opts.cwd,
+      env,
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const timeoutMs = opts.timeoutMs ?? 120_000;
     let stdout = "";
     let stderr = "";
-    const timer = setTimeout(() => child.kill(), opts.timeoutMs ?? 120_000);
+    let settled = false;
+    const settle = (r: RunResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(r);
+    };
+    const timer = setTimeout(() => {
+      defaultKillTree(child as unknown as ChildProcessLike);
+      settle({ code: -1, stdout, stderr: `${stderr}\ntimed out after ${timeoutMs / 1000}s` });
+    }, timeoutMs);
     child.stdout?.on("data", (d) => (stdout += String(d)));
     child.stderr?.on("data", (d) => (stderr += String(d)));
-    child.on("error", (err) => {
-      clearTimeout(timer);
-      resolve({ code: -1, stdout, stderr: stderr + err.message });
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve({ code: code ?? -1, stdout, stderr });
-    });
+    child.on("error", (err) => settle({ code: -1, stdout, stderr: stderr + err.message }));
+    child.on("close", (code) => settle({ code: code ?? -1, stdout, stderr }));
   });
 
 export interface GitFacts {
@@ -104,18 +124,25 @@ export async function readGitFacts(run: Run, appDir: string, opts: { fetch: bool
     if (f.code !== 0) fetchError = f.stderr.trim() || "git fetch failed";
   }
   const branch = (await git("rev-parse", "--abbrev-ref", "HEAD")).stdout.trim() || null;
-  const current = (await git("rev-parse", "HEAD")).stdout.trim() || null;
-  const latest = await git("rev-parse", "origin/main");
-  const counts = parseLeftRight((await git("rev-list", "--left-right", "--count", "HEAD...origin/main")).stdout);
-  const dirty = (await git("status", "--porcelain")).stdout.trim().length > 0;
-  const commits = parseCommits((await git("log", "--format=%h%x09%s", "HEAD..origin/main")).stdout);
+  const head = await git("rev-parse", "HEAD");
+  const current = head.code === 0 ? head.stdout.trim() || null : null;
+  const latestRes = await git("rev-parse", "origin/main");
+  const hasMain = latestRes.code === 0;
+  if (!hasMain && !fetchError) fetchError = "origin/main not found";
+  const counts = hasMain
+    ? parseLeftRight((await git("rev-list", "--left-right", "--count", "HEAD...origin/main")).stdout)
+    : { ahead: 0, behind: 0 };
+  const porcelain = await git("status", "--porcelain");
+  // A failed status is treated as dirty: refusing an update is the safe direction.
+  const dirty = porcelain.code !== 0 || porcelain.stdout.trim().length > 0;
+  const commits = hasMain ? parseCommits((await git("log", "--format=%h%x09%s", "HEAD..origin/main")).stdout) : [];
   return {
     isRepo: true,
     hasOrigin: true,
     repoRoot,
     branch,
     current,
-    latest: latest.code === 0 ? latest.stdout.trim() : null,
+    latest: hasMain ? latestRes.stdout.trim() : null,
     ...counts,
     dirty,
     commits,
@@ -130,6 +157,7 @@ export function decideCanApply(
   const no = (reason: string) => ({ can_apply: false, reason });
   if (!f.isRepo) return no("this copy isn't a git checkout");
   if (!f.hasOrigin) return no("the checkout has no origin remote");
+  if (f.latest === null) return no("GitHub's main branch (origin/main) wasn't found");
   if (ctx.mode !== "production") return no("running from source (npm run dev); pull and restart yourself");
   if (f.branch !== "main") return no(`on branch "${f.branch}", not main`);
   if (f.dirty) return no("the checkout has uncommitted changes");
