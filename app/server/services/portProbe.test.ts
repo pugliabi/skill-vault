@@ -58,6 +58,32 @@ test("a loopback port is busy when another program listens on [::]", async (t) =
   }
 });
 
+test("a loopback port is busy when another program listens on [::1]", async (t) => {
+  const held = await occupy("::1");
+  if (!held) return t.skip("no IPv6 on this machine");
+  try {
+    assert.equal(await isPortFree(held.port, "127.0.0.1"), false);
+  } finally {
+    await close(held.server);
+  }
+});
+
+test("probing a loopback port never listens on a non-loopback address (no Windows Firewall prompt)", async (t) => {
+  const held = await occupy("127.0.0.1");
+  assert.ok(held);
+  const { port } = held;
+  await close(held.server);
+
+  const hosts: unknown[] = [];
+  const listen = net.Server.prototype.listen;
+  t.mock.method(net.Server.prototype, "listen", function (this: net.Server, ...args: unknown[]) {
+    hosts.push(args[1]);
+    return (listen as (...a: unknown[]) => net.Server).apply(this, args);
+  });
+  assert.equal(await isPortFree(port, "127.0.0.1"), true);
+  assert.deepEqual(hosts, ["127.0.0.1"]);
+});
+
 test("port 0 (let the OS pick) always counts as free", async () => {
   assert.equal(await isPortFree(0, "127.0.0.1"), true);
 });

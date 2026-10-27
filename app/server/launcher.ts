@@ -168,8 +168,10 @@ const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 
 // ── Free-port selection ────────────────────────────────────────
 
-// isPortFree (services/portProbe.ts): for a loopback host a port also has to
-// be bindable on 0.0.0.0 and ::, so the app never shadows another server.
+// isPortFree (services/portProbe.ts): for a loopback host a port also must not
+// accept connections on 127.0.0.1 or ::1, so the app never shadows (or is
+// shadowed by) another server — checked by connecting, which can't raise a
+// Windows Firewall prompt the way binding 0.0.0.0 / :: can.
 
 async function findFreePort(start: number, host: string): Promise<number> {
   // Try up to 10 ports starting at `start`. Returns 0 on exhaustion so
