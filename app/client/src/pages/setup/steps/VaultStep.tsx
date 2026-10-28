@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { setupApi, joinPath, repoNameFromUrl, type FolderInfo, type SetupVault, type VaultCandidate } from "../../../lib/setup";
 import type { StepProps } from "../types";
 import { ChoiceCard, FolderField, Hint, StepHeader, StepNav, inputStyle, labelStyle } from "../ui";
@@ -53,17 +53,28 @@ export function VaultStep({ draft, commit, folderDialog }: StepProps) {
   const [cloneError, setCloneError] = useState<string | null>(null);
   const [machineId, setMachineId] = useState(draft.machine_id ?? "");
   const [more, setMore] = useState(false);
+  // The URL as it is right now, so an old clone preview can tell it is stale.
+  const urlRef = useRef(url);
 
   // Inspect the folder (new / existing) a moment after typing stops.
   useEffect(() => {
-    if (mode === "clone" || !folder.trim()) {
-      setInfo(null);
-      return;
-    }
+    setInfo(null);
+    if (mode === "clone" || !folder.trim()) return;
+    let cancelled = false;
     const t = setTimeout(() => {
-      setupApi.inspect(folder.trim()).then(setInfo).catch(() => setInfo(null));
+      setupApi
+        .inspect(folder.trim())
+        .then((r) => {
+          if (!cancelled) setInfo(r);
+        })
+        .catch(() => {
+          if (!cancelled) setInfo(null);
+        });
     }, 350);
-    return () => clearTimeout(t);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
   }, [mode, folder]);
 
   // Default clone destination: <parent>\<repo name>, until the user edits it.
@@ -72,18 +83,28 @@ export function VaultStep({ draft, commit, folderDialog }: StepProps) {
   }, [parent, url, destTouched]);
 
   useEffect(() => {
-    if (mode !== "clone" || !dest.trim()) {
-      setDestInfo(null);
-      return;
-    }
+    setDestInfo(null);
+    if (mode !== "clone" || !dest.trim()) return;
+    let cancelled = false;
     const t = setTimeout(() => {
-      setupApi.inspect(dest.trim()).then(setDestInfo).catch(() => setDestInfo(null));
+      setupApi
+        .inspect(dest.trim())
+        .then((r) => {
+          if (!cancelled) setDestInfo(r);
+        })
+        .catch(() => {
+          if (!cancelled) setDestInfo(null);
+        });
     }, 350);
-    return () => clearTimeout(t);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
   }, [mode, dest]);
 
   // A new URL means the old preview no longer applies.
   const changeUrl = (next: string) => {
+    urlRef.current = next;
     setUrl(next);
     setCandidates(null);
     setSubdir(null);
@@ -96,13 +117,16 @@ export function VaultStep({ draft, commit, folderDialog }: StepProps) {
   const picked = candidates?.find((c) => c.subdir === subdir) ?? null;
 
   const checkRepo = async () => {
+    const asked = url.trim();
     setChecking(true);
     setCloneError(null);
     try {
-      const r = await setupApi.clonePreview(url.trim());
+      const r = await setupApi.clonePreview(asked);
+      if (urlRef.current.trim() !== asked) return;
       setCandidates(r.candidates);
       setSubdir(r.candidates.length === 1 ? r.candidates[0].subdir : null);
     } catch (err) {
+      if (urlRef.current.trim() !== asked) return;
       setCloneError((err as Error).message);
       setCandidates(null);
     } finally {
