@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { defaultRun } from "../appUpdate.ts";
+import { defaultRun, type Run } from "../appUpdate.ts";
 import { CloneError, findVaultManifests, friendlyGitError, isCloneUrl, previewClone } from "./clonePreview.ts";
 
 function makeRepo(files: Record<string, string>): string {
@@ -90,6 +90,24 @@ test("a repo that doesn't exist is a CloneError and leaves no temp folder", asyn
   try {
     await assert.rejects(previewClone(path.join(tmpRoot, "missing-repo"), { run: defaultRun, tmpRoot }), CloneError);
     assert.deepEqual(fs.readdirSync(tmpRoot).filter((n) => n.startsWith("sv-clone-preview-")), []);
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("a failed git show fails the preview instead of hiding skills", async () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sv-prev-"));
+  const run: Run = async (_cmd, args) => {
+    if (args.includes("clone")) return { code: 0, stdout: "", stderr: "" };
+    if (args.includes("ls-tree")) return { code: 0, stdout: "skills.json\n", stderr: "" };
+    return { code: 128, stdout: "", stderr: "fatal: unable to access 'https://x/': Could not resolve host: x" };
+  };
+  try {
+    await assert.rejects(
+      previewClone("https://x/vault.git", { run, tmpRoot }),
+      (err: unknown) => err instanceof CloneError && /Couldn't reach the server/.test(err.message),
+    );
+    assert.deepEqual(fs.readdirSync(tmpRoot), [], "temporary copy removed");
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }

@@ -92,7 +92,7 @@ export function removeTree(dir: string): void {
 
 async function showJson(run: Run, cwd: string, file: string): Promise<Record<string, unknown> | null> {
   const r = await run("git", ["show", `HEAD:${file}`], { cwd, timeoutMs: 60_000, interactiveAuth: true });
-  if (r.code !== 0) return null;
+  if (r.code !== 0) throw new CloneError(friendlyGitError(r.stderr));
   try {
     return JSON.parse(r.stdout) as Record<string, unknown>;
   } catch {
