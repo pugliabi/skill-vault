@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { api, ApiError } from "../lib/api";
 import { Layout } from "../components/Layout";
@@ -22,6 +23,7 @@ export default function Settings() {
     queryFn: () => api.getConfig(),
   });
   const [importOpen, setImportOpen] = useState(false);
+  const [, navigate] = useLocation();
 
   return (
     <Layout>
@@ -39,6 +41,9 @@ export default function Settings() {
               . Shared with the <code style={{ fontFamily: "var(--mono)" }}>sv</code> CLI.
             </p>
           </div>
+          <Button size="sm" onClick={() => navigate("/setup")}>
+            Run setup guide…
+          </Button>
         </div>
 
         <Rule label="Vault" />
