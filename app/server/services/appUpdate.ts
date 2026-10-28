@@ -27,7 +27,13 @@ export interface RunResult {
 export type Run = (
   cmd: string,
   args: string[],
-  opts: { cwd: string; env?: NodeJS.ProcessEnv; timeoutMs?: number },
+  opts: {
+    cwd: string;
+    env?: NodeJS.ProcessEnv;
+    timeoutMs?: number;
+    /** git only: allow Git Credential Manager's own sign-in window (still never a terminal prompt). */
+    interactiveAuth?: boolean;
+  },
 ) => Promise<RunResult>;
 
 /**
@@ -58,7 +64,9 @@ export const defaultRun: Run = (cmd, args, opts) =>
     const argv = viaCmd ? ["/d", "/s", "/c", "npm", ...args] : args;
     const baseEnv = opts.env ?? process.env;
     const env: NodeJS.ProcessEnv =
-      cmd === "git" ? { ...baseEnv, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never" } : baseEnv;
+      cmd === "git"
+        ? { ...baseEnv, GIT_TERMINAL_PROMPT: "0", ...(opts.interactiveAuth ? {} : { GCM_INTERACTIVE: "never" }) }
+        : baseEnv;
     const child = spawn(file, argv, { cwd: opts.cwd, env, ...runSpawnOptions() });
     const timeoutMs = opts.timeoutMs ?? 120_000;
     let stdout = "";

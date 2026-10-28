@@ -8,12 +8,16 @@
  *   POST   /draft/start    { draft } — start a draft pre-filled from config
  *   PUT    /draft          { draft } — save the draft (400 if malformed)
  *   DELETE /draft          204 — discard the draft
+ *   POST   /inspect        { path } — what a picked folder holds (empty, vault, git repo, ...)
+ *   GET    /targets        { targets } — the known tools and whether each is on this PC
+ *   POST   /clone-preview  { url } → { candidates } — look inside a vault repo, keeping no copy
  */
 import os from "node:os";
 import { Router } from "express";
 import { readAppConfig, readSetupBase } from "../services/appConfig.ts";
 import { defaultRun, type Run } from "../services/appUpdate.ts";
 import { configFingerprint, deleteDraft, normalizeDraft, readDraft, startDraft, writeDraft } from "../services/setup/draft.ts";
+import { CloneError, isCloneUrl, previewClone } from "../services/setup/clonePreview.ts";
 import { inspectFolder } from "../services/setup/inspect.ts";
 import { detectTargets } from "../services/setup/targets.ts";
 import type { SetupBase } from "../services/setup/types.ts";
@@ -30,6 +34,8 @@ export interface SetupRouterDeps {
   readConfig?: () => AppConfig;
   /** Runs git (tests pass a fake). */
   run?: Run;
+  /** Parent folder for temporary clone previews (default: the OS temp folder). */
+  tmpRoot?: string;
 }
 
 export function setupRouter(deps: SetupRouterDeps = {}): Router {
@@ -84,6 +90,20 @@ export function setupRouter(deps: SetupRouterDeps = {}): Router {
 
   router.get("/targets", (_req, res) => {
     res.json({ targets: detectTargets(home(), readConfig()) });
+  });
+
+  router.post("/clone-preview", async (req, res) => {
+    const url = (req.body as { url?: unknown } | undefined)?.url;
+    if (typeof url !== "string" || !isCloneUrl(url)) {
+      res.status(400).json({ error: "Enter an https://, ssh:// or git@ URL." });
+      return;
+    }
+    try {
+      res.json({ candidates: await previewClone(url.trim(), { run, tmpRoot: deps.tmpRoot }) });
+    } catch (err) {
+      if (err instanceof CloneError) res.status(400).json({ error: err.message });
+      else res.status(500).json({ error: (err as Error).message });
+    }
   });
 
   return router;

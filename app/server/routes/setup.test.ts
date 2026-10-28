@@ -108,3 +108,18 @@ test("targets: lists the known tools for the injected home", async () => {
   assert.equal(targets[0].status, "found");
   fs.rmSync(home, { recursive: true, force: true });
 });
+
+test("clone-preview: only git URLs are accepted", async () => {
+  const url = await serve(setup.setupRouter({ run: async () => ({ code: 0, stdout: "", stderr: "" }) }));
+  const res = await fetch(`${url}/clone-preview`, json({ url: "C:\\repo" }));
+  assert.equal(res.status, 400);
+  assert.match((await res.json()).error, /https:\/\/, ssh:\/\/ or git@/);
+});
+
+test("clone-preview: a git failure is a 400 with a plain message", async () => {
+  const failing = async () => ({ code: 128, stdout: "", stderr: "remote: Repository not found." });
+  const url = await serve(setup.setupRouter({ run: failing }));
+  const res = await fetch(`${url}/clone-preview`, json({ url: "https://github.com/me/nope.git" }));
+  assert.equal(res.status, 400);
+  assert.match((await res.json()).error, /wasn't found/);
+});
