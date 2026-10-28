@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
+import { ApiError } from "../../../lib/api";
 import { setupApi, type SetupDraft, type SetupEvent, type SetupJobState } from "../../../lib/setup";
 import { Button } from "../../../components/ui/primitives";
 import type { StepProps } from "../types";
@@ -44,23 +45,45 @@ export function ReviewStep({ draft, goTo, apiKey, onFinished }: StepProps) {
   const [events, setEvents] = useState<SetupEvent[]>([]);
   const [result, setResult] = useState<SetupJobState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [nothingSaved, setNothingSaved] = useState(false);
 
   const run = async (job: (onEvent: (e: SetupEvent) => void) => Promise<void>, keep: boolean) => {
     setPhase("running");
     setError(null);
+    setNothingSaved(false);
     if (!keep) setEvents([]);
+    let streamError: string | null = null;
     try {
       await job((e) => setEvents((xs) => [...xs, e]));
     } catch (err) {
-      setError((err as Error).message);
+      if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+        // Refused before any job started (e.g. nothing to retry): show why, touch nothing else.
+        setError(err.message);
+        setPhase(result ? "result" : "review");
+        return;
+      }
+      // The stream can drop while the server keeps going; read the job's state below.
+      streamError = (err as Error).message;
     }
-    // The stream can drop; the server keeps the job's result either way.
-    const state = await setupApi.applyStatus().catch(() => null);
+    // Poll while the job still runs (up to 10 minutes).
+    const started = Date.now();
+    let state = await setupApi.applyStatus().catch(() => null);
+    while (state?.running && Date.now() - started < 10 * 60 * 1000) {
+      await new Promise((r) => setTimeout(r, 1000));
+      state = await setupApi.applyStatus().catch(() => null);
+    }
+    if (!state || state.running) {
+      setError("Lost contact with setup. Check Settings to see what was saved before pressing Finish again.");
+      setPhase(result ? "result" : "review");
+      return;
+    }
     setResult(state);
-    if (state && !state.vault_path) {
-      setPhase("review"); // steps 1–2 failed: nothing was saved
+    if (!state.vault_path) {
+      // Steps 1–2 failed: nothing was saved.
       const last = state.events.at(-1);
-      if (last?.state === "error") setError(last.message ?? "Setup failed.");
+      setError(last?.state === "error" ? (last.message ?? "Setup failed.") : (streamError ?? "Setup failed."));
+      setNothingSaved(true);
+      setPhase("review");
       return;
     }
     setPhase("result");
@@ -102,6 +125,7 @@ export function ReviewStep({ draft, goTo, apiKey, onFinished }: StepProps) {
           {result.ok ? "Everything is saved." : "Your vault and settings are saved, but a few items didn't go through."}
         </StepHeader>
         {log}
+        {error && <Hint tone="bad">{error}</Hint>}
         {!result.ok && (
           <>
             <Hint>Anything already moved stays where it is.</Hint>
@@ -134,7 +158,12 @@ export function ReviewStep({ draft, goTo, apiKey, onFinished }: StepProps) {
           <li key={i}>{a}</li>
         ))}
       </ol>
-      {error && <Hint tone="bad">{error} Nothing was saved. Fix it and press Finish again.</Hint>}
+      {error && (
+        <Hint tone="bad">
+          {error}
+          {nothingSaved ? " Nothing was saved. Fix it and press Finish again." : ""}
+        </Hint>
+      )}
       {events.length > 0 && error && log}
       <StepNav onBack={() => goTo("assistant")} onNext={finish} nextLabel="Finish" nextDisabled={!draft.vault} />
     </div>
