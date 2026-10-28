@@ -191,3 +191,33 @@ test("pick-folder: NUL characters are stripped from title and initial before the
   await fetch(`${url}/pick-folder`, json({ title: "Va\u0000ult", initial: "a\u0000b" }));
   assert.deepEqual(seen, [{ title: "Vault", initial: "ab" }]);
 });
+
+test("assistant: installed + sign-in + saved mode", async () => {
+  const url = await serve(
+    setup.setupRouter({
+      claudeAvailable: async () => ({ available: true, version: "2.1.0 (Claude Code)" }),
+      claudeLoginStatus: async () => ({ logged_in: true, auth_method: "claude.ai", email: "me@example.com" }),
+      readSavedAuth: () => ({ auth: "login", has_saved_key: false, env_key_present: true, workspace_id: null }),
+    }),
+  );
+  assert.deepEqual(await (await fetch(`${url}/assistant`)).json(), {
+    installed: true,
+    version: "2.1.0 (Claude Code)",
+    reason: null,
+    login: { logged_in: true, auth_method: "claude.ai", email: "me@example.com" },
+    saved: { auth: "login", has_saved_key: false, env_key_present: true, workspace_id: null },
+  });
+
+  const missing = await serve(
+    setup.setupRouter({
+      claudeAvailable: async () => ({ available: false, reason: "not found" }),
+      claudeLoginStatus: async () => {
+        throw new Error("must not be called");
+      },
+      readSavedAuth: () => ({ auth: "login", has_saved_key: false, env_key_present: false, workspace_id: null }),
+    }),
+  );
+  const body = await (await fetch(`${missing}/assistant`)).json();
+  assert.equal(body.installed, false);
+  assert.equal(body.login, null);
+});

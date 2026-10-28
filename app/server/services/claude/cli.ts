@@ -370,6 +370,42 @@ const authEnv = (): NodeJS.ProcessEnv => claudeChildEnv(readAssistantBlock());
 
 export const defaultRunner: ClaudeRunner = createRunner(realSpawn, defaultKillTree, { env: authEnv });
 
+// ── Sign-in check (setup guide) ──────────────────────────────────────────
+
+export interface ClaudeLoginStatus {
+  logged_in: boolean;
+  auth_method: string | null;
+  email: string | null;
+}
+
+/** `claude auth status` prints JSON; null when the output isn't that JSON (e.g. an older CLI). */
+export function parseAuthStatus(stdout: string): ClaudeLoginStatus | null {
+  try {
+    const j = JSON.parse(stdout) as { loggedIn?: unknown; authMethod?: unknown; email?: unknown };
+    if (typeof j.loggedIn !== "boolean") return null;
+    return {
+      logged_in: j.loggedIn,
+      auth_method: typeof j.authMethod === "string" ? j.authMethod : null,
+      email: typeof j.email === "string" ? j.email : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Checked with the API-key env removed — the same environment the assistant uses in Claude-login mode. */
+const loginRunner: ClaudeRunner = createRunner(realSpawn, defaultKillTree, { env: () => claudeChildEnv({ auth: "login" }) });
+
+/** Is the claude CLI signed in with a Claude account? null = couldn't tell. */
+export async function claudeLoginStatus(runner: ClaudeRunner = loginRunner): Promise<ClaudeLoginStatus | null> {
+  try {
+    const { stdout } = await runner(["auth", "status"], "", { cwd: os.tmpdir(), timeoutMs: 15_000 });
+    return parseAuthStatus(stdout.trim());
+  } catch {
+    return null;
+  }
+}
+
 // ── Streaming runner (assistant chat turns) ──────────────────────────────
 
 export type ClaudeStreamRunner = (
