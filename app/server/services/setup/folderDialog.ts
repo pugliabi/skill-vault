@@ -56,8 +56,15 @@ export function createFolderPicker(deps: {
       if (open) return Promise.reject(new PickerBusyError("A folder dialog is already open."));
       open = true;
       const inv = pickFolderInvocation(deps.appRoot, opts);
+      let child: ChildProcessLike;
+      try {
+        child = spawnFn(inv.file, inv.args, { env: inv.env, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+      } catch (err) {
+        // A synchronous spawn failure (e.g. a NUL byte in an env value) must not leave the picker stuck open.
+        open = false;
+        return Promise.reject(err);
+      }
       return new Promise<PickResult>((resolve, reject) => {
-        const child = spawnFn(inv.file, inv.args, { env: inv.env, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
         const out: Buffer[] = [];
         const err: Buffer[] = [];
         let settled = false;

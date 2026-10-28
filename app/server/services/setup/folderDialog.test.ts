@@ -65,3 +65,20 @@ test("a dialog left open is closed after the timeout", async () => {
   assert.deepEqual(await picker.pick({}), { cancelled: true });
   assert.equal(killed, true);
 });
+
+test("a spawn that throws does not leave the picker stuck open", async () => {
+  let calls = 0;
+  const picker = createFolderPicker({
+    appRoot: "C:\\app",
+    spawn: () => {
+      calls += 1;
+      if (calls === 1) throw new TypeError("ERR_INVALID_ARG_VALUE");
+      const c = fakeChild();
+      setImmediate(() => c.emit("close", 0));
+      return c as never;
+    },
+  });
+  await assert.rejects(picker.pick({}), /ERR_INVALID_ARG_VALUE/);
+  assert.equal(picker.isOpen(), false);
+  assert.deepEqual(await picker.pick({}), { cancelled: true });
+});

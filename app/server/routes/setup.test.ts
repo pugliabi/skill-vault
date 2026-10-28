@@ -183,3 +183,11 @@ test("pick-folder: only on Windows, only from this PC, one at a time", async () 
   const none = await serve(setup.setupRouter({ platform: "win32" }));
   assert.equal((await fetch(`${none}/pick-folder`, json({}))).status, 503);
 });
+
+test("pick-folder: NUL characters are stripped from title and initial before the picker sees them", async () => {
+  const seen: Array<{ title?: string; initial?: string }> = [];
+  const picker = { isOpen: () => false, pick: async (o: { title?: string; initial?: string }) => (seen.push(o), { cancelled: true as const }) };
+  const url = await serve(setup.setupRouter({ platform: "win32", picker }));
+  await fetch(`${url}/pick-folder`, json({ title: "Va\u0000ult", initial: "a\u0000b" }));
+  assert.deepEqual(seen, [{ title: "Vault", initial: "ab" }]);
+});

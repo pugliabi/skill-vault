@@ -195,11 +195,13 @@ export function setupRouter(deps: SetupRouterDeps = {}): Router {
       return;
     }
     const body = (req.body ?? {}) as { title?: unknown; initial?: unknown };
+    // NUL bytes make spawn throw (they can't live in an environment value), so drop them.
+    const clean = (s: string) => s.replace(/\0/g, "");
     try {
       res.json(
         await picker.pick({
-          title: typeof body.title === "string" ? body.title.slice(0, 200) : undefined,
-          initial: typeof body.initial === "string" ? body.initial : undefined,
+          title: typeof body.title === "string" ? clean(body.title).slice(0, 200) : undefined,
+          initial: typeof body.initial === "string" ? clean(body.initial) : undefined,
         }),
       );
     } catch (err) {
