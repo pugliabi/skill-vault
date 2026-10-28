@@ -85,3 +85,22 @@ test("reports the enclosing git repo and its origin", async () => {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a folder that can't be read is reported as unreadable, without git", async () => {
+  const root = tmp();
+  try {
+    const calls: string[][] = [];
+    const run: Run = async (_cmd, args) => {
+      calls.push(args);
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    const denied = (): string[] => {
+      throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+    };
+    const info = await inspectFolder(root, { run, readdir: denied });
+    assert.deepEqual(info, { path: path.resolve(root), kind: "unreadable", writable: false, skill_count: 0, git: null, notion: null });
+    assert.equal(calls.length, 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

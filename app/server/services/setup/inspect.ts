@@ -1,15 +1,25 @@
 /**
  * What's in a folder the user picked: nothing yet, a vault (skills.json),
  * a vault missing its manifest, a tool's skills folder (SKILL.md folders
- * directly inside — a target, not a vault), or something else. Also the
- * enclosing git repo and the vault's Notion database, for display.
+ * directly inside — a target, not a vault), or something else. A folder that
+ * exists but can't be read (permissions, or removed mid-check) is "unreadable"
+ * and reports no git or Notion details. Also the enclosing git repo and the
+ * vault's Notion database, for display.
  */
 import fs from "node:fs";
 import path from "node:path";
 import type { Run } from "../appUpdate.ts";
 import type { NotionRef } from "./types.ts";
 
-export type FolderKind = "missing" | "not_dir" | "empty" | "vault" | "vault_no_manifest" | "skills_folder" | "other";
+export type FolderKind =
+  | "missing"
+  | "not_dir"
+  | "unreadable"
+  | "empty"
+  | "vault"
+  | "vault_no_manifest"
+  | "skills_folder"
+  | "other";
 
 export interface FolderInfo {
   path: string;
@@ -85,7 +95,10 @@ async function gitInfo(dir: string, run: Run): Promise<FolderInfo["git"]> {
   return { root, origin: origin.code === 0 && origin.stdout.trim() ? origin.stdout.trim() : null };
 }
 
-export async function inspectFolder(input: string, deps: { run: Run }): Promise<FolderInfo> {
+export async function inspectFolder(
+  input: string,
+  deps: { run: Run; readdir?: (dir: string) => string[] },
+): Promise<FolderInfo> {
   const abs = path.resolve(input);
   let stat: fs.Stats | null;
   try {
@@ -95,9 +108,18 @@ export async function inspectFolder(input: string, deps: { run: Run }): Promise<
   }
   let kind: FolderKind;
   let skill_count = 0;
+  const readdir = deps.readdir ?? ((dir: string) => fs.readdirSync(dir));
+  let entries: string[] = [];
+  if (stat?.isDirectory()) {
+    try {
+      entries = readdir(abs);
+    } catch {
+      return { path: abs, kind: "unreadable", writable: false, skill_count: 0, git: null, notion: null };
+    }
+  }
   if (!stat) kind = "missing";
   else if (!stat.isDirectory()) kind = "not_dir";
-  else if (fs.readdirSync(abs).length === 0) kind = "empty";
+  else if (entries.length === 0) kind = "empty";
   else if (fs.existsSync(path.join(abs, "skills.json"))) {
     kind = "vault";
     skill_count = vaultSkillNames(abs).size;
