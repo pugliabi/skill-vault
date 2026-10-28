@@ -133,3 +133,37 @@ test("plan: needs a vault in the draft", async () => {
   const plan = await (await fetch(`${url}/plan`, json({ draft: withVault }))).json();
   assert.deepEqual(plan, { adopt: [], adopt_conflicts: [], push: [], differs: [] });
 });
+
+type SetupApplier = import("../services/setup/apply.ts").SetupApplier;
+type SetupJobState = import("../services/setup/apply.ts").SetupJobState;
+
+function fakeApplier(over: Partial<SetupApplier> = {}): SetupApplier {
+  const idle: SetupJobState = { running: false, ok: null, vault_path: null, events: [], failed: [] };
+  return {
+    isRunning: () => false,
+    status: () => idle,
+    apply: async (_req, onEvent) => {
+      onEvent({ step: "vault", state: "start" });
+      onEvent({ step: "done", state: "done", message: "Setup finished" });
+      return { ...idle, ok: true };
+    },
+    retry: async () => idle,
+    ...over,
+  };
+}
+
+test("apply: streams NDJSON events; 400 for a bad draft; 409 while running", async () => {
+  const { startDraft } = await import("../services/setup/draft.ts");
+  const draft = startDraft({ vault_path: "C:\\v", agent_locations: {}, default_targets: [], machine_id: null, repo_url: null });
+  const url = await serve(setup.setupRouter({ applier: fakeApplier() }));
+  const res = await fetch(`${url}/apply`, json({ draft, api_key: "sk-x" }));
+  assert.equal(res.headers.get("content-type"), "application/x-ndjson");
+  const lines = (await res.text()).trim().split("\n").map((l) => JSON.parse(l));
+  assert.deepEqual(lines.map((l) => l.step), ["vault", "done"]);
+
+  assert.equal((await fetch(`${url}/apply`, json({ draft: { version: 7 } }))).status, 400);
+
+  const busy = await serve(setup.setupRouter({ applier: fakeApplier({ isRunning: () => true }) }));
+  assert.equal((await fetch(`${busy}/apply`, json({ draft }))).status, 409);
+  assert.deepEqual(await (await fetch(`${url}/apply/status`)).json(), { running: false, ok: null, vault_path: null, events: [], failed: [] });
+});

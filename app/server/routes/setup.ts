@@ -12,18 +12,24 @@
  *   GET    /targets        { targets } — the known tools and whether each is on this PC
  *   POST   /clone-preview  { url } → { candidates } — look inside a vault repo, keeping no copy
  *   POST   /plan           { draft } → SkillsPlan — which skills to adopt, push, or leave differing
+ *   POST   /apply          { draft, api_key? } — run the Finish job, streaming NDJSON events (409 while running)
+ *   POST   /apply/retry    re-run only the items that failed, streaming NDJSON events
+ *   GET    /apply/status   the Finish job's state (running, ok, events, failed items)
  */
 import os from "node:os";
-import { Router } from "express";
+import { Router, type Response } from "express";
 import { readAppConfig, readSetupBase } from "../services/appConfig.ts";
 import { defaultRun, type Run } from "../services/appUpdate.ts";
 import { configFingerprint, deleteDraft, normalizeDraft, readDraft, startDraft, writeDraft } from "../services/setup/draft.ts";
 import { CloneError, isCloneUrl, previewClone } from "../services/setup/clonePreview.ts";
+import { createSetupApplier, type SetupApplier, type SetupEvent } from "../services/setup/apply.ts";
+import { defaultApplyDeps } from "../services/setup/applyDeps.ts";
 import { inspectFolder } from "../services/setup/inspect.ts";
 import { effectiveTargets, planSkills } from "../services/setup/plan.ts";
 import { detectTargets } from "../services/setup/targets.ts";
 import type { SetupBase } from "../services/setup/types.ts";
 import type { AppConfig } from "../types/vault.ts";
+import { redirectUrlFor } from "./notion.ts";
 import { isLoopbackRequest, refuseCrossSiteWrites } from "./sameOrigin.ts";
 
 export interface SetupRouterDeps {
@@ -38,6 +44,20 @@ export interface SetupRouterDeps {
   run?: Run;
   /** Parent folder for temporary clone previews (default: the OS temp folder). */
   tmpRoot?: string;
+  /** The Finish job (server/index.ts passes the shared one so busy checks see it). */
+  applier?: SetupApplier;
+}
+
+/** Run a job and stream its events as NDJSON (same format as POST /api/app/update). */
+async function streamJob(res: Response, job: (onEvent: (e: SetupEvent) => void) => Promise<unknown>): Promise<void> {
+  res.setHeader("Content-Type", "application/x-ndjson");
+  res.setHeader("Cache-Control", "no-cache");
+  try {
+    await job((e) => res.write(`${JSON.stringify(e)}\n`));
+  } catch (err) {
+    res.write(`${JSON.stringify({ step: "done", state: "error", message: (err as Error).message })}\n`);
+  }
+  res.end();
 }
 
 export function setupRouter(deps: SetupRouterDeps = {}): Router {
@@ -47,6 +67,7 @@ export function setupRouter(deps: SetupRouterDeps = {}): Router {
   const readBase = deps.readBase ?? readSetupBase;
   const run = deps.run ?? defaultRun;
   const readConfig = deps.readConfig ?? readAppConfig;
+  const applier = deps.applier ?? createSetupApplier(defaultApplyDeps(deps.home));
   router.use(refuseCrossSiteWrites);
 
   router.get("/capabilities", (req, res) => {
@@ -126,6 +147,35 @@ export function setupRouter(deps: SetupRouterDeps = {}): Router {
         targets: effectiveTargets(draft, readConfig()),
       }),
     );
+  });
+
+  router.post("/apply", async (req, res) => {
+    const body = (req.body ?? {}) as { draft?: unknown; api_key?: unknown };
+    let draft;
+    try {
+      draft = normalizeDraft(body.draft);
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+      return;
+    }
+    if (applier.isRunning()) {
+      res.status(409).json({ error: "Setup is already running" });
+      return;
+    }
+    const api_key = typeof body.api_key === "string" ? body.api_key : undefined;
+    await streamJob(res, (onEvent) => applier.apply({ draft, api_key, notion_redirect_url: redirectUrlFor(req) }, onEvent));
+  });
+
+  router.post("/apply/retry", async (_req, res) => {
+    if (applier.isRunning()) {
+      res.status(409).json({ error: "Setup is already running" });
+      return;
+    }
+    await streamJob(res, (onEvent) => applier.retry(onEvent));
+  });
+
+  router.get("/apply/status", (_req, res) => {
+    res.json(applier.status());
   });
 
   return router;

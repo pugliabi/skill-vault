@@ -15,6 +15,8 @@ import { fileURLToPath } from "node:url";
 import { configRouter } from "./routes/config.ts";
 import { appRouter } from "./routes/app.ts";
 import { setupRouter } from "./routes/setup.ts";
+import { createSetupApplier } from "./services/setup/apply.ts";
+import { defaultApplyDeps } from "./services/setup/applyDeps.ts";
 import { buildVersion } from "./services/instanceLock.ts";
 import { createAppUpdater } from "./services/appUpdate.ts";
 import { getServerPort } from "./services/runtime.ts";
@@ -159,7 +161,9 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
   );
 
   // In-app updates (git checkout installs): background check + one-click apply.
-  const busyWithoutUpdate = (): boolean => anyNotionJobRunning() || anyTurnRunning() || foregroundCheckActive();
+  const setupApplier = createSetupApplier(defaultApplyDeps());
+  const busyWithoutUpdate = (): boolean =>
+    anyNotionJobRunning() || anyTurnRunning() || foregroundCheckActive() || setupApplier.isRunning();
   const updater = createAppUpdater({
     appDir: APP_ROOT,
     mode: opts.mode,
@@ -209,7 +213,7 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
     }),
   );
   app.use("/api/config", configRouter());
-  app.use("/api/setup", setupRouter());
+  app.use("/api/setup", setupRouter({ applier: setupApplier }));
   app.use("/api/skills", skillsRouter({ isBusy: anyNotionJobRunning }));
   app.use("/api/history", historyRouter());
   app.use("/api/adopt", adoptRouter());
