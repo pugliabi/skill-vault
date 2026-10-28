@@ -33,6 +33,8 @@ export interface SetupDraft {
   step: SetupStep;
   vault: SetupVault | null;
   machine_id?: string;
+  /** true once the user has been through the Skills step (Next or Skip). */
+  skills_reviewed?: boolean;
   targets: SetupTarget[] | null;
   skills: { adopt: { name: string; from: string }[]; push: string[] };
   notion: { data_source_id: string; data_source_name: string; add_last_edited: boolean } | null;

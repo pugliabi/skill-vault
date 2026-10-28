@@ -157,6 +157,7 @@ export function normalizeDraft(input: unknown): SetupDraft {
     step: STEPS.includes(o.step as SetupStep) ? (o.step as SetupStep) : "welcome",
     vault: normalizeVault(o.vault),
     ...(isStr(o.machine_id) && o.machine_id.trim() ? { machine_id: o.machine_id.trim() } : {}),
+    ...(o.skills_reviewed === true ? { skills_reviewed: true } : {}),
     targets: normalizeTargets(o.targets),
     skills: normalizeSkills(o.skills),
     notion: normalizeNotion(o.notion),

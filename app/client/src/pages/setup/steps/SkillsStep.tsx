@@ -48,13 +48,14 @@ export function SkillsStep({ draft, commit, goTo }: StepProps) {
   const [adopt, setAdopt] = useState<Set<string> | null>(null);
   const [push, setPush] = useState<Set<string> | null>(null);
 
-  // Start with everything ticked, or with the earlier picks when coming back.
+  // First visit: everything ticked. Once reviewed, come back with exactly the saved picks
+  // (possibly none), so declined skills stay declined and new candidates start unticked.
   useEffect(() => {
     if (!plan || adopt) return;
-    const hadPicks = draft.skills.adopt.length > 0 || draft.skills.push.length > 0;
-    setAdopt(new Set(hadPicks ? draft.skills.adopt.map((a) => a.name) : plan.adopt.map((a) => a.name)));
-    setPush(new Set(hadPicks ? draft.skills.push : plan.push.map((p) => p.name)));
-  }, [plan, adopt, draft.skills]);
+    const reviewed = draft.skills_reviewed === true;
+    setAdopt(new Set(reviewed ? draft.skills.adopt.map((a) => a.name) : plan.adopt.map((a) => a.name)));
+    setPush(new Set(reviewed ? draft.skills.push : plan.push.map((p) => p.name)));
+  }, [plan, adopt, draft.skills, draft.skills_reviewed]);
 
   const next = () => {
     if (!plan || !adopt || !push) return;
@@ -64,6 +65,7 @@ export function SkillsStep({ draft, commit, goTo }: StepProps) {
           adopt: plan.adopt.filter((a) => adopt.has(a.name)).map((a) => ({ name: a.name, from: a.from })),
           push: plan.push.filter((p) => push.has(p.name)).map((p) => p.name),
         },
+        skills_reviewed: true,
       },
       "notion",
     );
@@ -119,7 +121,7 @@ export function SkillsStep({ draft, commit, goTo }: StepProps) {
         </>
       )}
 
-      <StepNav onBack={() => goTo("targets")} onSkip={() => commit({ skills: { adopt: [], push: [] } }, "notion")} onNext={next} nextDisabled={!plan} />
+      <StepNav onBack={() => goTo("targets")} onSkip={() => commit({ skills: { adopt: [], push: [] }, skills_reviewed: true }, "notion")} onNext={next} nextDisabled={!plan} />
     </div>
   );
 }

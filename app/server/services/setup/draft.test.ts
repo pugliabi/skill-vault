@@ -57,6 +57,12 @@ test("normalizeDraft strips secrets and unknown keys", () => {
   assert.ok(!("extra" in d));
 });
 
+test("normalizeDraft keeps skills_reviewed only when it is exactly true", () => {
+  assert.equal(normalizeDraft({ ...startDraft(base), skills_reviewed: true }).skills_reviewed, true);
+  assert.equal("skills_reviewed" in normalizeDraft({ ...startDraft(base), skills_reviewed: "yes" }), false);
+  assert.equal("skills_reviewed" in normalizeDraft(startDraft(base)), false);
+});
+
 test("normalizeDraft derives a clone's vault path from dest + subdir", () => {
   const d = normalizeDraft({
     ...startDraft(base),
