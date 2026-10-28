@@ -5,11 +5,11 @@ import { recordActivity } from "../services/activity.ts";
 import { listSkills, readManifest, skillDir } from "../services/vault.ts";
 import { hashSkillDirNormalized } from "../services/skillHash.ts";
 import { NotionApi } from "../services/notion/api.ts";
+import { DATA_SOURCE_ID, LAST_EDITED_PROPERTY, chooseDataSource, openNotionApiAt } from "../services/notion/dataSource.ts";
 import { downloadAndExtract, openDownload } from "../services/notion/archive.ts";
 import { gitGuard as realGitGuard, type GuardStatus } from "../services/notion/checker.ts";
 import {
   NotionNotConnectedError,
-  callToolJson,
   disconnectNotion,
   finishNotionAuth,
   getNotionClient,
@@ -28,7 +28,6 @@ import {
   readNotionCache,
   readNotionSettings,
   setNotionLink,
-  writeNotionSettings,
 } from "../services/notion/store.ts";
 import { isSafeNameSegment } from "./skills.ts";
 import {
@@ -75,9 +74,7 @@ class NotionMovedError extends Error {
   }
 }
 
-export const LAST_EDITED_PROPERTY = "Last edited";
-/** A Notion data source id: a UUID, with or without dashes. */
-const DATA_SOURCE_ID = /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i;
+export { LAST_EDITED_PROPERTY };
 
 interface LinkJob {
   id: string;
@@ -112,11 +109,7 @@ export function redirectUrlFor(req: Request): string {
 }
 
 async function getApi(req: Request): Promise<ApiConn> {
-  const client = await getNotionClient(redirectUrlFor(req));
-  return {
-    api: new NotionApi((name, args) => callToolJson(client, name, args)),
-    close: () => client.close(),
-  };
+  return openNotionApiAt(redirectUrlFor(req));
 }
 
 /** Run `fn` with a connected API client (from `open`), always closing it afterwards. */
@@ -263,22 +256,8 @@ export function notionRouter(deps: NotionRouterDeps = {}): Router {
     }
     const dsName = typeof name === "string" ? name : "";
     try {
-      const { last_edited_property, warning } = await withApi(req, async (api) => {
-        let has = await api.hasProperty(id, LAST_EDITED_PROPERTY, "last_edited_time");
-        let warning: string | undefined;
-        if (!has && add_last_edited === true) {
-          try {
-            await api.addLastEditedProperty(id, LAST_EDITED_PROPERTY);
-            has = await api.hasProperty(id, LAST_EDITED_PROPERTY, "last_edited_time");
-            if (!has) warning = `Could not verify the "${LAST_EDITED_PROPERTY}" property after adding it`;
-          } catch (err) {
-            warning = `Could not add "${LAST_EDITED_PROPERTY}": ${(err as Error).message}`;
-          }
-        }
-        return { last_edited_property: has ? LAST_EDITED_PROPERTY : null, warning };
-      });
-      writeNotionSettings(vp, { data_source_id: id, data_source_name: dsName, last_edited_property });
-      res.json({ ok: true, last_edited_property, ...(warning ? { warning } : {}) });
+      const r = await withApi(req, (api) => chooseDataSource(api, vp, { id, name: dsName, add_last_edited: add_last_edited === true }));
+      res.json({ ok: true, ...r });
     } catch (err) {
       sendError(res, err);
     }
