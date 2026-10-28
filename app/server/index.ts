@@ -14,6 +14,7 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { configRouter } from "./routes/config.ts";
 import { appRouter } from "./routes/app.ts";
+import { setupRouter } from "./routes/setup.ts";
 import { buildVersion } from "./services/instanceLock.ts";
 import { createAppUpdater } from "./services/appUpdate.ts";
 import { getServerPort } from "./services/runtime.ts";
@@ -208,6 +209,7 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
     }),
   );
   app.use("/api/config", configRouter());
+  app.use("/api/setup", setupRouter());
   app.use("/api/skills", skillsRouter({ isBusy: anyNotionJobRunning }));
   app.use("/api/history", historyRouter());
   app.use("/api/adopt", adoptRouter());
