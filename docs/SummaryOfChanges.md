@@ -32,13 +32,23 @@ Running log of change sets, newest first. Detailed per-release notes live in
   use the same-origin guard.
 
 ### Files Modified
-- `app/server/routes/setup.ts`, `app/server/services/setup/*` (draft, inspect,
-  targets, clonePreview, plan, apply, applyDeps, folderDialog, types; + tests),
-  `app/scripts/pick-folder.ps1` — new
-- `app/server/{index.ts,routes/notion.ts,routes/sameOrigin.ts}`,
-  `services/{appConfig.ts,notion/connection.ts}`
-- `app/client/src/pages/setup/*`, `app/client/src/lib/setup.ts` — new;
-  `pages/Settings.tsx`, `components/CommandBar.tsx`, `App.tsx`
+- New server: `app/server/routes/{setup,sameOrigin}.ts`,
+  `app/server/services/{pushSkill,notion/dataSource}.ts`,
+  `app/server/services/setup/{apply,applyDeps,clonePreview,draft,folderDialog,inspect,plan,targets,types}.ts`,
+  `app/scripts/pick-folder.ps1` (+ tests: `routes/{setup,sameOrigin}.test.ts`,
+  `services/{pushSkill,appConfig.setup,claude/authStatus,notion/connection.signin,notion/dataSource}.test.ts`,
+  `services/setup/{apply,clonePreview,draft,folderDialog,inspect,plan,targets}.test.ts`)
+- Modified server: `app/server/index.ts`,
+  `app/server/routes/{app,notion,push}.ts` (+ `notion.test.ts`),
+  `app/server/services/{appConfig,appUpdate}.ts`,
+  `app/server/services/claude/cli.ts`,
+  `app/server/services/notion/{connection,store}.ts`
+- New client: `app/client/src/lib/setup.ts`,
+  `app/client/src/pages/setup/{SetupGuide.tsx,types.ts,ui.tsx}`,
+  `app/client/src/pages/setup/steps/{VaultStep,TargetsStep,SkillsStep,NotionStep,AssistantStep,ReviewStep}.tsx`
+- Modified client: `app/client/src/{App.tsx,lib/api.ts}`,
+  `app/client/src/components/CommandBar.tsx`, `app/client/src/pages/Settings.tsx`
+- Removed: `app/client/src/pages/Setup.tsx` (replaced by the guide)
 - Docs: `docs/{getting-started,features,configuration,tech_reference,troubleshooting,faq,changelog,SummaryOfChanges,INDEX}.md`, `app/CHANGELOG.md`
 
 ### Impact

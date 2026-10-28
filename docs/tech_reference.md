@@ -205,8 +205,9 @@ Settings to see what was saved before pressing Finish again."
 While Finish runs the server counts as busy for both the idle auto-stop and the
 in-app updater. A pending Notion sign-in counts for the idle auto-stop only
 (the app window is on notion.com meanwhile, so no window is connected), and
-only for 10 minutes at most; it is cleared when the sign-in finishes, fails or
-the account is disconnected. The updater doesn't wait for it: the sign-in state
+only for 10 minutes at most. It is cleared when the sign-in finishes (success,
+or a failed code exchange) or when Notion is disconnected; a denied sign-in
+(no code comes back) clears only at the 10-minute cap. The updater doesn't wait for it: the sign-in state
 is on disk and the restarted server keeps the same port.
 
 ### Folder dialog
