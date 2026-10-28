@@ -28,6 +28,7 @@ import {
   readNotionCache,
   readNotionSettings,
   setNotionLink,
+  writeNotionAuth,
 } from "../services/notion/store.ts";
 import { isSafeNameSegment } from "./skills.ts";
 import {
@@ -165,7 +166,7 @@ function vaultPathOr409(res: Response): string | null {
  *
  *   GET  /status                     connection + settings summary
  *   POST /connect                    start OAuth → {status:"connected"} | {status:"redirect", url}
- *   GET  /callback                   OAuth redirect target → 302 to /settings?notion=…
+ *   GET  /callback                   OAuth redirect target → 302 to /settings or /setup ?notion=…
  *   POST /disconnect                 forget tokens
  *   GET  /data-sources               candidate Skills data sources
  *   POST /data-source                choose one (+ optionally add "Last edited")
@@ -202,9 +203,11 @@ export function notionRouter(deps: NotionRouterDeps = {}): Router {
   });
 
   router.post("/connect", async (req, res) => {
+    const returnTo = (req.body as { return_to?: unknown } | undefined)?.return_to === "setup" ? "setup" : "settings";
     try {
       const r = await startNotionAuth(redirectUrlFor(req));
       if (r.status === "connected") await probeTools(req);
+      else writeNotionAuth({ ...readNotionAuth(), return_to: returnTo });
       res.json(r);
     } catch (err) {
       sendError(res, err);
@@ -212,6 +215,9 @@ export function notionRouter(deps: NotionRouterDeps = {}): Router {
   });
 
   router.get("/callback", async (req, res) => {
+    const { return_to, ...rest } = readNotionAuth();
+    if (return_to) writeNotionAuth(rest);
+    const page = return_to === "setup" ? "/setup" : "/settings";
     const code = typeof req.query.code === "string" ? req.query.code : "";
     const state = typeof req.query.state === "string" ? req.query.state : undefined;
     try {
@@ -221,9 +227,9 @@ export function notionRouter(deps: NotionRouterDeps = {}): Router {
       }
       await finishNotionAuth(redirectUrlFor(req), code, state);
       await probeTools(req);
-      res.redirect(302, "/settings?notion=connected");
+      res.redirect(302, `${page}?notion=connected`);
     } catch (err) {
-      res.redirect(302, `/settings?notion=error&message=${encodeURIComponent((err as Error).message)}`);
+      res.redirect(302, `${page}?notion=error&message=${encodeURIComponent((err as Error).message)}`);
     }
   });
 

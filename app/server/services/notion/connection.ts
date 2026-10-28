@@ -52,6 +52,15 @@ function clearState(): void {
   writeNotionAuth(rest);
 }
 
+/** A sign-in sends the app window to notion.com; the idle auto-stop must wait for it — up to this long. */
+const SIGN_IN_BUSY_MS = 10 * 60_000;
+let signInStartedAt: number | null = null;
+
+/** True while a Notion sign-in started here hasn't come back yet (capped at 10 minutes). */
+export function notionSignInPending(now: number = Date.now()): boolean {
+  return signInStartedAt !== null && now - signInStartedAt < SIGN_IN_BUSY_MS;
+}
+
 export async function startNotionAuth(
   redirectUrl: string,
   connect: NotionConnector = connectToNotion,
@@ -65,7 +74,10 @@ export async function startNotionAuth(
     return { status: "connected" };
   } catch (err) {
     const url = provider.pendingAuthUrl();
-    if (err instanceof UnauthorizedError && url) return { status: "redirect", url };
+    if (err instanceof UnauthorizedError && url) {
+      signInStartedAt = Date.now();
+      return { status: "redirect", url };
+    }
     throw err;
   }
 }
@@ -83,6 +95,7 @@ export async function finishNotionAuth(
   } finally {
     // A state value is single-use, whatever the outcome.
     clearState();
+    signInStartedAt = null;
   }
 }
 
@@ -113,6 +126,7 @@ export async function getNotionClient(
 }
 
 export async function disconnectNotion(): Promise<void> {
+  signInStartedAt = null;
   clearNotionAuth();
 }
 

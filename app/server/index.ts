@@ -54,6 +54,7 @@ import {
 import { readAppConfig } from "./services/appConfig.ts";
 import { createHistoryRecorder, scanForUnrecordedChangesAsync } from "./services/historyRecorder.ts";
 import { startNotionChecker } from "./services/notion/checker.ts";
+import { notionSignInPending } from "./services/notion/connection.ts";
 import { findFreePort } from "./services/freePort.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -197,7 +198,8 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
     setActiveWatcher(null);
   };
   // Work that must not be cut off by an idle stop (launcher --exit-when-idle).
-  app.locals.isBusy = (): boolean => busyWithoutUpdate() || updater.isApplying();
+  // A pending Notion sign-in counts: the app window is on notion.com meanwhile.
+  app.locals.isBusy = (): boolean => busyWithoutUpdate() || updater.isApplying() || notionSignInPending();
 
   app.use(
     "/api",

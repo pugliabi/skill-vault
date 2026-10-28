@@ -27,6 +27,8 @@ export interface NotionAuthFile {
   tokens?: unknown;
   code_verifier?: string;
   state?: string;
+  /** Which page the OAuth callback returns to (set by POST /connect; single-use). */
+  return_to?: "settings" | "setup";
 }
 
 export interface NotionCacheRow {

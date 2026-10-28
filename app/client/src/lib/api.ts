@@ -400,9 +400,9 @@ export const api = {
 
   // ── notion (Phase 2: connect + link) ────────────────────────────
   notionStatus: () => request<NotionStatusResponse>("GET", "/api/notion/status"),
-  notionConnect: () =>
+  notionConnect: (returnTo?: "setup") =>
     request<{ status: "connected" } | { status: "redirect"; url: string }>(
-      "POST", "/api/notion/connect",
+      "POST", "/api/notion/connect", returnTo ? { return_to: returnTo } : undefined,
     ),
   notionDisconnect: () => request<{ ok: boolean }>("POST", "/api/notion/disconnect"),
   notionDataSources: () =>

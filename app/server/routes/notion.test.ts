@@ -173,3 +173,15 @@ test("OAuth redirect URL uses the local port, never the Host header", async () =
   const req = { socket: { localPort: 5174 }, get: () => "evil.example:80", protocol: "https" } as any;
   assert.equal(redirectUrlFor(req), "http://localhost:5174/api/notion/callback");
 });
+
+test("the sign-in callback returns to the page that started it", async () => {
+  const authFile = path.join(fakeHome, ".skill-vault", "notion-auth.json");
+  fs.writeFileSync(authFile, JSON.stringify({ return_to: "setup" }));
+  const toSetup = await fetch(`${base}/notion/callback?error=access_denied`, { redirect: "manual" });
+  assert.equal(toSetup.status, 302);
+  assert.match(toSetup.headers.get("location") ?? "", /^\/setup\?notion=error&message=/);
+  assert.equal(JSON.parse(fs.readFileSync(authFile, "utf8")).return_to, undefined, "return_to is single-use");
+
+  const toSettings = await fetch(`${base}/notion/callback?error=access_denied`, { redirect: "manual" });
+  assert.match(toSettings.headers.get("location") ?? "", /^\/settings\?notion=error&message=/);
+});
