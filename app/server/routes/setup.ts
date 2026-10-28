@@ -11,6 +11,7 @@
  *   POST   /inspect        { path } — what a picked folder holds (empty, vault, git repo, ...)
  *   GET    /targets        { targets } — the known tools and whether each is on this PC
  *   POST   /clone-preview  { url } → { candidates } — look inside a vault repo, keeping no copy
+ *   POST   /plan           { draft } → SkillsPlan — which skills to adopt, push, or leave differing
  */
 import os from "node:os";
 import { Router } from "express";
@@ -19,6 +20,7 @@ import { defaultRun, type Run } from "../services/appUpdate.ts";
 import { configFingerprint, deleteDraft, normalizeDraft, readDraft, startDraft, writeDraft } from "../services/setup/draft.ts";
 import { CloneError, isCloneUrl, previewClone } from "../services/setup/clonePreview.ts";
 import { inspectFolder } from "../services/setup/inspect.ts";
+import { effectiveTargets, planSkills } from "../services/setup/plan.ts";
 import { detectTargets } from "../services/setup/targets.ts";
 import type { SetupBase } from "../services/setup/types.ts";
 import type { AppConfig } from "../types/vault.ts";
@@ -104,6 +106,26 @@ export function setupRouter(deps: SetupRouterDeps = {}): Router {
       if (err instanceof CloneError) res.status(400).json({ error: err.message });
       else res.status(500).json({ error: (err as Error).message });
     }
+  });
+
+  router.post("/plan", (req, res) => {
+    let draft;
+    try {
+      draft = normalizeDraft((req.body as { draft?: unknown } | undefined)?.draft);
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+      return;
+    }
+    if (!draft.vault) {
+      res.status(400).json({ error: "Choose a vault first." });
+      return;
+    }
+    res.json(
+      planSkills({
+        vault: { mode: draft.vault.mode, path: draft.vault.path, clone_skill_names: draft.vault.clone?.skill_names },
+        targets: effectiveTargets(draft, readConfig()),
+      }),
+    );
   });
 
   return router;

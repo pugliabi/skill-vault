@@ -123,3 +123,13 @@ test("clone-preview: a git failure is a 400 with a plain message", async () => {
   assert.equal(res.status, 400);
   assert.match((await res.json()).error, /wasn't found/);
 });
+
+test("plan: needs a vault in the draft", async () => {
+  const { startDraft } = await import("../services/setup/draft.ts");
+  const url = await serve(setup.setupRouter({ readConfig: () => ({ vault_path: null, providers: [], default_targets: [] }) }));
+  const draft = startDraft({ vault_path: null, agent_locations: {}, default_targets: [], machine_id: null, repo_url: null });
+  assert.equal((await fetch(`${url}/plan`, json({ draft }))).status, 400);
+  const withVault = { ...draft, vault: { mode: "new", path: path.join(os.tmpdir(), "sv-none-xyz") } };
+  const plan = await (await fetch(`${url}/plan`, json({ draft: withVault }))).json();
+  assert.deepEqual(plan, { adopt: [], adopt_conflicts: [], push: [], differs: [] });
+});
