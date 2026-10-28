@@ -4,7 +4,44 @@ All notable changes to the Skill Vault App are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com); versions use semver
 (the app package is `0.x` — minor bumps carry user-facing feature batches).
 
-## [Unreleased]
+## [Unreleased] - 2026-10-28
+
+### Added
+- **First-run setup guide** replaces the single-box Setup page. Six steps
+  (vault, tools, skills, Notion, assistant, review) with Back / Skip / Next;
+  nothing is saved until **Finish**, and a draft (`~/.skill-vault/setup-draft.json`,
+  no secrets) lets you resume.
+  - **Vault**: start a new one, use a folder you have, or clone from GitHub
+    with a preview of the skills found (temporary copy, removed afterwards).
+    **Browse…** opens the Windows folder dialog on this PC. Unreadable folders
+    and half-read repos get plain messages.
+  - **Tools**: the six known tools detected, with default targets and custom
+    targets.
+  - **Skills**: adopt and push checklists built from a plan; your picks are
+    remembered when you return, and skills that appear later start unticked.
+  - **Notion** and **Assistant** steps (the API key is sent only at Finish, and
+    only when "Use an API key" is chosen).
+  - **Finish**: a numbered review, live progress, **Retry failed items**, and
+    honest reporting of refused, dropped and still-running jobs.
+  - Re-run any time from **Settings → Run setup guide…** or the command bar,
+    filled in with the current settings.
+- `/api/setup`: `GET /capabilities`, `GET/PUT/DELETE /draft`, `POST /draft/start`,
+  `POST /pick-folder`, `POST /inspect`, `GET /targets`, `POST /clone-preview`,
+  `POST /plan`, `GET /assistant`, `POST /apply`, `POST /apply/retry`,
+  `GET /apply/status`.
+
+### Fixed
+- Notion sign-in returns to the page that started it (`POST /api/notion/connect`
+  takes `return_to`), and a slow Notion sign-in no longer lets the installed
+  app stop itself while the window is on notion.com (10-minute cap).
+- Finish: a new-vault folder that only holds the empty skeleton from an earlier
+  failed Finish counts as empty, so pressing Finish again works; a failed
+  watcher restart after the settings were saved no longer stops Finish.
+
+### Changed
+- Push and Notion database selection now share services with the setup guide.
+
+## [Unreleased] - 2026-10-27
 
 ### Fixed
 - Notion push/pull of single-file skills: Notion now returns these as inline

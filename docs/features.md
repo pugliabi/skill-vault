@@ -99,6 +99,10 @@ sv sync-from LAPTOP  # compare another device's snapshot and pick what to sync
 
 The app's **Devices** page shows the same snapshots with a visual compare. See [vault-format.md](./vault-format.md) for the snapshot schema.
 
+## Setup guide — first run and re-run
+
+A six-step guide opens on first run (and any time from **Settings → Run setup guide…** or the command bar): **Vault** (new, existing, or cloned from GitHub; **Browse…** opens the Windows folder picker), **Tools** (known tools detected, plus defaults), **Skills** (adopt from your tools, push to your defaults), **Notion** (connect and pick the Skills database), **Assistant** (Claude login or API key), and **Finish** (a list of exactly what will happen, then live progress with retry for anything that fails). Nothing is saved until Finish, and you can re-run it from Settings with your current settings filled in. Details: [Getting Started](./getting-started.md#first-run-the-setup-guide).
+
 ## Providers — manage where skills go
 
 Providers are named directories skills can be pushed to — one per agent tool, plus any custom location (a project repo's skills folder, for example). Manage them in the app's Settings page (add/rename/remove with live path validation, "★ All providers" bulk add) or via `sv config`. Both tools read the same `agent_locations` map, so changes made in either are visible to both.

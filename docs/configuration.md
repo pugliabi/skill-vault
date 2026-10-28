@@ -20,7 +20,7 @@ Sensitive values (API keys) are masked in `sv config show` output.
 
 - **Purpose**: Absolute path to the vault root — the directory holding `skills.json`, `skills/`, `staging/`, `snapshots/`
 - **Type**: string
-- **Default**: Required — set by `sv init` or the app's Setup page
+- **Default**: Required — set by `sv init` or the app's setup guide
 - **Example**: `"vault_path": "C:\\Github\\my-skills"`
 
 ### agent_locations
@@ -144,6 +144,10 @@ The Start Menu launcher keeps a few files in `~/.skill-vault/`:
 - `logs/launch.log` — the launcher's own steps and any rebuild output.
 
 All are safe to delete while the app is closed.
+
+## Setup guide files (per machine)
+
+- `setup-draft.json` — the setup guide's answers while it's open (vault choice, tools, picks, Notion database, assistant mode). Never holds your API key or Notion sign-in. Deleted when Finish saves your settings, or when you press Start over / Close. Safe to delete.
 
 A server started from the Start Menu always binds `127.0.0.1` (only this computer can reach it), whatever `HOST` says; to expose the app on your LAN, run it from a terminal instead: `npm run dev -- --host 0.0.0.0`.
 

@@ -4,6 +4,24 @@ User-facing history of the Skill Vault project (app + CLI). The app keeps a
 more detailed log in [app/CHANGELOG.md](../app/CHANGELOG.md). Versions follow
 semver; the project is pre-1.0, so minor versions carry feature batches.
 
+## [Unreleased] - 2026-10-28
+
+### Added
+- **First-run setup guide** — six steps (vault, tools, skills, Notion,
+  assistant, review) with nothing saved until **Finish**: start a new vault,
+  use a folder you have, or clone one from GitHub with a preview; a Windows
+  folder dialog behind **Browse…**; detected tools with default targets;
+  adopt and push checklists; Notion and assistant steps; live progress with
+  **Retry failed items**; resume after closing; and re-run from **Settings →
+  Run setup guide…** or the command bar. ([getting started](./getting-started.md#first-run-the-setup-guide))
+
+### Fixed
+- Notion sign-in returns to the page that started it, and a slow Notion
+  sign-in no longer lets the installed app stop itself.
+
+### Changed
+- Push and Notion database selection share services with the setup guide.
+
 ## [Unreleased] - 2026-10-27
 
 ### Added

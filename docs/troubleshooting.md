@@ -104,6 +104,36 @@
 
 **Solution**: `sv config show` to verify `vault_path`; fix with `sv config set vault_path <path>`. Make sure the app runs as the same OS user as the CLI.
 
+## Setup guide
+
+### Browse… does nothing, or the folder dialog is behind the window
+
+The dialog opens on top of the app; if another program took focus, look for it in the taskbar. Browse only appears when the app runs on this PC (not over the LAN or on a Mac); you can always paste a path instead.
+
+### "Skill Vault can't open this folder"
+
+The folder exists but Windows won't let the app read it. Check the folder's permissions or pick another one.
+
+### "The repo wasn't found, or it needs a sign-in this PC doesn't have"
+
+Check the URL. For a private repo, sign in to GitHub with Git on this PC first (for example, clone any private repo once in a terminal so Git Credential Manager saves your sign-in), then try again. The same applies if the preview fails part-way with a plain message: the connection dropped or the sign-in expired, so try again.
+
+### Notion sign-in came back with an error
+
+The guide returns to the Notion step with Notion's reason. Press **Connect Notion** again, or skip the step and connect later in Settings → Notion.
+
+### Setup finished with "items need attention"
+
+Your vault and settings are saved. Press **Retry failed items**, or finish those skills on the Adopt page. Skills that were already moved stay where they are.
+
+### Finish says "Lost contact with setup"
+
+The app stopped answering while Finish was running. Check Settings to see what was saved before pressing Finish again. A new-vault folder left with only an empty `skills/` folder and an empty `skills.json` counts as empty, so pressing Finish again is safe.
+
+### Finish says "Settings saved. Restart Skill Vault to watch the new folders."
+
+Your settings were written, but the app couldn't restart its file watcher. Close and reopen Skill Vault; nothing else is needed.
+
 ## Discovery and scanning
 
 ### Problem: `sv scan` reports "No API key found"
@@ -154,7 +184,7 @@ Or set the ANTHROPIC_API_KEY environment variable.
 
 The reason line tells you which prerequisite failed:
 - **claude.exe not found / claude --version failed** — install [Claude Code](https://claude.com/claude-code) and sign in (`claude` must work in a terminal). On Windows the real `claude.exe` must be resolvable, not just a shim; reinstalling the CLI normally fixes this.
-- **vault not configured** — finish the Setup page first.
+- **vault not configured** — finish the setup guide first.
 - **assistant plugin bundle missing** — the app's `assistant-plugin/` folder is gone; re-pull or reinstall the app.
 
 Use the Retry button after fixing; status is cached for 60 seconds.
