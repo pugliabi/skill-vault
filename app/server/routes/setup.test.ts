@@ -86,3 +86,13 @@ test("draft: start, save, read, stale, delete", async () => {
   assert.equal((await (await fetch(`${url}/draft`)).json()).draft, null);
   fs.rmSync(home, { recursive: true, force: true });
 });
+
+test("inspect: needs a path, then describes the folder", async () => {
+  const notGit = async () => ({ code: 128, stdout: "", stderr: "" });
+  const url = await serve(setup.setupRouter({ run: notGit }));
+  assert.equal((await fetch(`${url}/inspect`, json({}))).status, 400);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sv-setup-i-"));
+  const info = await (await fetch(`${url}/inspect`, json({ path: dir }))).json();
+  assert.equal(info.kind, "empty");
+  fs.rmSync(dir, { recursive: true, force: true });
+});

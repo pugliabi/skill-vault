@@ -12,7 +12,9 @@
 import os from "node:os";
 import { Router } from "express";
 import { readSetupBase } from "../services/appConfig.ts";
+import { defaultRun, type Run } from "../services/appUpdate.ts";
 import { configFingerprint, deleteDraft, normalizeDraft, readDraft, startDraft, writeDraft } from "../services/setup/draft.ts";
+import { inspectFolder } from "../services/setup/inspect.ts";
 import type { SetupBase } from "../services/setup/types.ts";
 import { isLoopbackRequest, refuseCrossSiteWrites } from "./sameOrigin.ts";
 
@@ -22,6 +24,8 @@ export interface SetupRouterDeps {
   home?: () => string;
   /** Current config fields the guide starts from. */
   readBase?: () => SetupBase;
+  /** Runs git (tests pass a fake). */
+  run?: Run;
 }
 
 export function setupRouter(deps: SetupRouterDeps = {}): Router {
@@ -29,6 +33,7 @@ export function setupRouter(deps: SetupRouterDeps = {}): Router {
   const platform = deps.platform ?? process.platform;
   const home = deps.home ?? (() => os.homedir());
   const readBase = deps.readBase ?? readSetupBase;
+  const run = deps.run ?? defaultRun;
   router.use(refuseCrossSiteWrites);
 
   router.get("/capabilities", (req, res) => {
@@ -61,6 +66,15 @@ export function setupRouter(deps: SetupRouterDeps = {}): Router {
   router.delete("/draft", (_req, res) => {
     deleteDraft(home());
     res.status(204).end();
+  });
+
+  router.post("/inspect", async (req, res) => {
+    const p = (req.body as { path?: unknown } | undefined)?.path;
+    if (typeof p !== "string" || !p.trim()) {
+      res.status(400).json({ error: "path is required" });
+      return;
+    }
+    res.json(await inspectFolder(p.trim(), { run }));
   });
 
   return router;
