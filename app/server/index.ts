@@ -215,7 +215,7 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
     }),
   );
   app.use("/api/config", configRouter());
-  app.use("/api/setup", setupRouter({ applier: setupApplier }));
+  app.use("/api/setup", setupRouter({ applier: setupApplier, appRoot: APP_ROOT }));
   app.use("/api/skills", skillsRouter({ isBusy: anyNotionJobRunning }));
   app.use("/api/history", historyRouter());
   app.use("/api/adopt", adoptRouter());

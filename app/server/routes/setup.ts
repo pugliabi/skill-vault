@@ -15,6 +15,7 @@
  *   POST   /apply          { draft, api_key? } — run the Finish job, streaming NDJSON events (409 while running)
  *   POST   /apply/retry    re-run only the items that failed, streaming NDJSON events
  *   GET    /apply/status   the Finish job's state (running, ok, events, failed items)
+ *   POST   /pick-folder    { title?, initial? } → { path } | { cancelled } — the Windows folder dialog
  */
 import os from "node:os";
 import { Router, type Response } from "express";
@@ -27,6 +28,7 @@ import { defaultApplyDeps } from "../services/setup/applyDeps.ts";
 import { inspectFolder } from "../services/setup/inspect.ts";
 import { effectiveTargets, planSkills } from "../services/setup/plan.ts";
 import { detectTargets } from "../services/setup/targets.ts";
+import { PickerBusyError, createFolderPicker, type FolderPicker } from "../services/setup/folderDialog.ts";
 import type { SetupBase } from "../services/setup/types.ts";
 import type { AppConfig } from "../types/vault.ts";
 import { redirectUrlFor } from "./notion.ts";
@@ -46,6 +48,10 @@ export interface SetupRouterDeps {
   tmpRoot?: string;
   /** The Finish job (server/index.ts passes the shared one so busy checks see it). */
   applier?: SetupApplier;
+  /** The folder dialog (tests pass a fake). */
+  picker?: FolderPicker;
+  /** The app folder (holds scripts/pick-folder.ps1); without it the dialog is unavailable. */
+  appRoot?: string;
 }
 
 /** Run a job and stream its events as NDJSON (same format as POST /api/app/update). */
@@ -68,6 +74,7 @@ export function setupRouter(deps: SetupRouterDeps = {}): Router {
   const run = deps.run ?? defaultRun;
   const readConfig = deps.readConfig ?? readAppConfig;
   const applier = deps.applier ?? createSetupApplier(defaultApplyDeps(deps.home));
+  const picker = deps.picker ?? (deps.appRoot ? createFolderPicker({ appRoot: deps.appRoot }) : null);
   router.use(refuseCrossSiteWrites);
 
   router.get("/capabilities", (req, res) => {
@@ -176,6 +183,28 @@ export function setupRouter(deps: SetupRouterDeps = {}): Router {
 
   router.get("/apply/status", (_req, res) => {
     res.json(applier.status());
+  });
+
+  router.post("/pick-folder", async (req, res) => {
+    if (platform !== "win32" || !isLoopbackRequest(req)) {
+      res.status(403).json({ error: "The folder dialog only works on this PC. Type the path instead." });
+      return;
+    }
+    if (!picker) {
+      res.status(503).json({ error: "The folder dialog isn't available. Type the path instead." });
+      return;
+    }
+    const body = (req.body ?? {}) as { title?: unknown; initial?: unknown };
+    try {
+      res.json(
+        await picker.pick({
+          title: typeof body.title === "string" ? body.title.slice(0, 200) : undefined,
+          initial: typeof body.initial === "string" ? body.initial : undefined,
+        }),
+      );
+    } catch (err) {
+      res.status(err instanceof PickerBusyError ? 409 : 500).json({ error: (err as Error).message });
+    }
   });
 
   return router;

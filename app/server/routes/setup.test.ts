@@ -167,3 +167,19 @@ test("apply: streams NDJSON events; 400 for a bad draft; 409 while running", asy
   assert.equal((await fetch(`${busy}/apply`, json({ draft }))).status, 409);
   assert.deepEqual(await (await fetch(`${url}/apply/status`)).json(), { running: false, ok: null, vault_path: null, events: [], failed: [] });
 });
+
+test("pick-folder: only on Windows, only from this PC, one at a time", async () => {
+  const picker = { isOpen: () => false, pick: async () => ({ path: "C:\\picked" }) };
+  const win = await serve(setup.setupRouter({ platform: "win32", picker }));
+  assert.deepEqual(await (await fetch(`${win}/pick-folder`, json({ title: "Vault" }))).json(), { path: "C:\\picked" });
+
+  const linux = await serve(setup.setupRouter({ platform: "linux", picker }));
+  assert.equal((await fetch(`${linux}/pick-folder`, json({}))).status, 403);
+
+  const { PickerBusyError } = await import("../services/setup/folderDialog.ts");
+  const busy = await serve(setup.setupRouter({ platform: "win32", picker: { isOpen: () => true, pick: async () => { throw new PickerBusyError("open"); } } }));
+  assert.equal((await fetch(`${busy}/pick-folder`, json({}))).status, 409);
+
+  const none = await serve(setup.setupRouter({ platform: "win32" }));
+  assert.equal((await fetch(`${none}/pick-folder`, json({}))).status, 503);
+});
