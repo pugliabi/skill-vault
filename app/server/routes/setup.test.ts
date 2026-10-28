@@ -96,3 +96,15 @@ test("inspect: needs a path, then describes the folder", async () => {
   assert.equal(info.kind, "empty");
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test("targets: lists the known tools for the injected home", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sv-setup-t-"));
+  fs.mkdirSync(path.join(home, ".claude", "skills"), { recursive: true });
+  const url = await serve(
+    setup.setupRouter({ home: () => home, readConfig: () => ({ vault_path: null, providers: [], default_targets: [] }) }),
+  );
+  const { targets } = await (await fetch(`${url}/targets`)).json();
+  assert.equal(targets[0].id, "claude");
+  assert.equal(targets[0].status, "found");
+  fs.rmSync(home, { recursive: true, force: true });
+});

@@ -11,11 +11,13 @@
  */
 import os from "node:os";
 import { Router } from "express";
-import { readSetupBase } from "../services/appConfig.ts";
+import { readAppConfig, readSetupBase } from "../services/appConfig.ts";
 import { defaultRun, type Run } from "../services/appUpdate.ts";
 import { configFingerprint, deleteDraft, normalizeDraft, readDraft, startDraft, writeDraft } from "../services/setup/draft.ts";
 import { inspectFolder } from "../services/setup/inspect.ts";
+import { detectTargets } from "../services/setup/targets.ts";
 import type { SetupBase } from "../services/setup/types.ts";
+import type { AppConfig } from "../types/vault.ts";
 import { isLoopbackRequest, refuseCrossSiteWrites } from "./sameOrigin.ts";
 
 export interface SetupRouterDeps {
@@ -24,6 +26,8 @@ export interface SetupRouterDeps {
   home?: () => string;
   /** Current config fields the guide starts from. */
   readBase?: () => SetupBase;
+  /** Current app config (providers, default targets). */
+  readConfig?: () => AppConfig;
   /** Runs git (tests pass a fake). */
   run?: Run;
 }
@@ -34,6 +38,7 @@ export function setupRouter(deps: SetupRouterDeps = {}): Router {
   const home = deps.home ?? (() => os.homedir());
   const readBase = deps.readBase ?? readSetupBase;
   const run = deps.run ?? defaultRun;
+  const readConfig = deps.readConfig ?? readAppConfig;
   router.use(refuseCrossSiteWrites);
 
   router.get("/capabilities", (req, res) => {
@@ -75,6 +80,10 @@ export function setupRouter(deps: SetupRouterDeps = {}): Router {
       return;
     }
     res.json(await inspectFolder(p.trim(), { run }));
+  });
+
+  router.get("/targets", (_req, res) => {
+    res.json({ targets: detectTargets(home(), readConfig()) });
   });
 
   return router;
