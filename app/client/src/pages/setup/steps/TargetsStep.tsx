@@ -47,6 +47,7 @@ export function TargetsStep({ draft, commit, goTo, folderDialog }: StepProps) {
   const nameTaken = rows?.some((r) => r.id.toLowerCase() === name.trim().toLowerCase()) ?? false;
   const badName = /[\\/]/.test(name);
   const addCustom = () => {
+    if (!rows) return;
     setRows((rs) => [...(rs ?? []), { id: name.trim(), path: folder.trim(), enabled: true, is_default: true, known: false, label: name.trim() }]);
     setName("");
     setFolder("");
@@ -98,7 +99,7 @@ export function TargetsStep({ draft, commit, goTo, folderDialog }: StepProps) {
           <input aria-label="Target name" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Name, e.g. my-project" style={inputStyle} />
           <FolderField id="custom-target" label="its skills folder" value={folder} onChange={setFolder} folderDialog={folderDialog} dialogTitle="Choose the tool's skills folder" />
           <div>
-            <Button onClick={addCustom} disabled={!name.trim() || !folder.trim() || nameTaken || badName}>
+            <Button onClick={addCustom} disabled={!rows || !name.trim() || !folder.trim() || nameTaken || badName}>
               Add target
             </Button>
           </div>
