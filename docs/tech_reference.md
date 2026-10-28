@@ -163,8 +163,8 @@ remote address and a loopback `Host`.
 `~/.skill-vault/setup-draft.json`, per machine, never in the vault. The server
 normalises every draft it reads or writes (unknown fields dropped, values
 checked), and it never holds secrets: no API key, no Notion sign-in. `base` is a
-fingerprint of `vault_path`, `agent_locations`, `default_targets`, `machine_id`
-and `repo_url` at the time the draft started; when it no longer matches, GET
+fingerprint of `vault_path`, `agent_locations` and `default_targets` at the
+time the draft started; when it no longer matches, GET
 reports `stale: true` and the guide offers Start over instead of Resume. The
 `skills_reviewed` field records that the Skills step has been visited, so a
 return trip restores exactly the saved picks (an empty pick list means Skip,
@@ -179,7 +179,7 @@ targets, Notion or assistant means "leave as it is".
    "new vault" folder must be missing or empty; the empty skeleton an earlier
    failed Finish left behind (an empty `skills/` and a `skills.json` with no
    skills) counts as empty, so pressing Finish again just works.
-2. **Config**: one `writeAppConfig` call (`vault_path`, providers,
+2. **Config**: one `writeSetupConfig` call (`vault_path`, providers,
    `default_targets`, `repo_url`, `machine_id`, `assistant`); keys the app
    doesn't own are kept. Then the file watcher is rebuilt. If the settings were
    written but the watcher restart fails, Finish carries on and reports

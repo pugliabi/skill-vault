@@ -69,10 +69,10 @@ test("normalizeDraft derives a clone's vault path from dest + subdir", () => {
     vault: {
       mode: "clone",
       path: "ignored",
-      clone: { url: "https://github.com/me/v.git", dest: path.join("C:", "x", "v"), subdir: "skills", skill_names: ["a", 3], notion: null },
+      clone: { url: "https://github.com/me/v.git", dest: "C:\\x\\v", subdir: "skills", skill_names: ["a", 3], notion: null },
     },
   });
-  assert.equal(d.vault?.path, path.join("C:", "x", "v", "skills"));
+  assert.equal(d.vault?.path, path.join("C:\\x\\v", "skills"));
   assert.deepEqual(d.vault?.clone?.skill_names, ["a"]);
 });
 
@@ -87,6 +87,22 @@ test("normalizeDraft keeps targets with spaces and rejects bad shapes", () => {
   );
   assert.throws(() => normalizeDraft({ ...startDraft(base), notion: { data_source_id: "nope", data_source_name: "x" } }), DraftError);
   assert.throws(() => normalizeDraft({ ...startDraft(base), skills: { adopt: [{ name: "..", from: "claude" }], push: [] } }), DraftError);
+});
+
+test("relative vault, clone and target paths are rejected", () => {
+  const clone = { url: "https://github.com/me/v.git", dest: "C:\\x\\v", subdir: "", skill_names: [], notion: null };
+  assert.throws(() => normalizeDraft({ ...startDraft(base), vault: { mode: "new", path: "my-vault" } }), DraftError);
+  assert.throws(() => normalizeDraft({ ...startDraft(base), vault: { mode: "existing", path: "~/vault" } }), DraftError);
+  assert.throws(() => normalizeDraft({ ...startDraft(base), vault: { mode: "clone", clone: { ...clone, dest: "rel\\dest" } } }), DraftError);
+  assert.throws(() => normalizeDraft({ ...startDraft(base), targets: [{ id: "a", path: "rel\\p" }] }), DraftError);
+});
+
+test("clone.subdir must be a single folder name", () => {
+  const clone = { url: "https://github.com/me/v.git", dest: "C:\\x\\v", skill_names: [], notion: null };
+  for (const subdir of ["a/b", "..", ".", "a\\b"]) {
+    assert.throws(() => normalizeDraft({ ...startDraft(base), vault: { mode: "clone", clone: { ...clone, subdir } } }), DraftError, subdir);
+  }
+  assert.ok(normalizeDraft({ ...startDraft(base), vault: { mode: "clone", clone: { ...clone, subdir: "skills" } } }));
 });
 
 test("a default target must be enabled", () => {

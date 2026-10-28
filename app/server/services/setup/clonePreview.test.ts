@@ -41,6 +41,8 @@ test("URL check", () => {
   assert.equal(isCloneUrl("https://github.com/me/vault.git"), true);
   assert.equal(isCloneUrl("ssh://git@github.com/me/vault.git"), true);
   assert.equal(isCloneUrl("git@github.com:me/vault.git"), true);
+  assert.equal(isCloneUrl("-ux@x:;calc;"), false);
+  assert.equal(isCloneUrl("-u@h:x"), false);
   assert.equal(isCloneUrl("C:\\repos\\vault"), false);
   assert.equal(isCloneUrl("http://github.com/me/vault"), false);
 });
@@ -54,6 +56,8 @@ test("findVaultManifests keeps the shallowest skills.json in the top two levels"
 test("friendly git errors", () => {
   assert.match(friendlyGitError("remote: Repository not found.\nfatal: repository 'x' not found"), /wasn't found/);
   assert.match(friendlyGitError("x\ntimed out after 120s"), /Timed out/);
+  assert.match(friendlyGitError("spawn git ENOENT"), /Git isn.t installed/);
+  assert.match(friendlyGitError("'git' is not recognized as an internal or external command"), /Git isn.t installed/);
   assert.equal(friendlyGitError("Cloning into 'x'...\nfatal: something odd"), "fatal: something odd");
 });
 
@@ -90,6 +94,23 @@ test("a repo that doesn't exist is a CloneError and leaves no temp folder", asyn
   try {
     await assert.rejects(previewClone(path.join(tmpRoot, "missing-repo"), { run: defaultRun, tmpRoot }), CloneError);
     assert.deepEqual(fs.readdirSync(tmpRoot).filter((n) => n.startsWith("sv-clone-preview-")), []);
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("the clone puts -- right before the URL", async () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sv-prev-"));
+  let cloneArgs: string[] = [];
+  const run: Run = async (_cmd, args) => {
+    if (args.includes("clone")) cloneArgs = args;
+    return { code: 0, stdout: "", stderr: "" };
+  };
+  try {
+    await previewClone("https://x/vault.git", { run, tmpRoot });
+    const i = cloneArgs.indexOf("https://x/vault.git");
+    assert.ok(i > 0);
+    assert.equal(cloneArgs[i - 1], "--");
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }

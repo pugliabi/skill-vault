@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { ApiError } from "../../../lib/api";
 import { setupApi, type SetupDraft, type SetupEvent, type SetupJobState } from "../../../lib/setup";
@@ -41,6 +42,7 @@ function plannedActions(d: SetupDraft): string[] {
 
 export function ReviewStep({ draft, goTo, apiKey, onFinished }: StepProps) {
   const [, navigate] = useLocation();
+  const qc = useQueryClient();
   const [phase, setPhase] = useState<"review" | "running" | "result">("review");
   const [events, setEvents] = useState<SetupEvent[]>([]);
   const [result, setResult] = useState<SetupJobState | null>(null);
@@ -85,6 +87,12 @@ export function ReviewStep({ draft, goTo, apiKey, onFinished }: StepProps) {
       setNothingSaved(true);
       setPhase("review");
       return;
+    }
+    // The app shell redirects to /setup while its cached config has no vault; refresh it first.
+    try {
+      await qc.refetchQueries({ queryKey: ["config"] });
+    } catch {
+      /* ignore: the result screen still shows what happened */
     }
     setPhase("result");
   };

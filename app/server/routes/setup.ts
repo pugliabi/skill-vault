@@ -200,6 +200,11 @@ export function setupRouter(deps: SetupRouterDeps = {}): Router {
       res.status(409).json({ error: "Setup is already running" });
       return;
     }
+    const st = applier.status();
+    if (!st.vault_path || st.failed.length === 0) {
+      res.status(409).json({ error: "There's nothing to retry." });
+      return;
+    }
     await streamJob(res, (onEvent) => applier.retry(onEvent));
   });
 

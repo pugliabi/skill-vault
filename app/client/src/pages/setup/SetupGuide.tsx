@@ -147,8 +147,8 @@ export default function SetupGuide() {
         folderDialog: Boolean(caps?.folder_dialog),
         apiKey,
         setApiKey,
-        onFinished: () => {
-          void qc.invalidateQueries();
+        onFinished: async () => {
+          await qc.invalidateQueries();
           navigate("/");
         },
       }

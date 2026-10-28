@@ -61,11 +61,16 @@ export function NotionStep({ draft, commit, goTo }: StepProps) {
 
   const list = sources?.data_sources ?? [];
   const chosen = list.find((s) => s.id === choice) ?? null;
-  const next = () =>
-    commit(
-      { notion: chosen ? { data_source_id: chosen.id, data_source_name: chosen.name, add_last_edited: addLastEdited } : null },
-      "assistant",
-    );
+  const next = () => {
+    // The list may not have loaded yet: keep an earlier choice rather than dropping it.
+    const keep = !chosen && choice !== null && choice === draft.notion?.data_source_id ? draft.notion : null;
+    const notion = chosen
+      ? { data_source_id: chosen.id, data_source_name: chosen.name, add_last_edited: addLastEdited }
+      : keep
+        ? { ...keep, add_last_edited: addLastEdited }
+        : null;
+    return commit({ notion }, "assistant");
+  };
 
   return (
     <div>

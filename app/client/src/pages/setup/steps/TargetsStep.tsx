@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { setupApi, type DetectedTarget, type SetupTarget } from "../../../lib/setup";
+import { setupApi, isAbsolutePath, type DetectedTarget, type SetupTarget } from "../../../lib/setup";
 import { Button } from "../../../components/ui/primitives";
 import type { StepProps } from "../types";
 import { FolderField, Hint, StepHeader, StepNav, inputStyle, labelStyle, listBox, rowStyle } from "../ui";
@@ -45,7 +45,8 @@ export function TargetsStep({ draft, commit, goTo, folderDialog }: StepProps) {
     setRows((rs) => (rs ?? []).map((r) => (r.id === id ? { ...r, ...patch, is_default: (patch.enabled ?? r.enabled) && (patch.is_default ?? r.is_default) } : r)));
 
   const nameTaken = rows?.some((r) => r.id.toLowerCase() === name.trim().toLowerCase()) ?? false;
-  const badName = /[\\/]/.test(name);
+  const folderRelative = Boolean(folder.trim()) && !isAbsolutePath(folder.trim());
+  const badName =/[\\/]/.test(name);
   const addCustom = () => {
     if (!rows) return;
     setRows((rs) => [...(rs ?? []), { id: name.trim(), path: folder.trim(), enabled: true, is_default: true, known: false, label: name.trim() }]);
@@ -99,11 +100,12 @@ export function TargetsStep({ draft, commit, goTo, folderDialog }: StepProps) {
           <input aria-label="Target name" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Name, e.g. my-project" style={inputStyle} />
           <FolderField id="custom-target" label="its skills folder" value={folder} onChange={setFolder} folderDialog={folderDialog} dialogTitle="Choose the tool's skills folder" />
           <div>
-            <Button onClick={addCustom} disabled={!rows || !name.trim() || !folder.trim() || nameTaken || badName}>
+            <Button onClick={addCustom} disabled={!rows || !name.trim() || !folder.trim() || folderRelative || nameTaken || badName}>
               Add target
             </Button>
           </div>
-          {nameTaken && <Hint tone="bad">That name is already in the list.</Hint>}
+          {folderRelative && <Hint tone="bad">Use a full folder path.</Hint>}
+          {nameTaken &&<Hint tone="bad">That name is already in the list.</Hint>}
           {badName && <Hint tone="bad">Names can't contain \ or /.</Hint>}
         </div>
       </div>

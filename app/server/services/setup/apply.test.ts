@@ -129,7 +129,7 @@ test("clone: failure is plain words; success clones into dest and saves the repo
     const good = harness({ run: cloning });
     const ok = await good.applier.apply({ draft: draftWith({ vault: { mode: "clone", path: path.join(clone.dest, "skills"), clone } }) }, () => {});
     assert.equal(ok.ok, true);
-    assert.deepEqual(seen[0], ["clone", "--quiet", clone.url, clone.dest]);
+    assert.deepEqual(seen[0], ["clone", "--quiet", "--", clone.url, clone.dest]);
     assert.equal(good.calls.config[0].vault_path, path.join(clone.dest, "skills"));
     assert.equal(good.calls.config[0].repo_url, clone.url);
   } finally {

@@ -11,6 +11,7 @@ import { gitGuard as realGitGuard, type GuardStatus } from "../services/notion/c
 import {
   NotionNotConnectedError,
   disconnectNotion,
+  clearNotionSignInPending,
   finishNotionAuth,
   getNotionClient,
   missingTools,
@@ -222,6 +223,7 @@ export function notionRouter(deps: NotionRouterDeps = {}): Router {
     const state = typeof req.query.state === "string" ? req.query.state : undefined;
     try {
       if (!code) {
+        clearNotionSignInPending();
         const denied = typeof req.query.error === "string" ? req.query.error : "no authorization code";
         throw new Error(`Notion sign-in failed: ${denied}`);
       }

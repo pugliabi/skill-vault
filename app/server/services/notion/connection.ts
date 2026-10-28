@@ -61,6 +61,11 @@ export function notionSignInPending(now: number = Date.now()): boolean {
   return signInStartedAt !== null && now - signInStartedAt < SIGN_IN_BUSY_MS;
 }
 
+/** A sign-in that came back without a code (denied) is over: stop holding the idle stop. */
+export function clearNotionSignInPending(): void {
+  signInStartedAt = null;
+}
+
 export async function startNotionAuth(
   redirectUrl: string,
   connect: NotionConnector = connectToNotion,

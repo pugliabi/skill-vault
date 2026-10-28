@@ -162,6 +162,11 @@ export const setupApi = {
   applyStatus: () => call<SetupJobState>("GET", "/api/setup/apply/status"),
 };
 
+/** True for C:\x, C:/x, \\server\share and /x — the server rejects anything else. */
+export function isAbsolutePath(p: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(p) || /^\\\\/.test(p) || /^\//.test(p);
+}
+
 /** Join a folder and a name with the folder's own separator (paths come from Windows or POSIX). */
 export function joinPath(dir: string, name: string): string {
   if (!name) return dir;

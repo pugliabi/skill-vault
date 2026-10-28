@@ -32,6 +32,13 @@ test("a started sign-in is pending for at most 10 minutes", async () => {
   assert.equal(conn.notionSignInPending(), false);
 });
 
+test("clearNotionSignInPending ends a sign-in that was denied", async () => {
+  await conn.startNotionAuth(REDIRECT, needsSignIn as never);
+  assert.equal(conn.notionSignInPending(), true);
+  conn.clearNotionSignInPending();
+  assert.equal(conn.notionSignInPending(), false);
+});
+
 test("finishing (even with a bad state) clears the pending flag", async () => {
   await conn.startNotionAuth(REDIRECT, needsSignIn as never);
   assert.equal(conn.notionSignInPending(), true);

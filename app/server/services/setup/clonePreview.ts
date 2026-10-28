@@ -11,7 +11,7 @@ import path from "node:path";
 import type { Run } from "../appUpdate.ts";
 import type { NotionRef } from "./types.ts";
 
-const CLONE_URL = /^(?:https:\/\/|ssh:\/\/)\S+$|^[\w.-]+@[\w.-]+:\S+$/;
+const CLONE_URL = /^(?:https:\/\/|ssh:\/\/)\S+$|^[A-Za-z0-9_][\w.-]*@[\w.-]+:\S+$/;
 
 export function isCloneUrl(url: string): boolean {
   return CLONE_URL.test(url.trim());
@@ -21,6 +21,9 @@ export class CloneError extends Error {}
 
 /** One plain sentence for a failed git command. */
 export function friendlyGitError(stderr: string): string {
+  if (/ENOENT|not recognized as an internal or external command/i.test(stderr)) {
+    return "Git isn't installed on this PC. Install Git for Windows, then try again.";
+  }
   if (/timed out/i.test(stderr)) return "Timed out. Check the URL and your connection, then try again.";
   if (/repository not found|not found|authentication failed|could not read username|permission denied|access denied|\b403\b/i.test(stderr)) {
     return "The repo wasn't found, or it needs a sign-in this PC doesn't have.";
@@ -108,7 +111,7 @@ export async function previewClone(
   try {
     const clone = await deps.run(
       "git",
-      ["clone", "--depth", "1", "--filter=blob:none", "--no-checkout", "--quiet", url, tmp],
+      ["clone", "--depth", "1", "--filter=blob:none", "--no-checkout", "--quiet", "--", url, tmp],
       { cwd: path.dirname(tmp), timeoutMs: deps.timeoutMs ?? 120_000, interactiveAuth: true },
     );
     if (clone.code !== 0) throw new CloneError(friendlyGitError(clone.stderr));

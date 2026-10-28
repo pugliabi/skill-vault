@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { setupApi, joinPath, repoNameFromUrl, type FolderInfo, type SetupVault, type VaultCandidate } from "../../../lib/setup";
+import { setupApi, isAbsolutePath, joinPath, repoNameFromUrl, type FolderInfo, type SetupVault, type VaultCandidate } from "../../../lib/setup";
 import type { StepProps } from "../types";
 import { ChoiceCard, FolderField, Hint, StepHeader, StepNav, inputStyle, labelStyle } from "../ui";
 
 type Mode = SetupVault["mode"];
+
+const FULL_PATH_HINT = "Use a full folder path, like C:\\Users\\you\\skill-vault.";
 
 /** Plain-words summary of an inspected folder for the chosen mode; `ok` = Next may proceed. */
 function describe(mode: Mode, info: FolderInfo | null): { text: string; tone: "info" | "good" | "warn" | "bad"; ok: boolean } | null {
@@ -112,8 +114,10 @@ export function VaultStep({ draft, commit, folderDialog }: StepProps) {
     setCloneError(null);
   };
 
-  const folderState = mode && mode !== "clone" ? describe(mode, info) : null;
-  const destOk = destInfo && (destInfo.kind === "missing" || destInfo.kind === "empty") && destInfo.writable;
+  const folderRelative = Boolean(folder.trim()) && !isAbsolutePath(folder.trim());
+  const destRelative = Boolean(dest.trim()) && !isAbsolutePath(dest.trim());
+  const folderState = mode && mode !== "clone" ? (folderRelative ? { text: FULL_PATH_HINT, tone: "bad" as const, ok: false } : describe(mode, info)) : null;
+  const destOk = !destRelative && destInfo &&(destInfo.kind === "missing" || destInfo.kind === "empty") && destInfo.writable;
   const picked = candidates?.find((c) => c.subdir === subdir) ?? null;
 
   const checkRepo = async () => {
@@ -218,7 +222,8 @@ export function VaultStep({ draft, commit, folderDialog }: StepProps) {
               }}
               style={inputStyle}
             />
-            {destInfo && !destOk && <Hint tone="bad">This folder must be new or empty.</Hint>}
+            {destRelative && <Hint tone="bad">{FULL_PATH_HINT}</Hint>}
+            {!destRelative && destInfo && !destOk && <Hint tone="bad">This folder must be new or empty.</Hint>}
           </div>
           {cloneError && <Hint tone="bad">{cloneError}</Hint>}
           {candidates && candidates.length === 1 && (

@@ -118,6 +118,18 @@ The folder exists but Windows won't let the app read it. Check the folder's perm
 
 Check the URL. For a private repo, sign in to GitHub with Git on this PC first (for example, clone any private repo once in a terminal so Git Credential Manager saves your sign-in), then try again. The same applies if the preview fails part-way with a plain message: the connection dropped or the sign-in expired, so try again.
 
+### "Use a full folder path"
+
+Folders must be typed in full, like `C:\Users\you\skill-vault`. A name such as `my-vault` or a path starting with `~` isn't accepted, because Skill Vault wouldn't know where to put it. Use Browse… or paste the full path.
+
+### "Git isn't installed on this PC"
+
+Cloning from GitHub needs Git. Install Git for Windows, restart Skill Vault, then check the repo again.
+
+### Retry says "There's nothing to retry"
+
+Nothing failed in the last Finish, or the app was restarted since. Check Settings to see what was saved; press **Finish** again if something is missing.
+
 ### Notion sign-in came back with an error
 
 The guide returns to the Notion step with Notion's reason. Press **Connect Notion** again, or skip the step and connect later in Settings → Notion.

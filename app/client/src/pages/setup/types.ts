@@ -13,5 +13,5 @@ export interface StepProps {
   apiKey: string;
   setApiKey: (key: string) => void;
   /** Called after a successful Finish. */
-  onFinished: () => void;
+  onFinished: () => void | Promise<void>;
 }

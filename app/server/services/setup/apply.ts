@@ -126,7 +126,7 @@ async function prepareVault(v: SetupVault, run: Run, timeoutMs: number): Promise
   if (!clone) throw new Error("The clone details are missing.");
   if (!isEmptyOrMissing(clone.dest)) throw new Error(`The clone folder isn't empty: ${clone.dest}`);
   fs.mkdirSync(path.dirname(clone.dest), { recursive: true });
-  const r = await run("git", ["clone", "--quiet", clone.url, clone.dest], {
+  const r = await run("git", ["clone", "--quiet", "--", clone.url, clone.dest], {
     cwd: path.dirname(clone.dest),
     timeoutMs,
     interactiveAuth: true,

@@ -168,6 +168,20 @@ test("apply: streams NDJSON events; 400 for a bad draft; 409 while running", asy
   assert.deepEqual(await (await fetch(`${url}/apply/status`)).json(), { running: false, ok: null, vault_path: null, events: [], failed: [] });
 });
 
+test("apply/retry: 409 when nothing was saved or nothing failed", async () => {
+  let retried = false;
+  const retry = async () => (retried = true, { running: false, ok: true, vault_path: "C:\\v", events: [], failed: [] });
+  const fresh = await serve(setup.setupRouter({ applier: fakeApplier({ retry }) }));
+  const r1 = await fetch(`${fresh}/apply/retry`, json({}));
+  assert.equal(r1.status, 409);
+  assert.match((await r1.json()).error, /nothing to retry/);
+
+  const clean = { running: false, ok: true, vault_path: "C:\\v", events: [], failed: [] };
+  const noFails = await serve(setup.setupRouter({ applier: fakeApplier({ status: () => clean, retry }) }));
+  assert.equal((await fetch(`${noFails}/apply/retry`, json({}))).status, 409);
+  assert.equal(retried, false);
+});
+
 test("pick-folder: only on Windows, only from this PC, one at a time", async () => {
   const picker = { isOpen: () => false, pick: async () => ({ path: "C:\\picked" }) };
   const win = await serve(setup.setupRouter({ platform: "win32", picker }));

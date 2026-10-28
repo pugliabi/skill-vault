@@ -21,6 +21,12 @@ import type {
 
 export class DraftError extends Error {}
 
+const FULL_PATH_HINT = "Use a full folder path, like C:\\Users\\you\\skill-vault.";
+function absolute(p: string): string {
+  if (!path.isAbsolute(p)) throw new DraftError(FULL_PATH_HINT);
+  return p;
+}
+
 const STEPS: SetupStep[] = ["welcome", "vault", "targets", "skills", "notion", "assistant", "review"];
 const DATA_SOURCE_ID = /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i;
 /** Target names are config keys: any text without path separators or control characters. */
@@ -75,7 +81,8 @@ function normalizeVault(v: unknown): SetupVault | null {
     if (!isStr(c.url) || !c.url.trim() || !isStr(c.dest) || !c.dest.trim() || !isStr(c.subdir) || !Array.isArray(c.skill_names)) {
       throw new DraftError("vault.clone needs url, dest, subdir and skill_names");
     }
-    const dest = c.dest.trim();
+    if (!(c.subdir === "" || isSafeName(c.subdir))) throw new DraftError("vault.clone.subdir must be a folder name");
+    const dest = absolute(c.dest.trim());
     return {
       mode: "clone",
       path: c.subdir ? path.join(dest, c.subdir) : dest,
@@ -90,7 +97,7 @@ function normalizeVault(v: unknown): SetupVault | null {
     };
   }
   if (!isStr(o.path) || !o.path.trim()) throw new DraftError("vault.path is required");
-  return { mode: o.mode, path: o.path.trim(), ...repo };
+  return { mode: o.mode, path: absolute(o.path.trim()), ...repo };
 }
 
 function normalizeTargets(v: unknown): SetupTarget[] | null {
@@ -105,7 +112,7 @@ function normalizeTargets(v: unknown): SetupTarget[] | null {
     seen.add(id);
     if (!isStr(o.path) || !o.path.trim()) throw new DraftError(`target ${id} needs a folder`);
     const enabled = o.enabled === true;
-    return { id, path: o.path.trim(), enabled, is_default: enabled && o.is_default === true, known: o.known === true };
+    return { id, path: absolute(o.path.trim()), enabled, is_default: enabled && o.is_default === true, known: o.known === true };
   });
 }
 
