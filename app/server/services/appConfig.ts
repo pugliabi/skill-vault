@@ -30,6 +30,7 @@ import path from "node:path";
 import os from "node:os";
 import type { AppConfig, Provider } from "../types/vault.ts";
 import type { ClaudeAuthConfig } from "./claude/auth.ts";
+import type { SetupBase } from "./setup/types.ts";
 
 const CLI_CONFIG_DIR = path.join(os.homedir(), ".skill-vault");
 const CLI_CONFIG_FILE = path.join(CLI_CONFIG_DIR, "config.json");
@@ -121,6 +122,18 @@ export function readCliAppBlock(): {
   } catch {
     return {};
   }
+}
+
+/** The config fields the setup guide starts from (services/setup/draft.ts). */
+export function readSetupBase(): SetupBase {
+  const raw = readRaw();
+  return {
+    vault_path: raw.vault_path ?? null,
+    agent_locations: { ...(raw.agent_locations ?? {}) },
+    default_targets: Array.isArray(raw.default_targets) ? raw.default_targets : [],
+    machine_id: typeof raw.machine_id === "string" && raw.machine_id ? raw.machine_id : null,
+    repo_url: typeof raw.repo_url === "string" && raw.repo_url ? raw.repo_url : null,
+  };
 }
 
 /** Set (or create) the vault path, preserving all other config keys. */

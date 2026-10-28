@@ -49,3 +49,40 @@ test("writes from another site are refused", async () => {
   const res = await fetch(`${base}/anything`, { method: "POST", headers: { Origin: "http://evil.example" } });
   assert.equal(res.status, 403);
 });
+
+const sampleBase = {
+  vault_path: null as string | null,
+  agent_locations: {} as Record<string, string>,
+  default_targets: [] as string[],
+  machine_id: "PC1",
+  repo_url: null as string | null,
+};
+
+test("draft: start, save, read, stale, delete", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sv-setup-d-"));
+  let base = { ...sampleBase };
+  const url = await serve(setup.setupRouter({ home: () => home, readBase: () => base }));
+
+  assert.deepEqual(await (await fetch(`${url}/draft`)).json(), { draft: null, stale: false });
+
+  const { draft } = await (await fetch(`${url}/draft/start`, { method: "POST" })).json();
+  assert.equal(draft.machine_id, "PC1");
+  assert.equal(draft.vault, null);
+
+  const saved = await fetch(`${url}/draft`, { ...json({ ...draft, step: "targets", extra: 1 }), method: "PUT" });
+  assert.equal(saved.status, 200);
+  const read = await (await fetch(`${url}/draft`)).json();
+  assert.equal(read.draft.step, "targets");
+  assert.equal(read.stale, false);
+  assert.ok(!("extra" in read.draft));
+
+  base = { ...sampleBase, vault_path: "C:\\elsewhere" };
+  assert.equal((await (await fetch(`${url}/draft`)).json()).stale, true);
+
+  const bad = await fetch(`${url}/draft`, { ...json({ version: 9 }), method: "PUT" });
+  assert.equal(bad.status, 400);
+
+  assert.equal((await fetch(`${url}/draft`, { method: "DELETE" })).status, 204);
+  assert.equal((await (await fetch(`${url}/draft`)).json()).draft, null);
+  fs.rmSync(home, { recursive: true, force: true });
+});
