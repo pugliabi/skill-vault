@@ -83,13 +83,42 @@ function isEmptyOrMissing(p: string): boolean {
   }
 }
 
+/**
+ * A "new" vault folder may hold the skeleton a previous, half-finished run left
+ * (initVault's empty skills/ and a skills.json with no skills). Unreadable JSON
+ * counts as not empty.
+ */
+function isEmptyOrSkeleton(p: string): boolean {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(p);
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "ENOENT";
+  }
+  for (const name of entries) {
+    const full = path.join(p, name);
+    try {
+      if (name === "skills" && fs.statSync(full).isDirectory() && fs.readdirSync(full).length === 0) continue;
+      if (name === "skills.json" && fs.statSync(full).isFile()) {
+        const parsed = JSON.parse(fs.readFileSync(full, "utf8")) as { skills?: unknown };
+        const skills = parsed?.skills;
+        if (skills === undefined || (skills !== null && typeof skills === "object" && Object.keys(skills).length === 0)) continue;
+      }
+    } catch {
+      return false;
+    }
+    return false;
+  }
+  return true;
+}
+
 async function prepareVault(v: SetupVault, run: Run, timeoutMs: number): Promise<void> {
   if (v.mode === "existing") {
     if (!fs.existsSync(v.path) || !fs.statSync(v.path).isDirectory()) throw new Error(`The folder doesn't exist: ${v.path}`);
     return;
   }
   if (v.mode === "new") {
-    if (!isEmptyOrMissing(v.path)) throw new Error(`The folder isn't empty: ${v.path}`);
+    if (!isEmptyOrSkeleton(v.path)) throw new Error(`The folder isn't empty: ${v.path}`);
     fs.mkdirSync(v.path, { recursive: true });
     return;
   }
@@ -248,7 +277,6 @@ export function createSetupApplier(deps: SetupApplyDeps): SetupApplier {
         const targets = effectiveTargets(draft, deps.readConfig());
         try {
           deps.writeConfig(configPatch(draft, targets, req.api_key));
-          deps.rebuildWatcher();
         } catch (err) {
           const where = vault.mode === "clone" && vault.clone
             ? ` The repo was cloned to ${vault.clone.dest}: delete that folder, or choose it as an existing vault.`
@@ -257,7 +285,12 @@ export function createSetupApplier(deps: SetupApplyDeps): SetupApplier {
           state.ok = false;
           return snapshot();
         }
-        emit({ step: "config", state: "done" });
+        try {
+          deps.rebuildWatcher();
+          emit({ step: "config", state: "done" });
+        } catch {
+          emit({ step: "config", state: "done", message: "Settings saved. Restart Skill Vault to watch the new folders." });
+        }
         state.vault_path = vault.path;
         try {
           deps.deleteDraft();

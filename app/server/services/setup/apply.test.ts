@@ -232,3 +232,49 @@ test("Skip on targets and assistant leaves them out of the config patch", async 
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a watcher failure after the config write is a note, not a failure", async () => {
+  const root = tmp();
+  try {
+    const { applier, calls } = harness({
+      rebuildWatcher: () => {
+        throw new Error("watch limit");
+      },
+    });
+    const state = await applier.apply({ draft: draftWith({ vault: { mode: "new", path: path.join(root, "vault") } }) }, () => {});
+    assert.equal(state.ok, true);
+    assert.equal(state.vault_path, path.join(root, "vault"));
+    assert.equal(calls.draftDeleted, 1);
+    const cfg = state.events.find((e) => e.step === "config" && e.state === "done");
+    assert.equal(cfg?.message, "Settings saved. Restart Skill Vault to watch the new folders.");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a new vault folder holding only an empty skeleton can be re-run; anything else is refused", async () => {
+  const root = tmp();
+  try {
+    const skeleton = path.join(root, "a");
+    fs.mkdirSync(path.join(skeleton, "skills"), { recursive: true });
+    fs.writeFileSync(path.join(skeleton, "skills.json"), '{"skills":{}}');
+    const ok = await harness().applier.apply({ draft: draftWith({ vault: { mode: "new", path: skeleton } }) }, () => {});
+    assert.equal(ok.ok, true);
+
+    const extra = path.join(root, "b");
+    fs.mkdirSync(path.join(extra, "skills"), { recursive: true });
+    fs.writeFileSync(path.join(extra, "skills.json"), '{"skills":{}}');
+    fs.writeFileSync(path.join(extra, "notes.txt"), "x");
+    const bad = await harness().applier.apply({ draft: draftWith({ vault: { mode: "new", path: extra } }) }, () => {});
+    assert.equal(bad.ok, false);
+    assert.match(bad.events.at(-1)?.message ?? "", /isn't empty/);
+
+    const broken = path.join(root, "c");
+    fs.mkdirSync(broken);
+    fs.writeFileSync(path.join(broken, "skills.json"), "{not json");
+    const bad2 = await harness().applier.apply({ draft: draftWith({ vault: { mode: "new", path: broken } }) }, () => {});
+    assert.equal(bad2.ok, false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
