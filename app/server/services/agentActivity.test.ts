@@ -34,6 +34,13 @@ test("clientLabel names known clients and falls back", () => {
   assert.equal(clientLabel("command"), "a shell agent");
   assert.equal(clientLabel("something-else"), "an agent");
   assert.equal(clientLabel(undefined), "an agent");
+  assert.equal(clientLabel(""), "an agent");
+});
+
+test("clientLabel ignores prototype keys from the header", () => {
+  assert.equal(clientLabel("constructor"), "an agent");
+  assert.equal(clientLabel("toString"), "an agent");
+  assert.equal(clientLabel("__proto__"), "an agent");
 });
 
 test("agentIdleMs defaults to 10 minutes and honors SKILL_VAULT_AGENT_IDLE_MS", () => {

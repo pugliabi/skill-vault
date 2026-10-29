@@ -28,7 +28,7 @@ const LABELS: Record<string, string> = {
 
 /** Human label for a client id, used in `source` and activity messages. */
 export function clientLabel(id: string | undefined): string {
-  return (id !== undefined && LABELS[id]) || "an agent";
+  return id !== undefined && Object.hasOwn(LABELS, id) ? LABELS[id] : "an agent";
 }
 
 export function createAgentActivity(now: () => number = Date.now): {
