@@ -159,6 +159,20 @@ export function agentAccessRouter(opts: AgentAccessOptions): Router {
       [{ name: BUNDLED_SKILL_NAME, path: bundledSkillDir(opts.appRoot) }],
       { overwrite: row.state === "update_available", originContext: { type: "dir", root: sourceRoot } },
     );
+    // importSkills skips (rather than fails) a missing source, an existing
+    // copy without overwrite and an identical copy; only report what happened.
+    if (!result.imported.includes(BUNDLED_SKILL_NAME) && !result.updated.includes(BUNDLED_SKILL_NAME)) {
+      if (!fs.existsSync(bundledSkillDir(opts.appRoot))) {
+        res.status(409).json({ error: `The app's bundled ${BUNDLED_SKILL_NAME} skill folder is missing. Reinstall or rebuild the app.` });
+      } else if (row.state === "in_vault" && hashSkillDirNormalized(skillDir(vaultPath, BUNDLED_SKILL_NAME)) === hashSkillDirNormalized(bundledSkillDir(opts.appRoot))) {
+        res.json({ ...result, pushed: [], failed: [], skill: skillRow() });
+      } else if (row.state === "in_vault") {
+        res.status(409).json({ error: `Your vault copy of ${BUNDLED_SKILL_NAME} has local changes — update it from Updates.` });
+      } else {
+        res.status(409).json({ error: `Couldn't add ${BUNDLED_SKILL_NAME} to the vault.` });
+      }
+      return;
+    }
     recordActivity({
       kind: "adopt",
       skill: BUNDLED_SKILL_NAME,

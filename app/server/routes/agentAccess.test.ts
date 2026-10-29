@@ -210,7 +210,9 @@ test("a locally edited vault copy is not offered a one-click overwrite", async (
   const edited = path.join(vault, "skills", "skill-vault", "SKILL.md");
   fs.writeFileSync(edited, SKILL_MD + "\nMine\n");
   assert.equal((await get()).skill.state, "in_vault");
-  assert.equal((await post("/skill/add")).status, 200);
+  const res = await post("/skill/add");
+  assert.equal(res.status, 409);
+  assert.match(((await res.json()) as { error: string }).error, /local changes/);
   assert.ok(fs.readFileSync(edited, "utf-8").includes("Mine"));
 });
 
@@ -225,4 +227,51 @@ test("a vault skill named skill-vault from elsewhere blocks add", async () => {
   fs.writeFileSync(manifestFile, JSON.stringify(m));
   assert.equal((await get()).skill.state, "name_taken");
   assert.equal((await post("/skill/add")).status, 409);
+});
+
+const manifestSkills = () => JSON.parse(fs.readFileSync(path.join(vault, "skills.json"), "utf-8")).skills as Record<string, any>;
+const dropFromVault = () => {
+  const m = JSON.parse(fs.readFileSync(path.join(vault, "skills.json"), "utf-8"));
+  delete m.skills["skill-vault"];
+  fs.writeFileSync(path.join(vault, "skills.json"), JSON.stringify(m));
+  fs.rmSync(path.join(vault, "skills", "skill-vault"), { recursive: true, force: true });
+};
+const bundledMd = () => path.join(appRoot, "bundled-skills", "skill-vault", "SKILL.md");
+const zipSkillMd = async () => {
+  const AdmZip = (await import("adm-zip")).default;
+  return new AdmZip(path.join(stageDir, "skill-vault.zip")).readAsText("skill-vault/SKILL.md");
+};
+
+test("zip outside the vault packages the bundled copy and records nothing", async () => {
+  dropFromVault();
+  fs.writeFileSync(bundledMd(), SKILL_MD + "\nBundled\n");
+  const body = (await (await post("/skill/zip")).json()) as { from_vault: boolean };
+  assert.equal(body.from_vault, false);
+  assert.ok((await zipSkillMd()).includes("Bundled"));
+  assert.equal(manifestSkills()["skill-vault"], undefined);
+});
+
+test("a skipped import (bundled folder missing) is a 409 and leaves the vault alone", async () => {
+  const dir = path.join(appRoot, "bundled-skills");
+  const moved = path.join(root, "bundled-moved");
+  fs.renameSync(dir, moved);
+  try {
+    const res = await post("/skill/add");
+    assert.equal(res.status, 409);
+    assert.equal(manifestSkills()["skill-vault"], undefined);
+  } finally {
+    fs.renameSync(moved, dir);
+  }
+});
+
+test("adding when already up to date succeeds without changes; zip then packages the vault copy", async () => {
+  assert.equal((await post("/skill/add")).status, 200);
+  assert.equal(((await (await post("/skill/add")).json()) as { updated: string[] }).updated.length, 0);
+  const edited = path.join(vault, "skills", "skill-vault", "SKILL.md");
+  fs.writeFileSync(edited, SKILL_MD + "\nVaultCopy\n");
+  const body = (await (await post("/skill/zip")).json()) as { from_vault: boolean };
+  assert.equal(body.from_vault, true);
+  assert.ok((await zipSkillMd()).includes("VaultCopy"));
+  const { hashSkillDirNormalized } = await import("../services/skillHash.ts");
+  assert.equal(manifestSkills()["skill-vault"].desktop_package.content_hash, hashSkillDirNormalized(path.join(vault, "skills", "skill-vault")));
 });
