@@ -320,6 +320,11 @@ cost otherwise.
 | Grok | `Bash(git *)` † | `--tools` allowlist † | vault MCP | app-owned `GROK_HOME`, compat off |
 | Gemini | `git ` prefix (policy) | `replace`/`write_file` (workspace dirs) | `vault` | system settings file, `--allowed-mcp-server-names vault` |
 
+- Every engine registers **one** MCP server, `vault`, built by the existing `buildMcpConfig` and
+  allowed as a whole server. Tools added to `assistant-mcp/bridge.ts` later reach all five engines with
+  no per-engine change. That includes `read_skill_files`, `save_skill` and `package_for_desktop`, which
+  the Claude Desktop work is adding in parallel. The engine note's tool-name mapping is generic
+  (`mcp__vault__<tool>` → this engine's spelling), not a list of tools.
 - Nothing here ever passes `--yolo`, `--allow-all*`, `bypassPermissions` or
   `--dangerously-bypass-approvals-and-sandbox`. A unit test asserts that for every engine's
   `buildTurn`.
@@ -475,8 +480,12 @@ Before any adapter code, for each of Codex, Copilot, Grok and Gemini:
   - `docs/configuration.md`: `assistant.engine`, `assistant.engines`
   - `docs/faq.md`: "Why does Grok need its own sign-in?", "Why is Codex's shell not git-only?"
   - `docs/tech_reference.md`: the API rows for the new routes
-  - `docs/changelog.md`, `app/CHANGELOG.md`
+  - `docs/changelog.md`, and `app/CHANGELOG.md` entries under `[Unreleased]` (this ships in the
+    combined 0.2.0 release with the setup guide and the Notion fixes)
   - What's New
+- **Where to build:** in this worktree (`.claude/worktrees/assistant-providers`, branched from local
+  main `a25a664`), never in the shared `C:\Github\skill-vault` checkout. Rebase onto main before the PR,
+  since the Claude Desktop work touches `bridge.ts` in parallel.
 
 ## Files
 
@@ -495,7 +504,8 @@ Client: `components/assistant/ProviderSettings.tsx`, `EngineInstallDialog.tsx`,
 - `server/services/claude/auth.ts`: `withAuthHint` moves behind the Claude engine
 - `server/services/appConfig.ts`: the assistant block's `engine` / `engines`
 - `server/index.ts`: `isBusy` includes a running install and a pending sign-in
-- `server/services/setup/draft.ts` and the setup applier: `assistant.engine`
+- `server/services/setup/draft.ts` and `server/services/setup/apply.ts` (the Finish job):
+  `assistant.engine`
 - `server/routes/setup.ts`
 - `client/src/pages/setup/steps/AssistantStep.tsx`
 - `client/src/pages/Settings.tsx`
