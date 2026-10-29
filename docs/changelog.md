@@ -4,7 +4,11 @@ User-facing history of the Skill Vault project (app + CLI). The app keeps a
 more detailed log in [app/CHANGELOG.md](../app/CHANGELOG.md). Versions follow
 semver; the project is pre-1.0, so minor versions carry feature batches.
 
-## [Unreleased] - 2026-10-27
+## [0.3.0] - 2026-10-29 — Agents preview
+
+Adds the first agent-definition (subagent) porting support as a CLI-only
+preview. Agents aren't stored in the vault or shown in the app yet; that is
+planned for 0.4.0 ([#1](https://github.com/pugliabi/skill-vault/issues/1)).
 
 ### Added
 - **Port agent definitions between harnesses (CLI preview)** — `sv agents list`
