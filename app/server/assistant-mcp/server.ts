@@ -94,14 +94,26 @@ const isRefused = (err: unknown): boolean => (err as { cause?: { code?: string }
  */
 export function createResolvingFetch(resolve: () => Promise<string>, fetchFn: typeof fetch = fetch): typeof fetch {
   let base: string | null = null;
+  let pending: Promise<string> | null = null;
+  // Single-flight: parallel first calls share one search/start.
+  const baseUrl = (): Promise<string> => {
+    if (base) return Promise.resolve(base);
+    pending ??= resolve()
+      .then((b) => (base = b))
+      .finally(() => {
+        pending = null;
+      });
+    return pending;
+  };
   return (async (input: string | URL | Request, init?: RequestInit) => {
     for (let attempt = 0; ; attempt++) {
-      base ??= await resolve();
+      const used = await baseUrl();
       try {
-        return await fetchFn(`${base}${String(input)}`, init);
+        return await fetchFn(`${used}${String(input)}`, init);
       } catch (err) {
-        base = null;
-        if (attempt >= 1 || !isRefused(err)) throw err;
+        if (!isRefused(err)) throw err;
+        if (base === used) base = null;
+        if (attempt >= 1) throw err;
       }
     }
   }) as typeof fetch;

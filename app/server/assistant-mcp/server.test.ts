@@ -84,3 +84,45 @@ test("other network errors aren't retried", async () => {
   await assert.rejects(f("/api/x"), /boom/);
   assert.equal(calls, 1);
 });
+
+test("concurrent first calls share one resolve", async () => {
+  let resolves = 0;
+  const fetchFn = (async () => new Response("{}")) as typeof fetch;
+  const f = createResolvingFetch(async () => {
+    resolves++;
+    await new Promise((r) => setTimeout(r, 5));
+    return "http://a";
+  }, fetchFn);
+  const [a, b] = await Promise.all([f("/api/x"), f("/api/x")]);
+  assert.equal(resolves, 1);
+  assert.equal(a.ok && b.ok, true);
+});
+
+test("a non-refused failure keeps the cached server", async () => {
+  let resolves = 0;
+  let fail = false;
+  const fetchFn = (async () => {
+    if (fail) throw new TypeError("boom");
+    return new Response("{}");
+  }) as typeof fetch;
+  const f = createResolvingFetch(async () => `http://a${resolves++}`, fetchFn);
+  await f("/api/x");
+  fail = true;
+  await assert.rejects(f("/api/x"), /boom/);
+  fail = false;
+  await f("/api/x");
+  assert.equal(resolves, 1);
+});
+
+test("a second refused connection on the retry is rethrown", async () => {
+  let resolves = 0;
+  let calls = 0;
+  const fetchFn = (async () => {
+    calls++;
+    throw refused();
+  }) as typeof fetch;
+  const f = createResolvingFetch(async () => `http://a${resolves++}`, fetchFn);
+  await assert.rejects(f("/api/x"), /fetch failed/);
+  assert.equal(calls, 2);
+  assert.equal(resolves, 2);
+});
