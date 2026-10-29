@@ -1,8 +1,9 @@
 /**
  * Vault MCP bridge — the assistant's hands.
  *
- * A stdio MCP server the `claude` CLI launches per chat turn (via
- * `--mcp-config`). Every tool is a thin wrapper over the app's own HTTP
+ * A stdio MCP server launched per chat turn by the in-app assistant (via
+ * `--mcp-config`) and by Claude Desktop, Claude Code and the shared
+ * `skill-vault` command (see `main.ts`). Every tool is a thin wrapper over the app's own HTTP
  * API on localhost (`SKILL_VAULT_URL`), so agent actions flow through the
  * exact same routes, validation, activity log, SSE broadcast, and Notion
  * job guard as clicks in the UI. The bridge holds NO vault logic of its
@@ -27,12 +28,16 @@ export type BridgeHttp = (
   body?: unknown,
 ) => Promise<{ status: number; json: unknown }>;
 
-export function createHttp(baseUrl: string, fetchFn: typeof fetch = fetch): BridgeHttp {
+/** `client` is sent as X-Skill-Vault-Client (server/services/agentActivity.ts). */
+export function createHttp(baseUrl: string, fetchFn: typeof fetch = fetch, client?: string): BridgeHttp {
   const base = baseUrl.replace(/\/+$/, "");
   return async (method, path, body) => {
+    const headers: Record<string, string> = {};
+    if (body !== undefined) headers["content-type"] = "application/json";
+    if (client) headers["x-skill-vault-client"] = client;
     const res = await fetchFn(`${base}${path}`, {
       method,
-      headers: body === undefined ? undefined : { "content-type": "application/json" },
+      headers: Object.keys(headers).length > 0 ? headers : undefined,
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     let json: unknown = null;
@@ -110,6 +115,68 @@ function trimSkill(s: Record<string, unknown>): TrimmedSkill {
     origin: s.origin,
     notion_status: s.notion_status,
   };
+}
+
+/** read_skill_files stops adding files once their sizes pass this total. */
+export const READ_BUDGET_BYTES = 256 * 1024;
+
+interface TreeNode {
+  path: string;
+  type: "file" | "dir";
+  size?: number;
+  children?: TreeNode[];
+}
+
+function treeFiles(node: TreeNode): Array<{ path: string; size: number }> {
+  if (node.type === "file") return [{ path: node.path.replace(/\\/g, "/"), size: node.size ?? 0 }];
+  return (node.children ?? []).flatMap(treeFiles);
+}
+
+interface FileRead {
+  binary: boolean;
+  too_large: boolean;
+  size: number;
+  sha256: string | null;
+  content: string | null;
+}
+
+/** SKILL.md first, then the rest by path; binaries and files past the budget are listed in `skipped`. */
+async function readSkillFiles(http: BridgeHttp, name: string, only?: string[]): Promise<unknown> {
+  const enc = encodeURIComponent(name);
+  let wanted: Array<{ path: string; size: number }>;
+  if (only && only.length > 0) {
+    wanted = only.map((p) => ({ path: p.replace(/\\/g, "/"), size: 0 }));
+  } else {
+    const detail = expectOk(await http("GET", `/api/skills/${enc}`), "read_skill_files") as { files?: TreeNode };
+    wanted = detail.files ? treeFiles(detail.files) : [];
+    wanted.sort((a, b) => (a.path === "SKILL.md" ? -1 : b.path === "SKILL.md" ? 1 : a.path.localeCompare(b.path)));
+  }
+  const files: Array<{ path: string; content: string; sha256: string | null; size: number }> = [];
+  const skipped: Array<{ path: string; reason: "binary" | "too_large" | "over_budget" }> = [];
+  let total = 0;
+  for (const w of wanted) {
+    if (files.length > 0 && total + w.size > READ_BUDGET_BYTES) {
+      skipped.push({ path: w.path, reason: "over_budget" });
+      continue;
+    }
+    const urlPath = w.path.split("/").map(encodeURIComponent).join("/");
+    const f = expectOk(await http("GET", `/api/skills/${enc}/files/${urlPath}`), `read_skill_files ${w.path}`) as FileRead;
+    if (f.binary) {
+      skipped.push({ path: w.path, reason: "binary" });
+      continue;
+    }
+    if (f.too_large || f.content === null) {
+      skipped.push({ path: w.path, reason: "too_large" });
+      continue;
+    }
+    if (files.length > 0 && total + f.size > READ_BUDGET_BYTES) {
+      skipped.push({ path: w.path, reason: "over_budget" });
+      continue;
+    }
+    total += f.size;
+    files.push({ path: w.path, content: f.content, sha256: f.sha256, size: f.size });
+  }
+  return { files, skipped };
 }
 
 export interface ToolDef {
@@ -219,6 +286,16 @@ export const TOOLS: Record<string, ToolDef> = {
       "The app's ranked proactive suggestions — what's broken or needs attention right now (broken sources, available updates, failed operations, Notion drift, hygiene). The best starting point for 'what needs attention' or any triage request.",
     schema: {},
     handler: async (_args, http) => expectOk(await http("GET", "/api/assistant/suggestions"), "get_suggestions"),
+  },
+  read_skill_files: {
+    description:
+      "Read a vault skill's text files, SKILL.md first, with each file's sha256. Use it to follow a vault skill in this chat, and before save_skill mode:update. Files past the ~256 KB total come back in `skipped` as over_budget; ask for them by `paths`.",
+    schema: {
+      name: z.string(),
+      paths: z.array(z.string()).optional().describe('Only these files: relative, "/"-separated paths'),
+    },
+    handler: async (args, http) =>
+      readSkillFiles(http, String(args.name), Array.isArray(args.paths) ? (args.paths as string[]) : undefined),
   },
 
   // ── Mutating ───────────────────────────────────────────────────────────
@@ -340,6 +417,41 @@ export const TOOLS: Record<string, ToolDef> = {
     schema: { kind: z.string(), target: z.string(), action: z.string() },
     handler: async (args, http) =>
       expectOk(await http("POST", "/api/fix/repair", { kind: args.kind, target: args.target, action: args.action }), "fix_repair"),
+  },
+  save_skill: {
+    description:
+      'Save a skill into the vault from file contents. mode "create" makes a new staging skill: SKILL.md is required and its frontmatter name must equal `name`. mode "update" changes an existing skill: pass expected_sha256 (from read_skill_files) for every existing file you change and none for new files; files you leave out stay as they are and nothing is deleted. A "files changed" error means re-read and confirm with the user again.',
+    schema: {
+      name: z.string(),
+      mode: z.enum(["create", "update"]),
+      files: z
+        .array(z.object({ path: z.string(), content: z.string(), expected_sha256: z.string().optional() }))
+        .min(1)
+        .describe('Paths are relative and "/"-separated, e.g. SKILL.md or references/api.md'),
+    },
+    handler: async (args, http) => {
+      const r = await http("POST", `/api/skills/${encodeURIComponent(String(args.name))}/save`, {
+        mode: args.mode,
+        files: args.files,
+      });
+      const conflicts = (r.json as { conflicts?: Array<{ path: string }> } | null)?.conflicts;
+      if (r.status === 409 && Array.isArray(conflicts)) {
+        throw new BridgeToolError(
+          `save_skill: these files changed since they were read: ${conflicts.map((c) => c.path).join(", ")}. Re-read them with read_skill_files, show the user the new differences, and ask again.`,
+        );
+      }
+      return expectOk(r, "save_skill");
+    },
+  },
+  package_for_desktop: {
+    description:
+      "Build an upload-ready zip of a vault skill for Claude Desktop / claude.ai; the user uploads it in Settings → Capabilities → Skills. reveal:true also opens the folder holding the zip.",
+    schema: { skill: z.string(), reveal: z.boolean().optional() },
+    handler: async (args, http) => {
+      const out = expectOk(await http("POST", "/api/desktop", { skill: args.skill }), "package_for_desktop");
+      if (args.reveal) expectOk(await http("POST", "/api/desktop/reveal"), "package_for_desktop (reveal)");
+      return out;
+    },
   },
 };
 
