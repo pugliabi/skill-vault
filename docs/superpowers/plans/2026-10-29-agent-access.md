@@ -3450,8 +3450,8 @@ window isn't enough) and reopen it.
 
 - [ ] **Step 5: Check for personal data and commit**
 
-Run (from the worktree root): `git diff --cached --stat; grep -rnE "pugli|@gmail|C:\\\\Users\\\\" docs app/CHANGELOG.md app/bundled-skills || echo clean`
-Expected: `clean`.
+Run (from the worktree root): `grep -rnE "[A-Za-z]:\\\\Users\\\\|/Users/|/home/|[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.[A-Za-z]{2,}" docs/features.md docs/configuration.md docs/faq.md app/CHANGELOG.md app/bundled-skills || echo clean`
+Expected: `clean` (no user paths or email addresses).
 
 ```bash
 git add docs/features.md docs/configuration.md docs/faq.md app/CHANGELOG.md
