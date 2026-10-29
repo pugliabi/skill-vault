@@ -56,6 +56,7 @@ import { createHistoryRecorder, scanForUnrecordedChangesAsync } from "./services
 import { startNotionChecker } from "./services/notion/checker.ts";
 import { notionSignInPending } from "./services/notion/connection.ts";
 import { findFreePort } from "./services/freePort.ts";
+import { agentIdleMs, createAgentActivity } from "./services/agentActivity.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, "..");
@@ -73,6 +74,10 @@ export interface CreateAppOptions {
 export async function createApp(opts: CreateAppOptions): Promise<Express> {
   const app = express();
   app.use(express.json({ limit: "1mb" }));
+  // Bridge calls from Claude Desktop, Claude Code and the skill-vault command
+  // hold off the idle stop (see services/agentActivity.ts).
+  const agentActivity = createAgentActivity();
+  app.use("/api", agentActivity.track);
 
   // Compact request log so failures are visible during dev without spam.
   app.use((req, _res, next) => {
@@ -199,7 +204,9 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
   };
   // Work that must not be cut off by an idle stop (launcher --exit-when-idle).
   // A pending Notion sign-in counts: the app window is on notion.com meanwhile.
-  app.locals.isBusy = (): boolean => busyWithoutUpdate() || updater.isApplying() || notionSignInPending();
+  // An agent call in the last 10 minutes counts too (services/agentActivity.ts).
+  app.locals.isBusy = (): boolean =>
+    busyWithoutUpdate() || updater.isApplying() || notionSignInPending() || agentActivity.within(agentIdleMs());
 
   app.use(
     "/api",
