@@ -114,7 +114,7 @@ test("paths must be relative, /-separated, unique and not ignored", () => {
   for (const bad of ["../x.md", "/abs.md", "C:/x.md", "a\\b.md", "a//b.md", "./a.md", ".git/config"]) {
     refused(() => create("demo", [{ path: "SKILL.md", content: md("demo") }, { path: bad, content: "x" }]), 400, /invalid file path/);
   }
-  refused(() => create("demo", [{ path: "SKILL.md", content: md("demo") }, { path: "skill.md", content: "x" }]), 400, /duplicate/);
+  refused(() => create("demo", [{ path: "SKILL.md", content: md("demo") }, { path: "A.md", content: "x" }, { path: "a.md", content: "y" }]), 400, /duplicate/);
 });
 
 test("binary content and size limits are refused", () => {
