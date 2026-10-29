@@ -103,8 +103,9 @@ there for the user.
 ## Notion, status and updates
 
 - `notion_status`: whether Notion is connected and which skills are linked, changed or in conflict.
-- `notion_plan`, then `notion_run`; or `notion_push { skills }`. Show the plan and get a yes before
-  running it. One Notion job runs at a time: if a tool says one is busy, tell the user and stop.
+- `notion_plan { direction }` (`push` or `pull`) previews what would change. Show the user the plan,
+  and after a yes call `notion_run { direction, rows }` with the rows (each `id`, and its `action` if
+  the plan gave one) from the plan they approved. Or `notion_push { skills }` for specific skills. One Notion job runs at a time: if a tool says one is busy, tell the user and stop.
 - `check_updates { skills }`, then `apply_update`: update skills from where they came from (GitHub, a
   folder).
 - `audit_vault`: problems such as broken links or folders missing from the manifest.
