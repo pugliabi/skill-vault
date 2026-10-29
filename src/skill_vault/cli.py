@@ -52,6 +52,7 @@ if sys.platform == "win32":
                 pass
 
 import click
+import yaml
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -59,6 +60,7 @@ from rich.table import Table
 from skill_vault.config import (
     CONFIG_DIR,
     CONFIG_FILE,
+    DEFAULT_AGENT_DEFINITION_LOCATIONS,
     DEFAULT_AGENT_LOCATIONS,
     ResolvedPaths,
     default_config,
@@ -71,6 +73,7 @@ from skill_vault.config import (
     save_manifest,
     save_sync_log,
 )
+from skill_vault.agents import HARNESSES as AGENT_HARNESSES, find_agent_files, port_agent
 from skill_vault.compat import compatible_targets, detect_tool_specifics
 from skill_vault.conflicts import detect_conflict, resolve_interactive
 from skill_vault.converter import CONVERTERS, convert_for_perplexity, get_converter
@@ -735,7 +738,7 @@ COMMAND_GROUPS: list[tuple[str, list[str]]] = [
     ("Daily Use", ["push", "pull", "list", "add", "remove", "quick", "sync"]),
     ("Discovery", ["discover", "adopt", "scan", "adopt-remote"]),
     ("Staging", ["promote", "demote"]),
-    ("Advanced", ["share", "fix", "snapshot", "devices", "sync-from", "watch", "package", "import"]),
+    ("Advanced", ["share", "fix", "snapshot", "devices", "sync-from", "watch", "package", "import", "port-agent"]),
 ]
 
 
@@ -4410,6 +4413,69 @@ def sync(ctx, dry_run: bool):
         ctx.invoke(promote, skill_name=sname, do_push=False)
 
     console.print(f"\n  {ICON['ok']} [bold]Sync complete.[/]")
+
+
+# ── PORT-AGENT ──────────────────────────────────────────────
+
+
+@cli.command(name="port-agent")
+@click.argument("source_path", type=click.Path(exists=True, path_type=Path))
+@click.option("--from", "from_harness", required=True, type=click.Choice(AGENT_HARNESSES),
+              help="Harness the agent definition was written for")
+@click.option("--to", "to_harness", required=True, type=click.Choice(AGENT_HARNESSES),
+              help="Harness to port the agent definition to")
+@click.option("--out", "out_dir", type=click.Path(file_okay=False, path_type=Path), default=None,
+              help="Output directory (default: the target harness's agents folder)")
+@click.option("--dry-run", is_flag=True, help="Show what would be written without writing")
+@click.option("--force", is_flag=True, help="Overwrite existing agent files")
+def port_agent_cmd(source_path: Path, from_harness: str, to_harness: str,
+                   out_dir: Path | None, dry_run: bool, force: bool):
+    """Port agent definitions (subagents) between harnesses.
+
+    SOURCE_PATH is a single agent file or a folder of agent files.
+    Frontmatter, tool names and model names are translated; fields with
+    no equivalent in the target harness are dropped with a warning.
+
+    Examples:
+      sv port-agent ~/.claude/agents --from claude --to copilot
+      sv port-agent reviewer.agent.md --from copilot --to claude --out ./agents
+    """
+    if from_harness == to_harness:
+        raise click.UsageError("--from and --to must be different harnesses.")
+
+    dest = (out_dir or Path(DEFAULT_AGENT_DEFINITION_LOCATIONS[to_harness])).expanduser()
+    files = find_agent_files(source_path)
+    if not files:
+        console.print(f"[yellow]No agent definitions (*.md) found in {source_path}[/]")
+        return
+
+    ported = skipped = failed = 0
+    for src in files:
+        try:
+            out_name, content, warnings = port_agent(
+                src.read_text(encoding="utf-8"), from_harness, to_harness, filename=src.name,
+            )
+        except (ValueError, yaml.YAMLError) as exc:
+            console.print(f"  {ICON['err']} {src.name}: {exc}")
+            failed += 1
+            continue
+
+        out_path = dest / out_name
+        if out_path.exists() and not force:
+            console.print(f"  {ICON['warn']} {out_name}: already exists — skipped (use --force)")
+            skipped += 1
+            continue
+
+        console.print(f"  {ICON['ok']} {src.name} → [bold]{out_path}[/]")
+        for w in warnings:
+            console.print(f"      [yellow]![/] [dim]{w}[/]")
+        if not dry_run:
+            dest.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(content, encoding="utf-8")
+        ported += 1
+
+    verb = "Would port" if dry_run else "Ported"
+    console.print(f"\n  {verb} {ported} agent(s); {skipped} skipped, {failed} failed.")
 
 
 # ── Entry point ──────────────────────────────────────────────
