@@ -135,6 +135,15 @@ sv status            # sync state per skill × provider
 sv sync              # two-way sync plan
 ```
 
+### Port agent definitions (subagents)
+
+`sv port-agent` translates agent files between Claude Code (`~/.claude/agents/*.md`) and GitHub Copilot (`~/.copilot/agents/*.agent.md`). Name, description and body are copied. Tool names are mapped (for example, `Bash` ↔ `execute` and `mcp__server__tool` ↔ `server/tool`). Model aliases (`opus`/`sonnet`/`haiku`) are kept when ported to Claude. Fields with no equivalent are dropped with a warning:
+
+```bash
+sv port-agent ~/.claude/agents --from claude --to copilot --dry-run
+sv port-agent reviewer.agent.md --from copilot --to claude --out ./agents
+```
+
 Full command list and flags in [Getting Started](docs/getting-started.md) and [Configuration](docs/configuration.md).
 
 ## Repository layout
