@@ -46,7 +46,7 @@ function Row({ title, status, children }: { title: string; status: ReactNode; ch
 
 export function AgentAccessCard() {
   const qc = useQueryClient();
-  const { data: s } = useQuery({ queryKey: ["agent-access"], queryFn: () => api.agentAccess() });
+  const { data: s, isError, error } = useQuery({ queryKey: ["agent-access"], queryFn: () => api.agentAccess() });
   const refresh = () => qc.invalidateQueries({ queryKey: ["agent-access"] });
 
   const run = (fn: () => Promise<unknown>, ok: string, fail: string) => ({
@@ -61,7 +61,14 @@ export function AgentAccessCard() {
   const addSkill = useMutation({
     mutationFn: () => api.addVaultSkill(),
     onSuccess: (r) => {
-      toast.success(r.pushed.length ? `Added; pushed to ${r.pushed.join(", ")}` : "skill-vault is up to date in your vault");
+      const pushedTo = r.pushed.length ? ` and pushed it to ${r.pushed.join(", ")}` : "";
+      toast.success(
+        r.imported.includes("skill-vault")
+          ? `Added skill-vault to your vault${pushedTo}`
+          : r.updated.includes("skill-vault")
+            ? `Updated skill-vault in your vault${pushedTo}`
+            : "skill-vault is already up to date",
+      );
       for (const f of r.failed) toast.error(`Couldn't push to ${f.provider_id}: ${f.error}`);
       refresh();
       qc.invalidateQueries({ queryKey: ["skills"] });
@@ -102,6 +109,12 @@ export function AgentAccessCard() {
           tools and run Notion syncs. The <code style={{ fontFamily: "var(--mono)" }}>skill-vault</code> skill tells
           them how.
         </p>
+
+        {isError && (
+          <p style={{ margin: "0 0 10px", fontSize: 12.5, color: "var(--bad)" }}>
+            Couldn't load agent access status: {error instanceof Error ? error.message : "unknown error"}
+          </p>
+        )}
 
         <Row title="skill-vault skill" status={s ? `${SKILL_TEXT[s.skill.state]}${s.skill.targets.length ? ` Targets: ${s.skill.targets.join(", ")}.` : ""}` : "…"}>
           {(s?.skill.state === "not_in_vault" || s?.skill.state === "update_available") && (
