@@ -12,6 +12,7 @@ import {
   defaultStageDir,
   hashZipContentsNormalized,
   packageForClaudeDesktop,
+  recordDesktopPackage,
 } from "../services/desktopPackaging.ts";
 import { hashSkillDirNormalized } from "../services/skillHash.ts";
 import { readManifest, skillDir, writeManifest } from "../services/vault.ts";
@@ -19,26 +20,6 @@ import type {
   DesktopBackfillResult,
   DesktopPackageResult,
 } from "../types/vault.ts";
-
-/**
- * Record the packaging in the skill's manifest entry. There is no API to
- * see what's actually in the user's claude.ai account (custom skills don't
- * sync across surfaces and can't be listed programmatically), so this
- * record is the source of truth for desktop_status. Creates a minimal
- * entry for disk-only skills the manifest doesn't track yet.
- */
-function recordDesktopPackage(
-  vaultPath: string,
-  skill: string,
-  contentHash: string,
-  packagedAt: string,
-): void {
-  const manifest = readManifest(vaultPath);
-  const entry = manifest.skills[skill] ?? { targets: [] };
-  entry.desktop_package = { packaged_at: packagedAt, content_hash: contentHash };
-  manifest.skills[skill] = entry;
-  writeManifest(vaultPath, manifest);
-}
 
 /**
  * Claude Desktop — a *package* target, not a link target.

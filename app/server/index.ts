@@ -32,6 +32,7 @@ import { importRouter } from "./routes/import.ts";
 import { fixRouter } from "./routes/fix.ts";
 import { tagsRouter } from "./routes/tags.ts";
 import { desktopRouter } from "./routes/desktop.ts";
+import { agentAccessRouter } from "./routes/agentAccess.ts";
 import { openclawRouter } from "./routes/openclaw.ts";
 import { anyJobRunning as anyNotionJobRunning, claudeRouter, notionRouter } from "./routes/notion.ts";
 import {
@@ -250,6 +251,7 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
   app.use("/api/fix", fixRouter());
   app.use("/api/tags", tagsRouter());
   app.use("/api/desktop", desktopRouter());
+  app.use("/api/agent-access", agentAccessRouter({ appRoot: APP_ROOT }));
   app.use("/api/openclaw", openclawRouter());
   app.use("/api/notion", notionRouter());
   app.use("/api/claude", claudeRouter());
