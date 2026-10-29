@@ -73,6 +73,10 @@ export interface CreateAppOptions {
 
 export async function createApp(opts: CreateAppOptions): Promise<Express> {
   const app = express();
+  // POST /api/skills/:name/save carries whole skills (up to 5 MB of files).
+  // Parsed here first: body-parser skips a body that's already been read, so
+  // the 1 MB default below never sees it.
+  app.use("/api/skills/:name/save", express.json({ limit: "6mb" }));
   app.use(express.json({ limit: "1mb" }));
   // Bridge calls from Claude Desktop, Claude Code and the skill-vault command
   // hold off the idle stop (see services/agentActivity.ts).
