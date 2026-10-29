@@ -79,6 +79,35 @@ test("GET /callback with a bad state redirects back to settings with an error", 
   assert.ok(loc.startsWith("/settings?notion=error&message="), loc);
 });
 
+test("a network failure reaching Notion returns 502 with its cause, not a bare 'fetch failed'", async () => {
+  const express = (await import("express")).default;
+  const { notionRouter } = await import("./notion.ts");
+  const cause = Object.assign(new Error("getaddrinfo ENOTFOUND mcp.notion.com"), { code: "ENOTFOUND" });
+  const app = express();
+  app.use(
+    "/api/notion",
+    notionRouter({
+      openApi: async () => {
+        throw new TypeError("fetch failed", { cause });
+      },
+    }),
+  );
+  const s = app.listen(0);
+  await new Promise<void>((resolve) => s.once("listening", () => resolve()));
+  const errLog = console.error;
+  console.error = () => {};
+  try {
+    const port = (s.address() as { port: number }).port;
+    const res = await fetch(`http://127.0.0.1:${port}/api/notion/data-sources`);
+    assert.equal(res.status, 502);
+    const { error } = (await res.json()) as { error: string };
+    assert.match(error, /^Couldn't reach Notion \(mcp\.notion\.com\): getaddrinfo ENOTFOUND mcp\.notion\.com \[ENOTFOUND\]/);
+  } finally {
+    console.error = errLog;
+    await new Promise<void>((resolve) => s.close(() => resolve()));
+  }
+});
+
 test("POST /skills/:name/vault-only and /unlink write the link state", async () => {
   let res = await fetch(`${base}/notion/skills/mine/vault-only`, { method: "POST" });
   assert.equal(res.status, 200);

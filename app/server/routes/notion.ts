@@ -15,6 +15,7 @@ import {
   finishNotionAuth,
   getNotionClient,
   missingTools,
+  notionErrorMessage,
   startNotionAuth,
 } from "../services/notion/connection.ts";
 import {
@@ -149,7 +150,7 @@ function sendError(res: Response, err: unknown): void {
     res.status(400).json({ error: (err as Error).message });
   } else {
     console.error("[notion]", err);
-    res.status(502).json({ error: (err as Error).message });
+    res.status(502).json({ error: notionErrorMessage(err) });
   }
 }
 
@@ -231,7 +232,8 @@ export function notionRouter(deps: NotionRouterDeps = {}): Router {
       await probeTools(req);
       res.redirect(302, `${page}?notion=connected`);
     } catch (err) {
-      res.redirect(302, `${page}?notion=error&message=${encodeURIComponent((err as Error).message)}`);
+      console.error("[notion] sign-in callback failed:", err);
+      res.redirect(302, `${page}?notion=error&message=${encodeURIComponent(notionErrorMessage(err))}`);
     }
   });
 

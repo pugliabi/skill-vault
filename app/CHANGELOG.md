@@ -44,6 +44,11 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
 ## [Unreleased] - 2026-10-27
 
 ### Fixed
+- Connecting Notion when the server can't reach `mcp.notion.com` now says why
+  (DNS, timeout, or an HTTPS certificate from a proxy or antivirus) instead of
+  a bare "fetch failed"; sign-in callback failures are logged to `server.log`.
+- The sidebar shows the app's real version (from `app/package.json`) instead
+  of a hard-coded one.
 - Notion push/pull of single-file skills: Notion now returns these as inline
   text instead of an archive link, which failed with "returned no archive".
 - The assistant failing with "API key is not scoped to a workspace": choose
@@ -79,6 +84,11 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
   console, reuses a running server (one launch at a time, so double-clicks
   never start a second copy), and stops it about a minute after the last
   window closes. Shortcut-started servers always bind `127.0.0.1`.
+- New-version prompt: when GitHub's `main` carries a higher `app/package.json`
+  version, the update dialog opens by itself at startup (once per window) with
+  that version's CHANGELOG section as release notes. Plain commits still only
+  light the pill. The first update check runs 5 s after start (was 30 s) and
+  retries while a job is running.
 - In-app updates: an **Update available** button when GitHub's `main` is ahead;
   the dialog re-checks when opened. **Update & restart** pulls, rebuilds into a
   staging folder swapped in by rename, waits for running jobs, and restarts on

@@ -15,6 +15,13 @@ export interface AppUpdateStatus {
   ahead: number;
   dirty: boolean;
   commits: Array<{ sha: string; subject: string }>;
+  /** Installed app version and the one on GitHub's main. */
+  version: string | null;
+  latest_version: string | null;
+  /** main carries a higher version (not just new commits): prompt at startup. */
+  new_version: boolean;
+  /** CHANGELOG sections for the new version(s), markdown. */
+  notes: string;
   checked_at: string | null;
   can_apply: boolean;
   reason?: string;

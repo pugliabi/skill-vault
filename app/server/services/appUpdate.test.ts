@@ -4,11 +4,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  compareVersions,
   createAppUpdater,
   decideCanApply,
   defaultRun,
   parseCommits,
   parseLeftRight,
+  releaseNotes,
   runSpawnOptions,
   summarizeOutput,
   swapDist,
@@ -60,6 +62,9 @@ const facts = (over: Partial<GitFacts> = {}): GitFacts => ({
   behind: 2,
   dirty: false,
   commits: [],
+  version: null,
+  latestVersion: null,
+  notes: "",
   ...over,
 });
 const updater = (run: Run, extra: Partial<Parameters<typeof createAppUpdater>[0]> = {}) =>
@@ -167,6 +172,100 @@ test("the scheduled check waits while a job is running", async () => {
   await new Promise((r) => setTimeout(r, 50));
   u.stop();
   assert.ok(calls.includes("git fetch origin --quiet"));
+});
+
+test("the startup check retries while a job runs instead of waiting for the 6-hour cadence", async () => {
+  let busy = true;
+  const { run, calls } = fakeRun(BEHIND);
+  const u = updater(run, { isBusy: () => busy, firstRunDelayMs: 5, intervalMs: 60 * 60_000 });
+  u.start();
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(calls.length, 0);
+  busy = false;
+  await new Promise((r) => setTimeout(r, 30));
+  u.stop();
+  assert.ok(calls.includes("git fetch origin --quiet"));
+});
+
+// ── New versions: app/package.json on origin/main vs HEAD ──
+
+const pkg = (version: string) => ({ stdout: JSON.stringify({ name: "skill-vault-app", version }, null, 2) });
+const CHANGELOG = [
+  "# Changelog",
+  "",
+  "## [Unreleased]",
+  "- Not out yet",
+  "",
+  "## [0.3.0] - 2026-11-02",
+  "### Added",
+  "- Third thing",
+  "",
+  "## [0.2.0] - 2026-10-29",
+  "### Fixed",
+  "- Second thing",
+  "",
+  "## [0.1.0] - 2026-10-01",
+  "- First thing",
+].join("\n");
+
+test("compareVersions orders x.y.z numerically", () => {
+  assert.equal(compareVersions("0.2.0", "0.1.9"), 1);
+  assert.equal(compareVersions("0.10.0", "0.9.0"), 1);
+  assert.equal(compareVersions("1.0.0", "1.0.0"), 0);
+  assert.equal(compareVersions("v1.2", "1.2.0"), 0);
+  assert.equal(compareVersions("0.1.0", "0.2.0-beta.1"), -1);
+});
+
+test("releaseNotes keeps the sections after the installed version up to the new one", () => {
+  const notes = releaseNotes(CHANGELOG, "0.1.0", "0.3.0");
+  assert.match(notes, /^## \[0\.3\.0\] - 2026-11-02/);
+  assert.match(notes, /Third thing[\s\S]*## \[0\.2\.0\][\s\S]*Second thing/);
+  assert.doesNotMatch(notes, /Unreleased|Not out yet|First thing/);
+  assert.equal(releaseNotes(CHANGELOG, "0.2.0", "0.2.0"), "");
+  assert.equal(releaseNotes("no headings here", "0.1.0", "0.2.0"), "");
+});
+
+test("long release notes are cut at a line break, never mid-line", () => {
+  const line = "- **Bold** item that must not be split\n";
+  const notes = releaseNotes(`## [0.2.0]\n${line.repeat(200)}`, "0.1.0", "0.2.0");
+  assert.ok(notes.length <= 4005, String(notes.length));
+  assert.match(notes, /must not be split\n\n…$/);
+});
+
+test("a higher version on origin/main is a new version, with its release notes", async () => {
+  const { run } = fakeRun({
+    ...BEHIND,
+    "git show HEAD:app/package.json": pkg("0.1.0"),
+    "git show origin/main:app/package.json": pkg("0.2.0"),
+    "git show origin/main:app/CHANGELOG.md": { stdout: CHANGELOG },
+  });
+  const s = await updater(run).check();
+  assert.equal(s.version, "0.1.0");
+  assert.equal(s.latest_version, "0.2.0");
+  assert.equal(s.new_version, true);
+  assert.match(s.notes, /^## \[0\.2\.0\][\s\S]*Second thing$/);
+  assert.equal(s.can_apply, true);
+});
+
+test("new commits without a version bump only count as behind, not a new version", async () => {
+  const { run, calls } = fakeRun({
+    ...BEHIND,
+    "git show HEAD:app/package.json": pkg("0.2.0"),
+    "git show origin/main:app/package.json": pkg("0.2.0"),
+  });
+  const s = await updater(run).check();
+  assert.equal(s.behind, 2);
+  assert.equal(s.new_version, false);
+  assert.equal(s.notes, "");
+  assert.ok(!calls.includes("git show origin/main:app/CHANGELOG.md"), "no changelog read without a bump");
+});
+
+test("an unreadable package.json version never reports a new version", async () => {
+  const { run } = fakeRun({ ...BEHIND, "git show origin/main:app/package.json": { stdout: "{ not json" } });
+  const s = await updater(run).check();
+  assert.equal(s.version, null);
+  assert.equal(s.latest_version, null);
+  assert.equal(s.new_version, false);
 });
 
 // ── The real runner. These use node itself, so no git or npm is needed. ──
