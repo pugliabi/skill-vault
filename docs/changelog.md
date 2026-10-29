@@ -4,9 +4,18 @@ User-facing history of the Skill Vault project (app + CLI). The app keeps a
 more detailed log in [app/CHANGELOG.md](../app/CHANGELOG.md). Versions follow
 semver; the project is pre-1.0, so minor versions carry feature batches.
 
-## [Unreleased] - 2026-10-27
+## [0.3.0] - 2026-10-29 — Agents preview
+
+Adds the first agent-definition (subagent) porting support as a CLI-only
+preview. Agents aren't stored in the vault or shown in the app yet; that is
+planned for 0.4.0 ([#1](https://github.com/pugliabi/skill-vault/issues/1)).
 
 ### Added
+- **Port agent definitions between harnesses (CLI preview)** — `sv agents list`
+  and `sv agents port <name> --from claude --to copilot` (or the reverse)
+  translate subagent frontmatter, tool names, MCP tool references, and Claude
+  model IDs. Fields with no equivalent are dropped with a warning; ports that
+  would widen tool access are refused. ([features](./features.md#porting-agent-definitions-subagents--cli-preview))
 - **One-script Windows install** — `.\setup.cmd` checks Node 20+ and git,
   installs, builds, and adds **Start Menu → Skill Vault**; `-Uninstall`
   removes only the shortcuts. ([getting started](./getting-started.md#install-and-launch-the-app))

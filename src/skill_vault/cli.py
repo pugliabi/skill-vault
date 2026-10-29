@@ -71,6 +71,14 @@ from skill_vault.config import (
     save_manifest,
     save_sync_log,
 )
+from skill_vault.agents import (
+    HARNESSES as AGENT_HARNESSES,
+    AgentPortError,
+    agent_stem,
+    find_agent_file,
+    list_agent_files,
+    port_agent_file,
+)
 from skill_vault.compat import compatible_targets, detect_tool_specifics
 from skill_vault.conflicts import detect_conflict, resolve_interactive
 from skill_vault.converter import CONVERTERS, convert_for_perplexity, get_converter
@@ -188,6 +196,7 @@ def _show_command_list() -> None:
             ("sync-from <device>", "Sync from another device"),
             ("watch [-i interval]", "Auto-push on changes"),
             ("package <name> -t", "Package for target format"),
+            ("agents port <name>", "Port agent definitions"),
         ]),
     ]
     for group_name, cmds in groups:
@@ -3871,6 +3880,100 @@ def import_skill(skill_name: str, from_target: str):
 # UI is now shipped as an independent npm package, `skill-vault-app`,
 # which shares only the on-disk vault format with this CLI (see
 # docs/vault-format.md). Install it with `npx skill-vault-app`.
+
+
+# ── AGENTS (port agent definitions between harnesses) ─────────
+
+
+@cli.group(name="agents")
+def agents_cmd():
+    """Port agent definitions (subagents) between harnesses.
+
+    Supported harnesses: claude (~/.claude/agents), copilot (~/.copilot/agents).
+
+    Examples:
+      sv agents list
+      sv agents port code-reviewer --from claude --to copilot
+      sv agents port --all --from copilot --to claude --dry-run
+    """
+    pass
+
+
+@agents_cmd.command(name="list")
+@click.option("--harness", "harness_names", multiple=True,
+              type=click.Choice(sorted(AGENT_HARNESSES)), help="Limit to a harness")
+def agents_list(harness_names: tuple[str, ...]):
+    """List agent definitions found in each harness's agents directory."""
+    table = _styled_table(show_header=True, header_style="bold")
+    table.add_column("Harness", style="cyan", no_wrap=True)
+    table.add_column("Agent")
+    table.add_column("File", style="dim")
+    total = 0
+    for h in harness_names or sorted(AGENT_HARNESSES):
+        for p in list_agent_files(h):
+            table.add_row(h, agent_stem(p), str(p))
+            total += 1
+    if not total:
+        console.print("[yellow]No agent definitions found.[/]")
+        return
+    console.print(table)
+    console.print(f"\n[dim]{total} agent definition(s)[/]")
+
+
+@agents_cmd.command(name="port")
+@click.argument("agent", required=False)
+@click.option("--from", "from_harness", required=True,
+              type=click.Choice(sorted(AGENT_HARNESSES)), help="Source harness")
+@click.option("--to", "to_harness", required=True,
+              type=click.Choice(sorted(AGENT_HARNESSES)), help="Target harness")
+@click.option("--all", "port_all", is_flag=True, help="Port every agent in the source harness")
+@click.option("--out", "-o", "out_dir", type=click.Path(file_okay=False),
+              help="Output directory (default: the target harness's agents directory)")
+@click.option("--force", is_flag=True, help="Overwrite existing agent files")
+@click.option("--dry-run", is_flag=True, help="Show what would be written without writing")
+def agents_port(agent: str | None, from_harness: str, to_harness: str, port_all: bool,
+                out_dir: str | None, force: bool, dry_run: bool):
+    """Translate an agent definition from one harness to another.
+
+    AGENT is an agent name in the source harness's directory, or a path to an
+    agent file. Fields with no equivalent in the target are dropped with a warning.
+    """
+    if bool(agent) == port_all:
+        console.print("[red]Give an AGENT name/path or --all (not both).[/]")
+        raise SystemExit(1)
+    if from_harness == to_harness:
+        console.print("[red]--from and --to must be different harnesses.[/]")
+        raise SystemExit(1)
+
+    if port_all:
+        sources = list_agent_files(from_harness)
+        if not sources:
+            console.print(f"[yellow]No agent definitions found for {from_harness}.[/]")
+            return
+    else:
+        p = Path(agent).expanduser()
+        src = p if p.is_file() else find_agent_file(from_harness, agent)
+        if src is None:
+            console.print(f"[red]Agent '{agent}' not found for {from_harness}.[/]")
+            raise SystemExit(1)
+        sources = [src]
+
+    dest_dir = Path(out_dir).expanduser().resolve() if out_dir else None
+    failed = 0
+    for src in sources:
+        try:
+            result = port_agent_file(src, from_harness, to_harness, dest_dir,
+                                     overwrite=force, dry_run=dry_run)
+        except (AgentPortError, OSError) as e:
+            console.print(f"[red]✗[/] {src.name}: {e}")
+            failed += 1
+            continue
+        verb = "Would write" if dry_run else "Wrote"
+        console.print(f"[green]✓[/] {verb} {result.path}")
+        for w in result.warnings:
+            console.print(f"    [yellow]⚠[/] {w}")
+    if failed:
+        raise SystemExit(1)
 
 
 # ── PROVIDER (manage providers) ───────────────────────────────
