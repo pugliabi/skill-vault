@@ -1,5 +1,6 @@
 import type {
   ActivityEntry,
+  AgentAccessStatus,
   ClaudeStatus,
   ConflictResolveBody,
   DiffLine,
@@ -362,6 +363,17 @@ export const api = {
   // never overwritten.
   desktopBackfill: () =>
     request<DesktopBackfillResult>("POST", "/api/desktop/backfill"),
+
+  // ── agent access (Settings → Agent access) ─────────────────
+  agentAccess: () => request<AgentAccessStatus>("GET", "/api/agent-access"),
+  addVaultSkill: () =>
+    request<{ pushed: string[]; failed: Array<{ provider_id: string; error: string }> }>("POST", "/api/agent-access/skill/add"),
+  vaultSkillPrompt: () => request<{ prompt: string }>("GET", "/api/agent-access/skill/prompt"),
+  vaultSkillZip: () => request<{ zip_path: string; stage_dir: string }>("POST", "/api/agent-access/skill/zip"),
+  connectDesktop: () => request<AgentAccessStatus["claude_desktop"]>("POST", "/api/agent-access/desktop/connect"),
+  disconnectDesktop: () => request<AgentAccessStatus["claude_desktop"]>("POST", "/api/agent-access/desktop/disconnect"),
+  connectClaudeCode: () => request<AgentAccessStatus["claude_code"]>("POST", "/api/agent-access/claude-code/connect"),
+  disconnectClaudeCode: () => request<AgentAccessStatus["claude_code"]>("POST", "/api/agent-access/claude-code/disconnect"),
 
   // ── openclaw (export target) ───────────────────────────────
   // OpenClaw runs in an isolated WSL distro with no filesystem bridge, so
