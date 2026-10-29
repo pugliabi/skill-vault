@@ -20,6 +20,7 @@
 
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { IGNORE_NAMES } from "../services/skillHash.ts";
 
 /** Minimal HTTP seam: method + path (+ optional JSON body) → status + parsed JSON. */
 export type BridgeHttp = (
@@ -148,7 +149,8 @@ async function readSkillFiles(http: BridgeHttp, name: string, only?: string[]): 
     wanted = only.map((p) => ({ path: p.replace(/\\/g, "/"), size: 0 }));
   } else {
     const detail = expectOk(await http("GET", `/api/skills/${enc}`), "read_skill_files") as { files?: TreeNode };
-    wanted = detail.files ? treeFiles(detail.files) : [];
+    // Ignored folders (.git, node_modules...) are listed by the tree but save_skill refuses their paths.
+    wanted = (detail.files ? treeFiles(detail.files) : []).filter((w) => !w.path.split("/").some((seg) => IGNORE_NAMES.has(seg)));
     wanted.sort((a, b) => (a.path === "SKILL.md" ? -1 : b.path === "SKILL.md" ? 1 : a.path.localeCompare(b.path)));
   }
   const files: Array<{ path: string; content: string; sha256: string | null; size: number }> = [];

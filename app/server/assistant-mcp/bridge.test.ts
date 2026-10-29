@@ -348,3 +348,31 @@ test("package_for_desktop packages, and opens the folder only when asked", async
   await TOOLS.package_for_desktop.handler({ skill: "demo", reveal: true }, reveal, noSleep);
   assert.deepEqual(reveal.calls.map((c) => c.path), ["/api/desktop", "/api/desktop/reveal"]);
 });
+
+test("read_skill_files leaves out files under ignored folders", async () => {
+  const http = fakeHttp([
+    {
+      status: 200,
+      json: {
+        files: {
+          name: "demo", path: "", type: "dir",
+          children: [
+            { name: "SKILL.md", path: "SKILL.md", type: "file", size: 5 },
+            { name: ".git", path: ".git", type: "dir", children: [{ name: "config", path: ".git/config", type: "file", size: 4 }] },
+            { name: "node_modules", path: "node_modules", type: "dir", children: [
+              { name: "x", path: "node_modules/x", type: "dir", children: [{ name: "index.js", path: "node_modules/x/index.js", type: "file", size: 4 }] },
+            ] },
+          ],
+        },
+      },
+    },
+    textFile("hello"),
+  ]);
+  const out = (await TOOLS.read_skill_files.handler({ name: "demo" }, http, noSleep)) as {
+    files: Array<{ path: string }>;
+    skipped: unknown[];
+  };
+  assert.deepEqual(http.calls.map((c) => c.path), ["/api/skills/demo", "/api/skills/demo/files/SKILL.md"]);
+  assert.deepEqual(out.files.map((f) => f.path), ["SKILL.md"]);
+  assert.deepEqual(out.skipped, []);
+});
