@@ -85,6 +85,30 @@ Claude Desktop loads skills from your claude.ai account rather than a local fold
 - **Export to OpenClaw** — installs a skill into the isolated OpenClaw WSL gateway via its own CLI.
 - The Zip action on any skill produces a portable archive.
 
+## Porting agent definitions (subagents) — CLI preview
+
+Skills share one portable format; agent definitions don't. `sv agents` translates single-file agent definitions between **Claude Code** (`~/.claude/agents/<name>.md`) and **GitHub Copilot CLI** (`~/.copilot/agents/<name>.agent.md`). It doesn't need `sv init` and works directly on those folders — agents aren't stored in the vault yet.
+
+```bash
+sv agents list                                            # agents found per harness
+sv agents port code-reviewer --from claude --to copilot   # one agent (name or file path)
+sv agents port --all --from copilot --to claude --dry-run # preview a bulk port
+sv agents port my-agent --from claude --to copilot --out ./.github/agents
+```
+
+What gets translated:
+
+| | Claude Code | Copilot CLI |
+|---|---|---|
+| Tools | `Bash`, `Read`, `Edit`/`Write`, `Grep`/`Glob`, `Task`, `WebFetch`/`WebSearch`, `TodoWrite` | `execute`, `read`, `edit`, `search`, `agent`, `web`, `todo` |
+| MCP tools | `mcp__server__tool`, `mcp__server` | `server/tool`, `server/*` |
+| Model | `claude-sonnet-4-5[-date]` | `claude-sonnet-4.5` |
+| Name | file name (`name` is the identifier) | `name` (display name) |
+
+- Fields with no equivalent (`color`, `permissionMode`, `hooks`, `target`, `mcp-servers`, …) are **dropped with a warning**, and so are unversioned Claude aliases (`sonnet`, `opus`) and non-Claude models; the ported agent uses the target's default model.
+- Ports never **widen** tool access: if an agent lists tools and none of them map, or it has an empty tool list, the port is refused. Scoped tools such as `Bash(git:*)` port as the unscoped tool with a warning.
+- Existing files are not overwritten unless you pass `--force`.
+
 ## Multi-device sync
 
 ![Devices](images/devices.jpg)

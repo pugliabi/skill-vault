@@ -7,6 +7,11 @@ semver; the project is pre-1.0, so minor versions carry feature batches.
 ## [Unreleased] - 2026-10-27
 
 ### Added
+- **Port agent definitions between harnesses (CLI preview)** — `sv agents list`
+  and `sv agents port <name> --from claude --to copilot` (or the reverse)
+  translate subagent frontmatter, tool names, MCP tool references, and Claude
+  model IDs. Fields with no equivalent are dropped with a warning; ports that
+  would widen tool access are refused. ([features](./features.md#porting-agent-definitions-subagents--cli-preview))
 - **One-script Windows install** — `.\setup.cmd` checks Node 20+ and git,
   installs, builds, and adds **Start Menu → Skill Vault**; `-Uninstall`
   removes only the shortcuts. ([getting started](./getting-started.md#install-and-launch-the-app))

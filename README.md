@@ -133,6 +133,7 @@ sv init              # wizard: vault directory + provider detection
 sv quick             # discover → adopt → push, guided
 sv status            # sync state per skill × provider
 sv sync              # two-way sync plan
+sv agents port my-agent --from claude --to copilot   # port a subagent definition
 ```
 
 Full command list and flags in [Getting Started](docs/getting-started.md) and [Configuration](docs/configuration.md).
