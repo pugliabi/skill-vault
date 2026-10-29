@@ -136,3 +136,16 @@ test("parseSaveRequest checks the body shape", () => {
     files: [{ path: "a", content: "b", expected_sha256: "h" }],
   });
 });
+
+test("a case variant of SKILL.md is refused and writes nothing", () => {
+  create("demo");
+  const before = read("demo", "SKILL.md");
+  refused(
+    () => saveSkill(vault, "demo", { mode: "update", files: [{ path: "skill.md", content: md("other"), expected_sha256: sha(before) }] }, "x"),
+    400,
+    /exact name SKILL.md/,
+  );
+  assert.equal(read("demo", "SKILL.md"), before);
+  refused(() => create("fresh", [{ path: "Skill.md", content: md("fresh") }]), 400, /exact name SKILL.md/);
+  assert.equal(fs.existsSync(path.join(vault, "skills", "fresh")), false);
+});

@@ -103,6 +103,9 @@ export function saveSkill(vaultPath: string, name: string, req: SaveRequest, sou
     const rel = cleanRelPath(f.path);
     const abs = rel ? resolveSkillFilePath(vaultPath, name, rel) : null;
     if (!rel || !abs) throw new SaveError(400, `invalid file path: ${f.path}`);
+    if (rel.toLowerCase() === "skill.md" && rel !== "SKILL.md") {
+      throw new SaveError(400, `Use the exact name SKILL.md (got "${rel}")`);
+    }
     const key = rel.toLowerCase();
     if (seen.has(key)) throw new SaveError(400, `duplicate file path: ${rel}`);
     seen.add(key);
