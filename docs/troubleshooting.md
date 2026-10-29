@@ -182,6 +182,14 @@ Or set the ANTHROPIC_API_KEY environment variable.
 
 ## Notion
 
+### Problem: "Connect Notion" fails with "Couldn't reach Notion" (older versions: "fetch failed")
+
+**Symptoms**: clicking **Connect Notion** shows an error right away and never opens notion.com, even though Notion opens fine in the browser.
+
+**Cause**: the app's server (Node.js), not the browser, talks to `mcp.notion.com`, and it can't get through. The error names the reason: a certificate code (`SELF_SIGNED_CERT_IN_CHAIN`, `UNABLE_TO_GET_ISSUER_CERT_LOCALLY`) means a proxy or antivirus is inspecting HTTPS with a certificate the browser trusts but Node.js doesn't; `ENOTFOUND` means the name couldn't be looked up; a timeout means a firewall or proxy is blocking Node.js. The full error is in `~/.skill-vault/logs/server.log` (lines starting `[notion]`).
+
+**Solution**: for certificate errors, allow `mcp.notion.com` through the HTTPS inspection, or start the server with Node's `--use-system-ca` flag (Node 22.15+) so it trusts the Windows certificate store. For lookups and timeouts, check the connection or proxy settings, then try **Connect Notion** again.
+
 ### Problem: Pushing to Notion fails with "returned no archive"
 
 **Symptoms**: pushing (or pulling) a skill that is only a `SKILL.md` fails with `download-skill returned no archive for <page id>`; such skills may also sit in "changed in vault" forever.

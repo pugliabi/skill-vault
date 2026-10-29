@@ -2,8 +2,11 @@
  * In-app updates for a git-cloned install (design: docs/superpowers/specs/
  * 2026-10-27-install-and-launch-design.md §5).
  *
- * Check: `git fetch origin` 30 s after start and every 6 h, then compare
- * HEAD with origin/main. Apply (below): pull --ff-only → `npm ci` only when
+ * Check: `git fetch origin` 5 s after start and every 6 h, then compare
+ * HEAD with origin/main. A higher app/package.json version on origin/main is
+ * a new version (the client prompts for it at startup, with its CHANGELOG
+ * section as release notes); other commits only light the Update pill.
+ * Apply (below): pull --ff-only → `npm ci` only when
  * package-lock.json changed → build into dist-next/ and swap it into dist/
  * → hand over to a fresh server (deps.restart). Any failure before the
  * hand-over resets the checkout to the old commit (`git reset --keep`: a
@@ -101,6 +104,11 @@ export interface GitFacts {
   behind: number;
   dirty: boolean;
   commits: Array<{ sha: string; subject: string }>;
+  /** app/package.json "version" at HEAD and on origin/main (null when unreadable). */
+  version: string | null;
+  latestVersion: string | null;
+  /** CHANGELOG sections for the versions between them ("" when there are none). */
+  notes: string;
   fetchError?: string;
 }
 
@@ -116,6 +124,9 @@ const NO_FACTS: GitFacts = {
   behind: 0,
   dirty: false,
   commits: [],
+  version: null,
+  latestVersion: null,
+  notes: "",
 };
 
 /** Real path (symlinks, junctions, 8.3 names resolved) for comparing folders; case-folded on Windows. */
@@ -149,6 +160,52 @@ export function parseCommits(out: string): Array<{ sha: string; subject: string 
     });
 }
 
+/** Compare "x.y.z" versions numerically (a leading "v" and any "-pre" suffix are ignored). */
+export function compareVersions(a: string, b: string): number {
+  const nums = (v: string) => v.trim().replace(/^v/, "").split("-")[0].split(".").map((n) => Number.parseInt(n, 10) || 0);
+  const x = nums(a);
+  const y = nums(b);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = (x[i] ?? 0) - (y[i] ?? 0);
+    if (d !== 0) return Math.sign(d);
+  }
+  return 0;
+}
+
+const NOTES_MAX = 4000;
+
+/**
+ * The CHANGELOG sections ("## [0.2.0] - 2026-10-29" or "## 0.2.0") newer
+ * than `from`, up to and including `to`, in file order. "## [Unreleased]"
+ * and any other non-version heading end a section.
+ */
+export function releaseNotes(changelog: string, from: string, to: string): string {
+  const out: string[] = [];
+  let keep = false;
+  for (const line of changelog.split(/\r?\n/)) {
+    if (/^##\s/.test(line)) {
+      const v = /^##\s+\[?v?(\d+(?:\.\d+)*)/.exec(line)?.[1];
+      keep = !!v && compareVersions(v, from) > 0 && compareVersions(v, to) <= 0;
+    }
+    if (keep) out.push(line);
+  }
+  const text = out.join("\n").trim();
+  if (text.length <= NOTES_MAX) return text;
+  // Cut at a line break so the markdown stays well formed.
+  const cut = text.lastIndexOf("\n", NOTES_MAX);
+  return `${text.slice(0, cut > 0 ? cut : NOTES_MAX).trimEnd()}\n\n…`;
+}
+
+/** The "version" field of a package.json text, or null. */
+function packageVersion(text: string): string | null {
+  try {
+    const v = (JSON.parse(text) as { version?: unknown }).version;
+    return typeof v === "string" && v.trim() ? v.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function readGitFacts(run: Run, appDir: string, opts: { fetch: boolean }): Promise<GitFacts> {
   const git = (...args: string[]) => run("git", args, { cwd: appDir, timeoutMs: 60_000 });
   const top = await git("rev-parse", "--show-toplevel");
@@ -174,6 +231,16 @@ export async function readGitFacts(run: Run, appDir: string, opts: { fetch: bool
   // A failed status is treated as dirty: refusing an update is the safe direction.
   const dirty = porcelain.code !== 0 || porcelain.stdout.trim().length > 0;
   const commits = hasMain ? parseCommits((await git("log", "--format=%h%x09%s", "HEAD..origin/main")).stdout) : [];
+  // Versions are read from the app folder, which is the checkout root's child when appInRoot.
+  const show = async (rev: string, file: string) => {
+    if (!appInRoot) return null;
+    const r = await git("show", `${rev}:${path.basename(appDir)}/${file}`);
+    return r.code === 0 ? r.stdout : null;
+  };
+  const version = packageVersion((await show("HEAD", "package.json")) ?? "");
+  const latestVersion = hasMain ? packageVersion((await show("origin/main", "package.json")) ?? "") : null;
+  const newer = !!version && !!latestVersion && compareVersions(latestVersion, version) > 0;
+  const notes = newer ? releaseNotes((await show("origin/main", "CHANGELOG.md")) ?? "", version, latestVersion) : "";
   return {
     isRepo: true,
     hasOrigin: true,
@@ -185,6 +252,9 @@ export async function readGitFacts(run: Run, appDir: string, opts: { fetch: bool
     ...counts,
     dirty,
     commits,
+    version,
+    latestVersion,
+    notes,
     ...(fetchError ? { fetchError } : {}),
   };
 }
@@ -218,6 +288,13 @@ export interface AppUpdateStatus {
   ahead: number;
   dirty: boolean;
   commits: Array<{ sha: string; subject: string }>;
+  /** The installed app version and the one on GitHub's main. */
+  version: string | null;
+  latest_version: string | null;
+  /** main carries a higher version, not just new commits: the client prompts at startup. */
+  new_version: boolean;
+  /** CHANGELOG sections for the new version(s) (markdown, "" when none). */
+  notes: string;
   checked_at: string | null;
   can_apply: boolean;
   reason?: string;
@@ -318,7 +395,7 @@ export interface AppUpdater {
   stop(): void;
 }
 
-const FIRST_CHECK_DELAY_MS = 30_000;
+const FIRST_CHECK_DELAY_MS = 5_000;
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const short = (sha: string | null) => (sha ? sha.slice(0, 7) : null);
 
@@ -344,6 +421,10 @@ export function createAppUpdater(deps: AppUpdaterDeps): AppUpdater {
         ahead: 0,
         dirty: false,
         commits: [],
+        version: null,
+        latest_version: null,
+        new_version: false,
+        notes: "",
         checked_at: null,
         can_apply: false,
         reason: "not checked yet",
@@ -361,6 +442,14 @@ export function createAppUpdater(deps: AppUpdaterDeps): AppUpdater {
       ahead: facts.ahead,
       dirty: facts.dirty,
       commits: facts.commits,
+      version: facts.version,
+      latest_version: facts.latestVersion,
+      new_version:
+        facts.behind > 0 &&
+        !!facts.version &&
+        !!facts.latestVersion &&
+        compareVersions(facts.latestVersion, facts.version) > 0,
+      notes: facts.notes,
       checked_at: checkedAt,
       ...decideCanApply(facts, { mode: deps.mode, busy: deps.isBusy(), applying }),
       ...(error ? { last_error: error } : {}),
@@ -388,8 +477,11 @@ export function createAppUpdater(deps: AppUpdaterDeps): AppUpdater {
     return inFlight;
   }
 
-  const tick = () => {
-    if (!applying && !deps.isBusy()) void check();
+  /** Run a scheduled check unless something is busy; true when it ran. */
+  const tick = (): boolean => {
+    if (applying || deps.isBusy()) return false;
+    void check();
+    return true;
   };
 
   /** Full output of a failed command into the server log (--log-file tees it to server.log). */
@@ -525,11 +617,21 @@ export function createAppUpdater(deps: AppUpdaterDeps): AppUpdater {
     apply,
     isApplying: () => applying,
     start() {
-      const first = setTimeout(tick, deps.firstRunDelayMs ?? FIRST_CHECK_DELAY_MS);
+      const delay = deps.firstRunDelayMs ?? FIRST_CHECK_DELAY_MS;
+      // The startup check retries while a job runs rather than waiting out
+      // the 6-hour cadence: the startup new-version prompt depends on it.
+      const later = (fn: () => void, ms: number) => {
+        const t = setTimeout(fn, ms);
+        t.unref?.();
+        timers.push(t);
+      };
+      const first = () => {
+        if (!tick()) later(first, delay);
+      };
+      later(first, delay);
       const every = setInterval(tick, deps.intervalMs ?? CHECK_INTERVAL_MS);
-      first.unref?.();
       every.unref?.();
-      timers.push(first, every);
+      timers.push(every);
     },
     stop() {
       for (const t of timers) clearTimeout(t);

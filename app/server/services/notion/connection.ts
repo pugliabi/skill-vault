@@ -23,6 +23,33 @@ export class NotionNotConnectedError extends Error {
   }
 }
 
+/** The usual cause behind each network error code Node's fetch reports (`cause.code`). */
+const NETWORK_HINTS: Array<[RegExp, string]> = [
+  [/CERT|SELF_SIGNED|UNABLE_TO_(GET|VERIFY)/, "a proxy or antivirus on this network is inspecting HTTPS with a certificate Node.js doesn't trust"],
+  [/^(ENOTFOUND|EAI_AGAIN)$/, "the address couldn't be looked up; check the internet connection"],
+  [/TIMEOUT|^(ETIMEDOUT|ECONNREFUSED|ECONNRESET|ENETUNREACH|EHOSTUNREACH)$/, "a firewall or proxy may be blocking Node.js"],
+];
+
+/**
+ * Message for a failed Notion call. Node's fetch reports every network
+ * failure as a bare "fetch failed" and keeps the reason (DNS, TLS, timeout)
+ * in `cause`, so that case is spelled out; any other error keeps its message.
+ */
+export function notionErrorMessage(err: unknown): string {
+  if (!(err instanceof TypeError) || err.message !== "fetch failed") {
+    return err instanceof Error ? err.message : String(err);
+  }
+  const cause = err.cause as { code?: unknown; message?: unknown; errors?: Array<{ message?: unknown }> } | undefined;
+  const code = typeof cause?.code === "string" ? cause.code : "";
+  // Connection attempts to several addresses fail as an AggregateError with an empty message.
+  const reason = [cause?.message, cause?.errors?.[0]?.message].find((m): m is string => typeof m === "string" && !!m);
+  const hint = NETWORK_HINTS.find(([re]) => re.test(code))?.[1];
+  return (
+    `Couldn't reach Notion (${new URL(NOTION_MCP_URL).host}): ${reason ?? "network error"}` +
+    `${code ? ` [${code}]` : ""}${hint ? ` — ${hint}` : ""}`
+  );
+}
+
 function newClient(): Client {
   return new Client({ name: "skill-vault", version: "1.0.0" });
 }

@@ -33,6 +33,9 @@ Clone the repo and run `.\setup.cmd` (needs Node 20+ and git; it prints the `win
 **How does the app update itself — is it safe?**
 It checks GitHub in the background and shows **Update available** when `main` has new commits. **Update & restart** pulls them, rebuilds into a separate folder, swaps the new build in only once it's complete, waits for any running job, then restarts in place. If any step fails, the checkout is put back and your current version keeps running. It only updates a clean `main` checkout — if you've edited or committed locally, it tells you and leaves things alone.
 
+**When does the update prompt pop up on its own?**
+Only for a new *version*: when `version` in `app/package.json` on GitHub's `main` is higher than the installed one. The update dialog then opens at startup (once per app window) with that version's section of `app/CHANGELOG.md` as release notes. Ordinary commits without a version bump just light the **Update available** pill. To release one: bump `version` in `app/package.json`, rename the CHANGELOG's `## [Unreleased]` heading to `## [0.2.0] - <date>` (matching the new version), and push to `main`.
+
 **Is it safe to expose the app on my network?**
 The app binds `127.0.0.1` by default, and the Start Menu app always does. Binding `0.0.0.0` (from a terminal: `npm run dev -- --host 0.0.0.0`) makes the dashboard — which can modify your vault and agent directories — reachable by anyone on the LAN. There is no authentication. Only do this on networks you trust.
 

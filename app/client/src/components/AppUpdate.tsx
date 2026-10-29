@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "./ui/primitives";
+import { renderMarkdown } from "../lib/markdown";
 import {
   appUpdateApi,
   getHealth,
@@ -9,10 +10,31 @@ import {
   type ApplyEvent,
 } from "../lib/appUpdate";
 
+const PROMPTED_KEY = "sv-update-prompted";
+/** The version this window already prompted for; sessionStorage keeps it across reloads of one window. */
+let promptedVersion: string | null = (() => {
+  try {
+    return sessionStorage.getItem(PROMPTED_KEY);
+  } catch {
+    return null;
+  }
+})();
+
+function markPrompted(version: string): void {
+  promptedVersion = version;
+  try {
+    sessionStorage.setItem(PROMPTED_KEY, version);
+  } catch {
+    /* the in-memory mark still stops repeats until the window reloads */
+  }
+}
+
 /**
  * Sidebar-footer pill, shown only when this checkout is behind GitHub's
  * main. Opens AppUpdateDialog, which streams pull → install → build →
- * restart and reloads once the new server answers.
+ * restart and reloads once the new server answers. When main carries a
+ * higher app version (not just new commits), the dialog also opens by
+ * itself once per app window, with the release notes.
  */
 export function UpdatePill() {
   const qc = useQueryClient();
@@ -26,13 +48,12 @@ export function UpdatePill() {
   const { data } = useQuery({
     queryKey: ["app-update"],
     queryFn: appUpdateApi.status,
-    // The server's first check runs 30 s after start: poll quickly until it
-    // has one, so the pill doesn't wait for the 10-minute cadence.
-    refetchInterval: (query) => (query.state.data?.checked_at ? 10 * 60_000 : 15_000),
+    // The server's first check runs 5 s after start: poll quickly until it
+    // has one, so the startup prompt and pill don't wait for the 10-minute cadence.
+    refetchInterval: (query) => (query.state.data?.checked_at ? 10 * 60_000 : 5_000),
     staleTime: 60_000,
   });
   const showPill = !!data && data.behind > 0;
-  if (!showPill && !snapshot) return null;
 
   // Opening re-checks the checkout (the background check runs only every
   // 6 h), so fixing what blocked the update is picked up right away.
@@ -50,6 +71,17 @@ export function UpdatePill() {
       })
       .finally(() => setChecking(false));
   };
+
+  // A new version prompts on its own, once per window (see markPrompted).
+  // The status was just fetched, so this skips the re-check a click does.
+  useEffect(() => {
+    if (!data?.new_version || !data.latest_version || snapshot) return;
+    if (promptedVersion === data.latest_version) return;
+    markPrompted(data.latest_version);
+    setSnapshot(data);
+  }, [data, snapshot]);
+
+  if (!showPill && !snapshot) return null;
   const shown = data && data.behind > 0 ? data : snapshot;
 
   return (
@@ -57,7 +89,11 @@ export function UpdatePill() {
       {showPill && (
       <button
         onClick={() => open(data)}
-        title="A newer version of Skill Vault is available"
+        title={
+          data.new_version && data.latest_version
+            ? `Skill Vault ${data.latest_version} is available`
+            : "A newer version of Skill Vault is available"
+        }
         style={{
           display: "flex",
           alignItems: "center",
@@ -73,7 +109,9 @@ export function UpdatePill() {
       >
         <span className="sv-pulse" style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--accent)" }} />
         <span style={{ flex: 1, textAlign: "left" }}>Update available</span>
-        <span style={{ fontFamily: "var(--mono)", fontSize: 9.5, color: "var(--ink-4)" }}>{data.behind}</span>
+        <span style={{ fontFamily: "var(--mono)", fontSize: 9.5, color: "var(--ink-4)" }}>
+          {data.new_version && data.latest_version ? `v${data.latest_version}` : data.behind}
+        </span>
       </button>
       )}
       {snapshot && shown && (
@@ -95,7 +133,20 @@ const STEP_LABEL: Record<ApplyEvent["step"], string> = {
 
 const MARK: Record<ApplyEvent["state"], string> = { start: "…", done: "✓", skip: "–", wait: "…", error: "✗" };
 
-const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])';
+function CommitList({ commits }: { commits: AppUpdateStatus["commits"] }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 3, marginTop: 4 }}>
+      {commits.map((c) => (
+        <div key={c.sha} style={{ fontSize: 12.5, display: "flex", gap: 8, color: "var(--ink)" }}>
+          <code style={{ fontFamily: "var(--mono)", color: "var(--ink-3)" }}>{c.sha}</code>
+          <span>{c.subject}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const FOCUSABLE ='button:not([disabled]), [href], input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])';
 
 function AppUpdateDialog({
   status,
@@ -111,6 +162,8 @@ function AppUpdateDialog({
   const [events, setEvents] = useState<ApplyEvent[]>([]);
   const busy = phase === "running" || phase === "restarting";
   const panel = useRef<HTMLDivElement>(null);
+  const release = status.new_version && !!status.latest_version;
+  const notesHtml = useMemo(() => (status.notes ? renderMarkdown(status.notes) : ""), [status.notes]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -226,18 +279,34 @@ function AppUpdateDialog({
           gap: 10,
         }}
       >
-        <div style={{ fontSize: 14, fontWeight: 600 }}>Update Skill Vault</div>
-        <div style={{ fontSize: 12.5, color: "var(--ink-2)" }}>
-          {status.behind} new {status.behind === 1 ? "change" : "changes"} on GitHub:
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-          {status.commits.map((c) => (
-            <div key={c.sha} style={{ fontSize: 12.5, display: "flex", gap: 8 }}>
-              <code style={{ fontFamily: "var(--mono)", color: "var(--ink-3)" }}>{c.sha}</code>
-              <span>{c.subject}</span>
+        {release ? (
+          <>
+            <div style={{ fontSize: 14, fontWeight: 600 }}>Skill Vault {status.latest_version} is available</div>
+            <div style={{ fontSize: 12.5, color: "var(--ink-2)" }}>You have {status.version}.</div>
+            {status.notes && (
+              // Notes scroll on their own so the buttons stay in view.
+              <div
+                className="sv-markdown sv-markdown--chat"
+                style={{ borderTop: "0.5px solid var(--border)", paddingTop: 8, maxHeight: "38vh", overflowY: "auto" }}
+                dangerouslySetInnerHTML={{ __html: notesHtml }}
+              />
+            )}
+            <details style={{ fontSize: 12.5, color: "var(--ink-2)" }}>
+              <summary style={{ cursor: "pointer" }}>
+                {status.behind} {status.behind === 1 ? "change" : "changes"} on GitHub
+              </summary>
+              <CommitList commits={status.commits} />
+            </details>
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize: 14, fontWeight: 600 }}>Update Skill Vault</div>
+            <div style={{ fontSize: 12.5, color: "var(--ink-2)" }}>
+              {status.behind} new {status.behind === 1 ? "change" : "changes"} on GitHub:
             </div>
-          ))}
-        </div>
+            <CommitList commits={status.commits} />
+          </>
+        )}
         {checking && phase === "idle" && <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>Checking GitHub…</div>}
         {!checking && !status.can_apply && status.reason && phase === "idle" && (
           <div style={{ fontSize: 12.5, color: "var(--warn)" }}>Can't update right now: {status.reason}.</div>
@@ -263,7 +332,7 @@ function AppUpdateDialog({
         )}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
           <Button kind="ghost" size="sm" onClick={onClose} disabled={busy}>
-            Close
+            {release && phase === "idle" ? "Later" : "Close"}
           </Button>
           <Button kind="primary" size="sm" onClick={() => void run()} disabled={!status.can_apply || busy || checking}>
             {busy ? "Updating…" : "Update & restart"}

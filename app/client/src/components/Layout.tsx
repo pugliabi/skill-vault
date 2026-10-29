@@ -130,7 +130,7 @@ export function Layout({ children }: { children: ReactNode }) {
               Skill Vault
             </span>
             <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--ink-3)" }}>
-              v0.2.0
+              v{__APP_VERSION__}
             </span>
           </div>
         </div>

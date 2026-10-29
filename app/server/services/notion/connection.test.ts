@@ -179,6 +179,45 @@ test("getNotionClient keeps tokens on non-auth errors", async () => {
   assert.deepEqual(readNotionAuth().tokens, { access_token: "a" });
 });
 
+/** The shape Node's fetch throws for a network failure: TypeError("fetch failed") with the reason in `cause`. */
+function fetchFailed(cause: unknown): TypeError {
+  return new TypeError("fetch failed", { cause });
+}
+const withCode = (message: string, code: string) => Object.assign(new Error(message), { code });
+
+test("notionErrorMessage spells out the cause of a bare 'fetch failed'", async () => {
+  const { notionErrorMessage } = await import("./connection.ts");
+  const tls = notionErrorMessage(fetchFailed(withCode("self-signed certificate in certificate chain", "SELF_SIGNED_CERT_IN_CHAIN")));
+  assert.match(tls, /^Couldn't reach Notion \(mcp\.notion\.com\): self-signed certificate in certificate chain \[SELF_SIGNED_CERT_IN_CHAIN\]/);
+  assert.match(tls, /proxy or antivirus/);
+  assert.match(
+    notionErrorMessage(fetchFailed(withCode("unable to get local issuer certificate", "UNABLE_TO_GET_ISSUER_CERT_LOCALLY"))),
+    /proxy or antivirus/,
+  );
+  assert.match(
+    notionErrorMessage(fetchFailed(withCode("getaddrinfo ENOTFOUND mcp.notion.com", "ENOTFOUND"))),
+    /ENOTFOUND mcp\.notion\.com \[ENOTFOUND\] — the address couldn't be looked up/,
+  );
+  assert.match(
+    notionErrorMessage(fetchFailed(withCode("Connect Timeout Error", "UND_ERR_CONNECT_TIMEOUT"))),
+    /\[UND_ERR_CONNECT_TIMEOUT\] — a firewall or proxy/,
+  );
+});
+
+test("notionErrorMessage reads an AggregateError cause and survives a missing one", async () => {
+  const { notionErrorMessage } = await import("./connection.ts");
+  const agg = Object.assign(new AggregateError([withCode("connect ETIMEDOUT 1.2.3.4:443", "ETIMEDOUT")], ""), { code: "ETIMEDOUT" });
+  assert.match(notionErrorMessage(fetchFailed(agg)), /: connect ETIMEDOUT 1\.2\.3\.4:443 \[ETIMEDOUT\] — a firewall/);
+  assert.equal(notionErrorMessage(fetchFailed(undefined)), "Couldn't reach Notion (mcp.notion.com): network error");
+});
+
+test("notionErrorMessage leaves every other error's message alone", async () => {
+  const { notionErrorMessage } = await import("./connection.ts");
+  assert.equal(notionErrorMessage(new Error("fetch failed")), "fetch failed");
+  assert.equal(notionErrorMessage(new TypeError("x is not a function")), "x is not a function");
+  assert.equal(notionErrorMessage("plain"), "plain");
+});
+
 test("state is generated, persisted and returned", async () => {
   const { createNotionAuthProvider } = await import("./oauth.ts");
   const { readNotionAuth } = await import("./store.ts");
