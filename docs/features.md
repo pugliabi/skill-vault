@@ -85,6 +85,35 @@ Claude Desktop loads skills from your claude.ai account rather than a local fold
 - **Export to OpenClaw** — installs a skill into the isolated OpenClaw WSL gateway via its own CLI.
 - The Zip action on any skill produces a portable archive.
 
+## Agent access — Claude Desktop, Claude Code and other agents
+
+Settings → **Agent access** gives other agents the same vault tools the in-app assistant uses, so a
+chat can save the skill it just wrote, load a vault skill, push skills to your other tools, build a
+Claude Desktop zip, or run a Notion sync.
+
+- **The `skill-vault` skill** tells an agent how. **Add to vault** adopts it like any other skill and
+  pushes it to your default targets. The card offers **Update** only while your vault copy is untouched;
+  if you edited it, the card just shows it as in the vault and updates go through the normal **Updates**
+  page, so your edits are never overwritten. An Add or Update that changes nothing says "already up to date".
+- **Claude Desktop**: **Connect** adds a `skill-vault` MCP server to Claude Desktop's config. Quit
+  Claude Desktop from the tray and reopen it, then install the skill with **Download skill zip**
+  (upload it in Settings → Capabilities → Skills) or **Copy install prompt** (paste it into a chat).
+- **Claude Code**: **Connect** registers the same server for every project
+  (`claude mcp add --scope user`); the card reads its status from `~/.claude.json`. The skill reaches
+  Claude Code through the `claude` target.
+- **Other agents** (Cursor, Codex, Copilot, Windsurf, OpenClaw) run the shared command. In cmd or
+  PowerShell it is `%USERPROFILE%\.skill-vault\bin\skill-vault.cmd`; in Git Bash, macOS or Linux it is
+  `~/.skill-vault/bin/skill-vault`. `skill-vault tools` lists every tool, and a tool's JSON arguments go
+  on stdin: `echo '{"query":"pdf"}' | ~/.skill-vault/bin/skill-vault search_skills`. PowerShell has no
+  `<` operator, so there use
+  `cmd /c "%USERPROFILE%\.skill-vault\bin\skill-vault.cmd search_skills < args.json"`.
+
+When the app isn't open, the first tool call starts it in the background (Windows) and it stops about
+10 minutes after the last call. Saving from a chat never overwrites without the agent showing you the
+changes first, and a skill edited since the agent read it is refused. Agents can't save a `SKILL.md`
+whose name differs in casing, and the files they read leave out ignored folders such as `.git` and
+`node_modules`.
+
 ## Multi-device sync
 
 ![Devices](images/devices.jpg)

@@ -169,6 +169,18 @@ All three are safe to delete; they regenerate. The assistant also uses
 configuration of its own beyond a signed-in `claude` CLI — see
 [assistant.md](./assistant.md).
 
+## Agent access files (per machine)
+
+| Path | Written by | What |
+|---|---|---|
+| `~/.skill-vault/bin/skill-vault`, `skill-vault.cmd` | the built app, at every start | The shared command: runs the vault bridge in command mode |
+| `%APPDATA%\Claude\claude_desktop_config.json` → `mcpServers["skill-vault"]` | Agent access → Claude Desktop → Connect | Claude Desktop's MCP entry for the vault bridge |
+| `claude_desktop_config.json.skill-vault.bak` | each Connect / Disconnect | The Desktop config as it was before the last change |
+| `~/.claude.json` → `mcpServers["skill-vault"]` | `claude mcp add --scope user` (Agent access → Claude Code → Connect) | Claude Code's entry; the app only reads this file |
+
+`SKILL_VAULT_AGENT_IDLE_MS` (environment) changes how long a bridge call keeps a background-started
+app running (default 600000, about 10 minutes; a 2-minute boot grace applies after it starts).
+
 ## CLI flags worth knowing
 
 Run `sv <command> --help` for the full set per command. Frequently used:

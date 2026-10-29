@@ -3,6 +3,8 @@
 **Date:** 2026-10-29 · **Status:** approved design, awaiting spec review · Builds on `main` at
 `a25a664` (setup guide and Notion fixes merged). Ships in the combined **0.2.0** release.
 
+**Amended during implementation (2026-10-29):** (1) Claude Code status is read from `~/.claude.json`, not `claude mcp get`; (2) the `.cmd` shim is `@echo off` + CRLF + `"<node>" "<bridge>" --client command %*`; (3) the install prompt wraps SKILL.md in a four-backtick fence; (4) the card's **Update** applies only to an untouched vault copy (local edits go through Updates).
+
 ## Problem
 
 - Claude Desktop is a *package target* only: the app builds an upload-ready zip and the user uploads it.
@@ -116,7 +118,8 @@ A new card in Settings, next to the setup guide's **Run setup guide…** entry. 
 |---|---|---|
 | Not in vault | "Not in your vault" | **Add to vault** |
 | In vault, same content as bundled | "In your vault" + its targets | — |
-| In vault, bundled copy differs | "Update available" | **Update** (the existing update-from-origin action) |
+| In vault, bundled copy differs, vault copy untouched | "Update available" | **Update** (the existing update-from-origin action) |
+| In vault, bundled copy differs, vault copy edited | "In your vault" | none (updates go through the normal Updates page; local edits are never overwritten) |
 | A vault skill named `skill-vault` with a different origin | "A skill named skill-vault already exists" | none (rename yours to use this) |
 
 **Add to vault** adopts `bundled-skills/skill-vault` through the existing import with
@@ -137,7 +140,7 @@ targets to the config's `default_targets`, and pushes it to them. The row then l
 
 **Row 3 — Claude Code**
 
-- Status from `claude mcp get skill-vault`: *Not connected* · *Connected* · *Broken* · *Name taken* ·
+- Status read from `~/.claude.json`: *Not connected* · *Connected* · *Broken* · *Name taken* ·
   *Claude Code CLI not found*.
 - **Connect** / **Reconnect** / **Disconnect**. The skill itself reaches Claude Code through the
   `claude` target (row 1).
@@ -190,8 +193,9 @@ write. The merge and removal are pure functions (`config in → config out`) so 
 
 - Connect: `claude mcp add --scope user skill-vault -- "<node>" "<app>/dist/assistant-mcp.js" --client claude-code`
 - Disconnect: `claude mcp remove --scope user skill-vault`, only after `get` shows the entry is ours.
-- Status: `claude mcp get skill-vault`; exit 0 and output naming our bridge path → connected; exit 0
-  with another command → *Name taken*; non-zero → not connected; CLI missing → *not found*.
+- Status: read `mcpServers["skill-vault"]` from `~/.claude.json` (`claude mcp get` starts the server to
+  health-check it, so it isn't used); our bridge path → connected; another command → *Name taken*;
+  no entry → not connected; CLI missing → *not found*.
 - A Connect over an existing entry of ours removes it first, then adds (Reconnect).
 
 ## The bridge
@@ -305,7 +309,7 @@ me the zip so I can save it to my skills.
 
 At production server start, `services/agentAccess/commandShim.ts` writes:
 
-- `~/.skill-vault/bin/skill-vault.cmd`: `@"<node>" "<app>\dist\assistant-mcp.js" --client command %*`
+- `~/.skill-vault/bin/skill-vault.cmd`: `@echo off` + CRLF + `"<node>" "<app>\dist\assistant-mcp.js" --client command %*`
 - `~/.skill-vault/bin/skill-vault` (POSIX `sh`, forward-slash paths):
   `exec "<node>" "<app>/dist/assistant-mcp.js" --client command "$@"`
 
@@ -341,7 +345,7 @@ Unit tests in the existing `node --test` style:
 - **Desktop config:** merge adds the entry and preserves every other key/server; idempotent; refuses
   invalid JSON and non-objects; refuses a foreign `skill-vault`; removal leaves foreign entries; ours
   detection; path resolution including the Store fallback and *Not installed*.
-- **Claude Code:** command lines built for connect/disconnect; status parsing for each state; process
+- **Claude Code:** command lines built for connect/disconnect; status parsing of `~/.claude.json` for each state; process
   execution injected.
 - **Bridge:** argument parsing; `tools` output; command mode with stdin JSON, empty stdin, bad JSON,
   unknown tool, tool error (exit codes); `X-Skill-Vault-Client` header; server discovery from lock +
