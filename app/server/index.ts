@@ -57,6 +57,7 @@ import { startNotionChecker } from "./services/notion/checker.ts";
 import { notionSignInPending } from "./services/notion/connection.ts";
 import { findFreePort } from "./services/freePort.ts";
 import { agentIdleMs, createAgentActivity } from "./services/agentActivity.ts";
+import { writeCommandShims } from "./services/agentAccess/commandShim.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, "..");
@@ -183,6 +184,16 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
   // Background checks only for the built app: `npm run dev` never fetches on
   // its own (its status stays "not checked yet", so no pill).
   if (opts.mode === "production") updater.start();
+
+  // ~/.skill-vault/bin/skill-vault: the vault tools for agents with a shell
+  // (services/agentAccess/commandShim.ts). Built app only: it runs dist/.
+  if (opts.mode === "production") {
+    try {
+      writeCommandShims(process.execPath, path.join(APP_ROOT, "dist", "assistant-mcp.js"));
+    } catch (err) {
+      console.error(`[agent-access] couldn't write the skill-vault command: ${(err as Error).message}`);
+    }
+  }
 
   // Cleanup hook — launcher.ts invokes this before server.close() so
   // chokidar tears down cleanly on Ctrl+C and the SSE clients receive
