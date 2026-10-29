@@ -5,12 +5,13 @@ import { recordActivity } from "../services/activity.ts";
 import { listSkills, readManifest, skillDir } from "../services/vault.ts";
 import { hashSkillDirNormalized } from "../services/skillHash.ts";
 import { NotionApi } from "../services/notion/api.ts";
+import { DATA_SOURCE_ID, LAST_EDITED_PROPERTY, chooseDataSource, openNotionApiAt } from "../services/notion/dataSource.ts";
 import { downloadAndExtract, openDownload } from "../services/notion/archive.ts";
 import { gitGuard as realGitGuard, type GuardStatus } from "../services/notion/checker.ts";
 import {
   NotionNotConnectedError,
-  callToolJson,
   disconnectNotion,
+  clearNotionSignInPending,
   finishNotionAuth,
   getNotionClient,
   missingTools,
@@ -28,7 +29,7 @@ import {
   readNotionCache,
   readNotionSettings,
   setNotionLink,
-  writeNotionSettings,
+  writeNotionAuth,
 } from "../services/notion/store.ts";
 import { isSafeNameSegment } from "./skills.ts";
 import {
@@ -75,9 +76,7 @@ class NotionMovedError extends Error {
   }
 }
 
-export const LAST_EDITED_PROPERTY = "Last edited";
-/** A Notion data source id: a UUID, with or without dashes. */
-const DATA_SOURCE_ID = /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i;
+export { LAST_EDITED_PROPERTY };
 
 interface LinkJob {
   id: string;
@@ -112,11 +111,7 @@ export function redirectUrlFor(req: Request): string {
 }
 
 async function getApi(req: Request): Promise<ApiConn> {
-  const client = await getNotionClient(redirectUrlFor(req));
-  return {
-    api: new NotionApi((name, args) => callToolJson(client, name, args)),
-    close: () => client.close(),
-  };
+  return openNotionApiAt(redirectUrlFor(req));
 }
 
 /** Run `fn` with a connected API client (from `open`), always closing it afterwards. */
@@ -172,7 +167,7 @@ function vaultPathOr409(res: Response): string | null {
  *
  *   GET  /status                     connection + settings summary
  *   POST /connect                    start OAuth → {status:"connected"} | {status:"redirect", url}
- *   GET  /callback                   OAuth redirect target → 302 to /settings?notion=…
+ *   GET  /callback                   OAuth redirect target → 302 to /settings or /setup ?notion=…
  *   POST /disconnect                 forget tokens
  *   GET  /data-sources               candidate Skills data sources
  *   POST /data-source                choose one (+ optionally add "Last edited")
@@ -209,9 +204,11 @@ export function notionRouter(deps: NotionRouterDeps = {}): Router {
   });
 
   router.post("/connect", async (req, res) => {
+    const returnTo = (req.body as { return_to?: unknown } | undefined)?.return_to === "setup" ? "setup" : "settings";
     try {
       const r = await startNotionAuth(redirectUrlFor(req));
       if (r.status === "connected") await probeTools(req);
+      else writeNotionAuth({ ...readNotionAuth(), return_to: returnTo });
       res.json(r);
     } catch (err) {
       sendError(res, err);
@@ -219,18 +216,22 @@ export function notionRouter(deps: NotionRouterDeps = {}): Router {
   });
 
   router.get("/callback", async (req, res) => {
+    const { return_to, ...rest } = readNotionAuth();
+    if (return_to) writeNotionAuth(rest);
+    const page = return_to === "setup" ? "/setup" : "/settings";
     const code = typeof req.query.code === "string" ? req.query.code : "";
     const state = typeof req.query.state === "string" ? req.query.state : undefined;
     try {
       if (!code) {
+        clearNotionSignInPending();
         const denied = typeof req.query.error === "string" ? req.query.error : "no authorization code";
         throw new Error(`Notion sign-in failed: ${denied}`);
       }
       await finishNotionAuth(redirectUrlFor(req), code, state);
       await probeTools(req);
-      res.redirect(302, "/settings?notion=connected");
+      res.redirect(302, `${page}?notion=connected`);
     } catch (err) {
-      res.redirect(302, `/settings?notion=error&message=${encodeURIComponent((err as Error).message)}`);
+      res.redirect(302, `${page}?notion=error&message=${encodeURIComponent((err as Error).message)}`);
     }
   });
 
@@ -263,22 +264,8 @@ export function notionRouter(deps: NotionRouterDeps = {}): Router {
     }
     const dsName = typeof name === "string" ? name : "";
     try {
-      const { last_edited_property, warning } = await withApi(req, async (api) => {
-        let has = await api.hasProperty(id, LAST_EDITED_PROPERTY, "last_edited_time");
-        let warning: string | undefined;
-        if (!has && add_last_edited === true) {
-          try {
-            await api.addLastEditedProperty(id, LAST_EDITED_PROPERTY);
-            has = await api.hasProperty(id, LAST_EDITED_PROPERTY, "last_edited_time");
-            if (!has) warning = `Could not verify the "${LAST_EDITED_PROPERTY}" property after adding it`;
-          } catch (err) {
-            warning = `Could not add "${LAST_EDITED_PROPERTY}": ${(err as Error).message}`;
-          }
-        }
-        return { last_edited_property: has ? LAST_EDITED_PROPERTY : null, warning };
-      });
-      writeNotionSettings(vp, { data_source_id: id, data_source_name: dsName, last_edited_property });
-      res.json({ ok: true, last_edited_property, ...(warning ? { warning } : {}) });
+      const r = await withApi(req, (api) => chooseDataSource(api, vp, { id, name: dsName, add_last_edited: add_last_edited === true }));
+      res.json({ ok: true, ...r });
     } catch (err) {
       sendError(res, err);
     }

@@ -10,13 +10,13 @@
  *   POST /api/app/update       — apply; streams NDJSON ApplyEvents, ending
  *                                with {step:"restart"} on success
  *
- * POSTs under /app/ are refused (403) when a browser marks them as coming
- * from another site (Sec-Fetch-Site other than same-origin), or when their
- * Origin isn't this server (browsers omit Sec-Fetch-Site for plain-HTTP LAN
- * addresses, e.g. with --host 0.0.0.0, but always send Origin on a POST).
+ * POSTs under /app/ are refused (403) when they come from another site (see
+ * isCrossSite in sameOrigin.ts: Sec-Fetch-Site other than same-origin, or an
+ * Origin that isn't this server).
  */
 import { Router } from "express";
 import type { AppUpdater } from "../services/appUpdate.ts";
+import { isCrossSite } from "./sameOrigin.ts";
 
 export interface HealthInfo {
   ok: true;
@@ -26,29 +26,15 @@ export interface HealthInfo {
   mode: "development" | "production";
 }
 
-/** The Origin header names the host the request was sent to ("null" and junk never match). */
-function isOwnOrigin(origin: string, host: string | undefined): boolean {
-  try {
-    return host !== undefined && new URL(origin).host === host;
-  } catch {
-    return false;
-  }
-}
-
 export function appRouter(opts: { health: () => HealthInfo; updater: AppUpdater }): Router {
   const router = Router();
 
   // Another site open in the browser must not be able to start an update on
-  // this server. A request with neither header (curl, tests) isn't from a web
-  // page and is allowed.
+  // this server (shared guard in sameOrigin.ts).
   router.use("/app", (req, res, next) => {
-    if (req.method === "POST") {
-      const site = req.get("sec-fetch-site");
-      const origin = req.get("origin");
-      if ((site !== undefined && site !== "same-origin") || (origin !== undefined && !isOwnOrigin(origin, req.get("host")))) {
-        res.status(403).json({ error: "cross-site request refused" });
-        return;
-      }
+    if (req.method === "POST" && isCrossSite(req)) {
+      res.status(403).json({ error: "cross-site request refused" });
+      return;
     }
     next();
   });

@@ -14,6 +14,9 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { configRouter } from "./routes/config.ts";
 import { appRouter } from "./routes/app.ts";
+import { setupRouter } from "./routes/setup.ts";
+import { createSetupApplier } from "./services/setup/apply.ts";
+import { defaultApplyDeps } from "./services/setup/applyDeps.ts";
 import { buildVersion } from "./services/instanceLock.ts";
 import { createAppUpdater } from "./services/appUpdate.ts";
 import { getServerPort } from "./services/runtime.ts";
@@ -51,6 +54,7 @@ import {
 import { readAppConfig } from "./services/appConfig.ts";
 import { createHistoryRecorder, scanForUnrecordedChangesAsync } from "./services/historyRecorder.ts";
 import { startNotionChecker } from "./services/notion/checker.ts";
+import { notionSignInPending } from "./services/notion/connection.ts";
 import { findFreePort } from "./services/freePort.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -158,7 +162,9 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
   );
 
   // In-app updates (git checkout installs): background check + one-click apply.
-  const busyWithoutUpdate = (): boolean => anyNotionJobRunning() || anyTurnRunning() || foregroundCheckActive();
+  const setupApplier = createSetupApplier(defaultApplyDeps());
+  const busyWithoutUpdate = (): boolean =>
+    anyNotionJobRunning() || anyTurnRunning() || foregroundCheckActive() || setupApplier.isRunning();
   const updater = createAppUpdater({
     appDir: APP_ROOT,
     mode: opts.mode,
@@ -192,7 +198,8 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
     setActiveWatcher(null);
   };
   // Work that must not be cut off by an idle stop (launcher --exit-when-idle).
-  app.locals.isBusy = (): boolean => busyWithoutUpdate() || updater.isApplying();
+  // A pending Notion sign-in counts: the app window is on notion.com meanwhile.
+  app.locals.isBusy = (): boolean => busyWithoutUpdate() || updater.isApplying() || notionSignInPending();
 
   app.use(
     "/api",
@@ -208,6 +215,7 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
     }),
   );
   app.use("/api/config", configRouter());
+  app.use("/api/setup", setupRouter({ applier: setupApplier, appRoot: APP_ROOT }));
   app.use("/api/skills", skillsRouter({ isBusy: anyNotionJobRunning }));
   app.use("/api/history", historyRouter());
   app.use("/api/adopt", adoptRouter());

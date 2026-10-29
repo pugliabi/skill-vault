@@ -18,7 +18,7 @@ const COMMANDS = [
   { cmd: "sv sync",    label: "Plan and run two-way sync",     href: "/sync",     cat: "daily" },
   { cmd: "sv adopt",   label: "Discover skills in agent dirs", href: "/adopt",    cat: "discovery" },
   { cmd: "sv scan",    label: "Recursive repo scan",           href: "/adopt",    cat: "discovery" },
-  { cmd: "sv init",    label: "Setup wizard",                  href: "/setup",    cat: "system" },
+  { cmd: "sv init",    label: "Setup guide",                  href: "/setup",    cat: "system" },
   { cmd: "sv config",  label: "Settings",                      href: "/settings", cat: "system" },
 ];
 

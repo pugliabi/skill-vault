@@ -29,7 +29,8 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import type { AppConfig, Provider } from "../types/vault.ts";
-import type { ClaudeAuthConfig } from "./claude/auth.ts";
+import { applyClaudeAuthPatch, type ClaudeAuthConfig, type ClaudeAuthPatch } from "./claude/auth.ts";
+import type { SetupBase } from "./setup/types.ts";
 
 const CLI_CONFIG_DIR = path.join(os.homedir(), ".skill-vault");
 const CLI_CONFIG_FILE = path.join(CLI_CONFIG_DIR, "config.json");
@@ -123,6 +124,18 @@ export function readCliAppBlock(): {
   }
 }
 
+/** The config fields the setup guide starts from (services/setup/draft.ts). */
+export function readSetupBase(): SetupBase {
+  const raw = readRaw();
+  return {
+    vault_path: raw.vault_path ?? null,
+    agent_locations: { ...(raw.agent_locations ?? {}) },
+    default_targets: Array.isArray(raw.default_targets) ? raw.default_targets : [],
+    machine_id: typeof raw.machine_id === "string" && raw.machine_id ? raw.machine_id : null,
+    repo_url: typeof raw.repo_url === "string" && raw.repo_url ? raw.repo_url : null,
+  };
+}
+
 /** Set (or create) the vault path, preserving all other config keys. */
 export function setVaultPath(vaultPath: string): AppConfig {
   const raw = readRaw();
@@ -144,6 +157,32 @@ export function writeAppConfig(partial: Partial<AppConfig>): AppConfig {
     raw.agent_locations = Object.fromEntries(
       partial.providers.map((p) => [p.id, p.path]),
     );
+  }
+  writeRaw(raw);
+  return readAppConfig();
+}
+
+/** Everything the setup guide saves on Finish (services/setup/apply.ts, step 2). */
+export interface SetupConfigPatch {
+  vault_path: string;
+  providers?: Provider[];
+  default_targets?: string[];
+  repo_url?: string;
+  machine_id?: string;
+  assistant?: ClaudeAuthPatch;
+}
+
+/** One atomic write for the setup guide. Keys the app doesn't own are preserved. */
+export function writeSetupConfig(patch: SetupConfigPatch): AppConfig {
+  const raw = readRaw();
+  raw.vault_path = patch.vault_path;
+  if (patch.providers) raw.agent_locations = Object.fromEntries(patch.providers.map((p) => [p.id, p.path]));
+  if (patch.default_targets) raw.default_targets = patch.default_targets;
+  if (patch.repo_url !== undefined) raw.repo_url = patch.repo_url;
+  if (patch.machine_id) raw.machine_id = patch.machine_id;
+  if (patch.assistant) {
+    const current = raw.assistant && typeof raw.assistant === "object" ? (raw.assistant as ClaudeAuthConfig) : {};
+    raw.assistant = applyClaudeAuthPatch(current, patch.assistant);
   }
   writeRaw(raw);
   return readAppConfig();

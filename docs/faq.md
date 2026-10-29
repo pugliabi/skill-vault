@@ -58,3 +58,12 @@ Voice input uses the browser's built-in speech recognition (Chrome and Edge ship
 
 **Does the background sweep change my clones?**
 It runs the same `git pull --ff-only` a manual *Check updates* does on local clones, and nothing else — it never modifies the vault. Statuses are cached (survives restarts) and shown with their age; disable by simply not running the app, or re-check on demand with the refresh link.
+
+**Can I run the setup guide again?**
+Yes. Open **Settings → Run setup guide…** or use the command bar's "Setup guide". It opens with your current settings filled in, and nothing changes until you press **Finish**.
+
+**Does the guide store my API key?**
+Only when you press **Finish** with "Use an API key" chosen, and then only in `~/.skill-vault/config.json`, the same place Settings keeps it. It is never written to the guide's draft file, and it is kept in the page's memory until Finish (a reload means typing it again).
+
+**Can I use a vault that lives inside a bigger repo?**
+Yes. When you clone from GitHub, the guide finds `skills.json` at the repo root or one folder down (like `agent-skills/skills/`) and uses that folder as the vault. If it finds two candidates it asks which one; if it finds none, it offers to use the repo root as a new vault.

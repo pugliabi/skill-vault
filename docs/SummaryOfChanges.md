@@ -3,6 +3,59 @@
 Running log of change sets, newest first. Detailed per-release notes live in
 [changelog.md](./changelog.md) and [app/CHANGELOG.md](../app/CHANGELOG.md).
 
+## 2026-10-28 — First-run setup guide
+
+### Changes Made
+- **Guide**: the single-box Setup page is replaced by a six-step guide (vault,
+  tools, skills, Notion, assistant, review). Nothing is saved until **Finish**;
+  a per-machine draft (`~/.skill-vault/setup-draft.json`, no secrets, stale
+  when the config changed) lets you resume. Re-run from **Settings → Run setup
+  guide…** or the command bar.
+- **Vault choices**: new folder, existing folder (with an "unreadable folder"
+  case), or clone from GitHub with a preview (`--depth 1 --filter=blob:none
+  --no-checkout` into a temp folder, always removed; a git failure while reading
+  the repo fails the preview instead of showing a partial list). **Browse…**
+  opens the Windows folder dialog for requests from this PC; NUL characters are
+  stripped from its inputs.
+- **Finish**: vault folder, one config write (watcher restart failure is
+  reported, not fatal), adopt, push, Notion database; steps 1 and 2 are
+  all-or-nothing, 3 to 5 item by item with **Retry failed items**. An empty
+  skeleton left by an earlier failed Finish counts as an empty new vault. The
+  API key is sent only when "Use an API key" is chosen. The client reports
+  refused requests in place, keeps polling `apply/status` after a dropped
+  stream, and says so when contact is lost.
+- **Skills step** remembers it was visited (`skills_reviewed`): coming back
+  restores exactly your picks, and new skills start unticked.
+- **Notion**: the sign-in returns to the page that started it (`return_to`);
+  a pending sign-in keeps the installed app from stopping itself (10-minute cap).
+- **Busy**: Finish counts for the idle stop and the updater; all setup writes
+  use the same-origin guard.
+
+### Files Modified
+- New server: `app/server/routes/{setup,sameOrigin}.ts`,
+  `app/server/services/{pushSkill,notion/dataSource}.ts`,
+  `app/server/services/setup/{apply,applyDeps,clonePreview,draft,folderDialog,inspect,plan,targets,types}.ts`,
+  `app/scripts/pick-folder.ps1` (+ tests: `routes/{setup,sameOrigin}.test.ts`,
+  `services/{pushSkill,appConfig.setup,claude/authStatus,notion/connection.signin,notion/dataSource}.test.ts`,
+  `services/setup/{apply,clonePreview,draft,folderDialog,inspect,plan,targets}.test.ts`)
+- Modified server: `app/server/index.ts`,
+  `app/server/routes/{app,notion,push}.ts` (+ `notion.test.ts`),
+  `app/server/services/{appConfig,appUpdate}.ts`,
+  `app/server/services/claude/cli.ts`,
+  `app/server/services/notion/{connection,store}.ts`
+- New client: `app/client/src/lib/setup.ts`,
+  `app/client/src/pages/setup/{SetupGuide.tsx,types.ts,ui.tsx}`,
+  `app/client/src/pages/setup/steps/{VaultStep,TargetsStep,SkillsStep,NotionStep,AssistantStep,ReviewStep}.tsx`
+- Modified client: `app/client/src/{App.tsx,lib/api.ts}`,
+  `app/client/src/components/CommandBar.tsx`, `app/client/src/pages/Settings.tsx`
+- Removed: `app/client/src/pages/Setup.tsx` (replaced by the guide)
+- Docs: `docs/{getting-started,features,configuration,tech_reference,troubleshooting,faq,changelog,SummaryOfChanges,INDEX}.md`, `app/CHANGELOG.md`
+
+### Impact
+- A new user goes from an empty box to a working vault, detected tools,
+  adopted skills and (optionally) Notion and the assistant in one guided pass,
+  and can repeat it later without losing anything.
+
 ## 2026-10-27 — Install & launch: one-script Windows setup, hidden launcher, in-app updates
 
 ### Changes Made

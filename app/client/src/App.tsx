@@ -5,7 +5,7 @@ import { api } from "./lib/api";
 import { CommandBar } from "./components/CommandBar";
 import { KeyboardCheatsheet } from "./components/KeyboardCheatsheet";
 import Dashboard from "./pages/Dashboard";
-import Setup from "./pages/Setup";
+import SetupGuide from "./pages/setup/SetupGuide";
 import Skills from "./pages/Skills";
 import Adopt from "./pages/Adopt";
 import Sync from "./pages/Sync";
@@ -31,7 +31,7 @@ export default function App() {
   return (
     <>
       <Switch>
-        <Route path="/setup" component={Setup} />
+        <Route path="/setup" component={SetupGuide} />
         {needsSetup ? (
           <Route>
             <Redirect to="/setup" />

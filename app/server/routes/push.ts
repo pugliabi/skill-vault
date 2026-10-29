@@ -1,10 +1,8 @@
 import { Router } from "express";
-import path from "node:path";
 import { readAppConfig } from "../services/appConfig.ts";
 import { recordActivity } from "../services/activity.ts";
-import { skillDir, readManifest, writeManifest } from "../services/vault.ts";
-import { linkSkillDir } from "../services/linking.ts";
-import type { PushRequest, PushResult } from "../types/vault.ts";
+import { PushSkipError, pushSkillToProvider } from "../services/pushSkill.ts";
+import type { PushRequest } from "../types/vault.ts";
 
 /**
  * Push a single skill to a single provider. Creates a symlink (or
@@ -38,10 +36,6 @@ export function pushRouter(): Router {
       return;
     }
 
-    const source = skillDir(cfg.vault_path, body.skill);
-    const target = path.join(provider.path, body.skill);
-    const forceCopy = body.method === "copy";
-
     // Starting record — emitted BEFORE the mutation so the SSE
     // `activity` event arrives ahead of any `provider_changed` event the
     // watcher may emit as a side effect of linkSkillDir creating files
@@ -56,45 +50,14 @@ export function pushRouter(): Router {
     });
 
     try {
-      const result = linkSkillDir(source, target, { forceCopy });
-
-      if (result.method === "skip") {
-        recordActivity({
-          kind: "push",
-          skill: body.skill,
-          provider_id: body.provider_id,
-          ok: false,
-          message: result.reason ?? "skipped (circular or invalid path)",
-        });
-        res.status(409).json({
-          error: result.reason ?? "skipped (circular or invalid path)",
-        });
-        return;
-      }
-
-      // Record the push in the manifest: add provider_id to `targets`
-      // if not already there.
-      const manifest = readManifest(cfg.vault_path);
-      const entry = manifest.skills[body.skill] ?? { targets: [] };
-      if (!entry.targets.includes(provider.id)) {
-        entry.targets = [...entry.targets, provider.id];
-        manifest.skills[body.skill] = entry;
-        writeManifest(cfg.vault_path, manifest);
-      }
-
+      const out = pushSkillToProvider(cfg.vault_path, body.skill, provider, { forceCopy: body.method === "copy" });
       recordActivity({
         kind: "push",
         skill: body.skill,
         provider_id: body.provider_id,
         ok: true,
-        message: `linked via ${result.method}`,
+        message: `linked via ${out.method}`,
       });
-
-      const out: PushResult = {
-        skill: body.skill,
-        target_path: result.target,
-        method: result.method as "symlink" | "junction" | "copy",
-      };
       res.json(out);
     } catch (err) {
       recordActivity({
@@ -104,7 +67,7 @@ export function pushRouter(): Router {
         ok: false,
         message: (err as Error).message,
       });
-      res.status(500).json({ error: (err as Error).message });
+      res.status(err instanceof PushSkipError ? 409 : 500).json({ error: (err as Error).message });
     }
   });
 

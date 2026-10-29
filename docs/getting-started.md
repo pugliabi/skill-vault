@@ -35,23 +35,34 @@ The shortcut opens Skill Vault in its own window (Microsoft Edge in app mode, or
 
 ## First-run setup
 
-The first launch shows a **Setup** page:
+### First run: the setup guide
 
-1. **Pick a vault directory** — the folder that will hold your skill library (e.g. `C:\Github\my-skills` or `~/skills-vault`). Choose somewhere you back up, ideally a git repo; the vault is the source of truth. The app creates the layout:
+The first time Skill Vault opens, a short guide walks you through:
 
-   ```
-   <vault>/
-   ├── skills.json     # manifest: one entry per skill
-   ├── skills/         # one folder per production skill
-   ├── staging/        # skills not yet promoted to production
-   └── snapshots/      # per-device state files (multi-device sync)
-   ```
+1. **Vault**: start a new vault, use a folder you already have, or clone a vault repo from GitHub. **Browse…** opens the normal Windows folder picker; you can also paste a path. A folder that exists but can't be read is flagged ("Skill Vault can't open this folder. Check its permissions or pick another one.").
+2. **Tools**: Claude Code, Cursor, Copilot and the other known tools are detected. Tick the ones you use; "default" tools also get every new skill.
+3. **Skills** (optional): adopt skills found in your tools into the vault, and push vault skills out to your default tools. Each list has checkboxes. If you come back to this step, your picks are restored exactly (Skip means nothing moves); skills that turn up later start unticked.
+4. **Notion** (optional): connect and pick your Skills database.
+5. **Assistant** (optional): sign in with your Claude account or use an API key.
+6. **Finish**: a list of exactly what will happen, then live progress.
 
-2. **Add providers** — go to **Settings → Providers** and add each agent tool: a name plus the directory it reads skills from (`~/.claude/skills`, `~/.cursor/skills`, and so on). Path validation is live, and "★ All providers" adds every detected tool in one click.
+Nothing is saved until you press **Finish**. If you close the window halfway, the guide offers to resume. Run it again any time from **Settings → Run setup guide…** or the command bar ("Setup guide"); it opens with your current settings filled in.
 
-3. **Set defaults** — the Defaults section picks which providers new skills push to unless you say otherwise.
+When you clone from GitHub, **Next** takes a quick look inside the repo (a temporary copy, deleted straight away) and lists the skills it found. If the repo can't be read part-way (a dropped connection, an expired sign-in), the preview says so instead of showing a partial list.
 
-Everything is stored in `~/.skill-vault/config.json`, shared with the CLI.
+If Finish ends with "items need attention", your vault and settings are already saved; see [Troubleshooting](./troubleshooting.md#setup-finished-with-items-need-attention).
+
+The vault folder ends up laid out like this:
+
+```
+<vault>/
+├── skills.json     # manifest: one entry per skill
+├── skills/         # one folder per production skill
+├── staging/        # skills not yet promoted to production
+└── snapshots/      # per-device state files (multi-device sync)
+```
+
+Choose somewhere you back up, ideally a git repo; the vault is the source of truth. Everything is stored in `~/.skill-vault/config.json`, shared with the CLI. You can still change tools and defaults later in **Settings → Providers** and **Defaults**.
 
 ## Bring in the skills you already have
 

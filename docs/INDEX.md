@@ -6,7 +6,7 @@ Start at the [README](../README.md) for the overview and quickstart tour.
 
 | Doc | What's in it |
 |---|---|
-| [getting-started.md](./getting-started.md) | Installation (one-script Windows setup, Start Menu launcher, in-app updates) and first-run setup for the app and the `sv` CLI |
+| [getting-started.md](./getting-started.md) | Installation (one-script Windows setup, Start Menu launcher, in-app updates), the first-run setup guide, and setup for the `sv` CLI |
 | [features.md](./features.md) | The full feature tour, with screenshots |
 | [assistant.md](./assistant.md) | The AI assistant: chat agents, proactive "For you" suggestions, voice input, safety model |
 | [examples.md](./examples.md) | Recipes for common workflows |
