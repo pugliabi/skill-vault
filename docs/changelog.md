@@ -4,6 +4,14 @@ User-facing history of the Skill Vault project (app + CLI). The app keeps a
 more detailed log in [app/CHANGELOG.md](../app/CHANGELOG.md). Versions follow
 semver; the project is pre-1.0, so minor versions carry feature batches.
 
+## [Unreleased]
+
+### Fixed
+- **The Claude assistant now keeps to its documented limits.** Its file edits stay in the vault and repos
+  folders, and its shell runs plain `git` for history and clones and nothing else. Before, it could write
+  anywhere and run read-only commands such as `hostname`. It can no longer `git push`, `commit` or
+  `config`, or chain and pipe commands.
+
 ## [0.2.0] - 2026-10-30
 
 The app now installs with `setup.cmd` and opens from the Start Menu, a setup guide walks you through first use, and Notion connection errors say why. Two features are in beta testing and have only been tested on Windows so far: **agent access** and **assistant providers**.

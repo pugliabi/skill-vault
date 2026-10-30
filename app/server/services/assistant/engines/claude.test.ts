@@ -29,6 +29,7 @@ test("Claude's turn is exactly today's buildTurnArgs, message on stdin, no targe
       leadAgent: "vault-assistant",
       contextBlock: "# ctx",
       mcpConfigJson: JSON.stringify({ mcpServers: { vault: INPUT.mcp } }),
+      vaultPath: INPUT.vaultPath,
       pluginDir: INPUT.pluginDir,
       reposDir: INPUT.reposDir,
     }),

@@ -4,6 +4,16 @@ All notable changes to the Skill Vault App are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com); versions use semver
 (the app package is `0.x` — minor bumps carry user-facing feature batches).
 
+## [Unreleased]
+
+### Fixed
+- Claude assistant limits now match the docs. `--permission-mode dontAsk` (a
+  `-p` run could start in auto mode), `Edit(path)` rules for the vault and repos
+  folder instead of bare `Edit`/`Write`, `--disallowedTools PowerShell,Monitor`,
+  a Bash hook (`assistant-plugin/hooks/git-gate.mjs`) that lets through one
+  plain git command for history or clones, and `safe.bareRepository=explicit`.
+  The assistant can no longer `git push`, `commit` or `config`.
+
 ## [0.2.0] - 2026-10-30
 
 The app now installs with `setup.cmd` and opens from the Start Menu, a setup guide walks you through first use, and Notion connection errors say why. Two features are in beta testing and have only been tested on Windows so far: **agent access** and **assistant providers**.

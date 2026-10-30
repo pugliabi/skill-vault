@@ -28,13 +28,14 @@ one unusual sentence, a unique file or function name.
 ## 2. Moved INSIDE the same repo (the common case)
 
 Repos restructure far more often than they vanish. Get a full clone under
-the repos dir (`git fetch --unshallow` if shallow), then in order:
+the repos dir (`git fetch --unshallow` if shallow), then run these in order,
+each one on its own with `git -C <clone>` (Bash takes no pipes or `cd`):
 
 ```
-git log --all --oneline --follow -- "<old subpath>/SKILL.md"   # rename chain
-git log --all --diff-filter=R --summary | grep -i <name>       # explicit renames
-git log --all -S"<distinctive line>" --name-only --oneline     # content moves
-git grep -l "<distinctive key>" HEAD                           # where is it NOW
+git log --all --oneline --follow -- "<old subpath>/SKILL.md"       # rename chain
+git log --all --diff-filter=RD --name-status --oneline -- "*<name>*"  # explicit renames
+git log --all -S"<distinctive line>" --name-only --oneline         # content moves
+git grep -l "<distinctive key>" HEAD                               # where is it NOW
 ```
 
 `scan_dir_for_skills` on the clone root lists every skill folder the repo

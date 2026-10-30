@@ -55,6 +55,7 @@ export function createClaudeEngine(): AssistantEngine {
         leadAgent: input.leadAgent,
         contextBlock: input.contextBlock,
         mcpConfigJson: JSON.stringify({ mcpServers: { vault: input.mcp } }),
+        vaultPath: input.vaultPath,
         pluginDir: input.pluginDir,
         reposDir: input.reposDir,
       }),
