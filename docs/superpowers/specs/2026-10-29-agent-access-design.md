@@ -3,7 +3,7 @@
 **Date:** 2026-10-29 · **Status:** approved design, awaiting spec review · Builds on `main` at
 `a25a664` (setup guide and Notion fixes merged). Ships in the combined **0.2.0** release.
 
-**Amended during implementation (2026-10-29):** (1) Claude Code status is read from `~/.claude.json`, not `claude mcp get`; (2) the `.cmd` shim is `@echo off` + CRLF + `"<node>" "<bridge>" --client command %*`; (3) the install prompt wraps SKILL.md in a four-backtick fence; (4) the card's **Update** applies only to an untouched vault copy (local edits go through Updates).
+**Amended during implementation (2026-10-29):** (1) Claude Code status is read from `~/.claude.json`, not `claude mcp get`; (2) the `.cmd` shim is `@echo off` + CRLF + `"<node>" "<bridge>" --client command %*`; (3) the install prompt wraps SKILL.md in a four-backtick fence; (4) the card's **Update** applies only to an untouched vault copy (local edits go through Updates); (5) the vault copy is ours when its `dir` origin has subpath `skill-vault` under any folder named `bundled-skills`, so a moved or re-cloned app still recognises it, and **Update** re-points `origin.path` at the current checkout; **Add to vault** skips (and reports) a default target whose `skill-vault` folder isn't a link to the vault copy; (6) `launch.ps1 -Headless` resets PATH to the Machine + User PATH and removes `CLAUDECODE` and `CLAUDE_CODE_*` before starting the server; (7) without `--client` the bridge's client is `assistant` only when `SKILL_VAULT_URL` is set, otherwise `agent`; (8) OpenClaw runs in an isolated WSL distro (export only), so it can't reach the vault, run the shared command or be a `push_to_provider` target; (9) command mode takes `--file <path>` (UTF-8, or UTF-16LE with a BOM) instead of stdin, and the docs give the sh, `cmd` and PowerShell forms; (10) `save_skill` refuses path segments Windows or macOS would write elsewhere (ignored names in any casing, trailing dot or space, `:`, `~<digit>` short names, device names, control and reserved characters).
 
 ## Problem
 
@@ -26,8 +26,8 @@
    vault: browse/search, use a vault skill in the chat, save a chat skill to the vault, push vault
    skills to other targets, install a skill in Claude Desktop, and run Notion/status checks.
 2. The skill is an **ordinary vault skill**: one click adds it to the vault with an origin pointing at
-   the app's bundled copy, so existing targets push it to Claude Code, Cursor, Codex, Copilot, Windsurf,
-   OpenClaw, and the Claude Desktop package target zips it. App updates that change it show up as
+   the app's bundled copy, so existing targets push it to Claude Code, Cursor, Codex, Copilot and
+   Windsurf, and the Claude Desktop package target zips it. App updates that change it show up as
    *Update available*.
 3. **Claude Desktop and Claude Code get the vault tools over MCP**, connected from one Settings card.
 4. **Every other agent with a shell** gets the same tools through a shared command,
@@ -38,7 +38,7 @@
 
 ## Non-goals
 
-- MCP config writers for Cursor, Codex, Copilot, Windsurf or OpenClaw (they use the shared command).
+- MCP config writers for Cursor, Codex, Copilot or Windsurf (they use the shared command).
 - A Claude Desktop Extension (`.mcpb`) package.
 - Installing skills into a claude.ai account without the user's upload/save click (no API exists).
 - Deleting files through `save_skill`; renames; binary files.
@@ -62,7 +62,7 @@
 Any agent with the skill-vault skill
  ├─ Claude Desktop ── MCP entry in claude_desktop_config.json ─────────┐
  ├─ Claude Code ───── MCP entry via `claude mcp add --scope user` ─────┤
- └─ Cursor, Codex, Copilot, Windsurf, OpenClaw ─ shell: ~/.skill-vault/bin/skill-vault <tool>
+ └─ Cursor, Codex, Copilot, Windsurf ─ shell: ~/.skill-vault/bin/skill-vault <tool>
                                                                        ▼
           <app>/dist/assistant-mcp.js   one bridge, one tool table; MCP mode or command mode
             → server from ~/.skill-vault/app.lock + GET /api/health, or start it hidden
@@ -86,8 +86,8 @@ provider-agnostic: other assistant providers (Codex, Copilot, Grok) use the same
 
 1. Vault tools are available (named `list_skills`, `save_skill`, … under any server prefix) → use them.
 2. The agent has a shell → run `~/.skill-vault/bin/skill-vault` (`skill-vault.cmd` on Windows
-   `cmd`/PowerShell). `skill-vault tools` lists tools and schemas; `skill-vault <tool>` takes JSON
-   arguments on stdin and prints the JSON result.
+   `cmd`/PowerShell). `skill-vault tools` lists tools and schemas; `skill-vault <tool> --file args.json`
+   takes JSON arguments from a UTF-8 file (or stdin) and prints the JSON result.
 3. Neither → say the vault isn't connected and how to connect (Skill Vault → Settings → Agent access).
 
 **Actions it covers:**
@@ -147,8 +147,10 @@ targets to the config's `default_targets`, and pushes it to them. The row then l
 
 **Row 4 — Other agents**
 
-- Shows the command path (`~/.skill-vault/bin/skill-vault`) and a one-line usage example. Nothing to
-  connect; push the skill to those targets from row 1 or the normal Push flow.
+- Shows both command paths (`%USERPROFILE%\.skill-vault\bin\skill-vault.cmd` for `cmd` and PowerShell,
+  `~/.skill-vault/bin/skill-vault` for sh) and a one-line usage hint (`skill-vault <tool> --file
+  args.json`, or stdin). Nothing to connect; push the skill to those targets from row 1 or the normal
+  Push flow.
 
 Connect is disabled with "Build the app first" when `dist/assistant-mcp.js` doesn't exist (dev mode).
 
@@ -202,15 +204,17 @@ write. The merge and removal are pure functions (`config in → config out`) so 
 
 `app/server/assistant-mcp/main.ts` gains argument parsing; `bridge.ts` keeps the tool table.
 
-**Arguments:** `[--client <id>] [tools | <tool-name>]`
+**Arguments:** `[--client <id>] [tools | <tool-name> [--file <path>]]`
 
 - No positional → MCP stdio mode (today's behavior).
 - `tools` → print `[{ name, description, input_schema }]` as JSON and exit 0.
-- `<tool-name>` → read stdin to end (empty or a TTY → `{}`), parse JSON, run the tool's handler, print
-  the result as JSON, exit 0. Unknown tool, bad JSON, or a tool error → print `{ "error": "…" }`,
-  exit 1.
-- `--client` (default `assistant`) is sent on every HTTP call as `X-Skill-Vault-Client`. The command
-  shim passes `--client command`.
+- `<tool-name>` → read the JSON arguments from `--file` (UTF-16LE with an FF FE BOM, otherwise UTF-8
+  with any BOM dropped; stdin isn't read) or else stdin to end (empty or a TTY → `{}`), parse JSON, run
+  the tool's handler, print the result as JSON, exit 0. Unknown tool, unreadable file, bad JSON, or a
+  tool error → print `{ "error": "…" }`, exit 1.
+- `--client` is sent on every HTTP call as `X-Skill-Vault-Client`. Without it the client is
+  `assistant` when `SKILL_VAULT_URL` is set (the in-app assistant) and `agent` otherwise, so a
+  hand-made MCP config counts as agent activity. The command shim passes `--client command`.
 
 **Finding the server** (`assistant-mcp/server.ts`), used when `SKILL_VAULT_URL` is not set:
 
@@ -364,8 +368,11 @@ Unit tests in the existing `node --test` style:
 
 **Manual, after merge, on the installed app:** connect Claude Desktop, restart it, and run the four
 actions plus a push to another target; connect Claude Code and call a tool; run
-`skill-vault list_skills` from Git Bash and from PowerShell; close the app and confirm a Desktop tool
-call starts it hidden and that it stops ~10 minutes after the last call.
+`skill-vault list_skills` from Git Bash and from PowerShell, and a `--file` call with a non-ASCII
+argument from `cmd` and PowerShell; close the app and confirm a Desktop tool call starts it hidden and
+that it stops ~10 minutes after the last call. Also check that a server started by a bridge keeps
+running when the host (Claude Desktop, Claude Code) closes the bridge: a host that kills the bridge's
+whole process tree (a Windows job object) can take the server with it, and breakaway isn't handled.
 
 ## Docs
 

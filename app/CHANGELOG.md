@@ -37,10 +37,12 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
     `claude_desktop_config.json` (backed up first; other servers untouched).
   - **Claude Code**: **Connect** runs `claude mcp add --scope user skill-vault`;
     status is read from `~/.claude.json`.
-  - **Other agents**: `~/.skill-vault/bin/skill-vault <tool>` (JSON in, JSON out);
+  - **Other agents**: `~/.skill-vault/bin/skill-vault <tool> --file args.json`
+    (JSON arguments from a UTF-8 file or stdin, JSON out);
     `%USERPROFILE%\.skill-vault\bin\skill-vault.cmd` for cmd and PowerShell.
   - **The `skill-vault` skill** ships with the app. **Add to vault** adopts it and
-    pushes it to your default targets; install it in Claude Desktop with the zip or
+    pushes it to your default targets (a target that already has a `skill-vault`
+    folder of its own is left alone); install it in Claude Desktop with the zip or
     the copy-paste prompt. **Update** appears only while your vault copy is untouched;
     if you edited it, updates go through the Updates page and your edits are never
     overwritten by the card.

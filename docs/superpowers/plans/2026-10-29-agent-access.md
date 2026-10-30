@@ -18,7 +18,7 @@ bridge calls as activity so a background-started app idles out 10 minutes after 
 
 ## Global Constraints
 
-- Work only in the worktree `C:\Github\skill-vault\.claude\worktrees\agent-access` (branch `feat/agent-access`, based on `main` `a25a664`). Other sessions use the main checkout.
+- Work only in the worktree `<worktree>` (branch `feat/agent-access`, based on `main` `a25a664`). Other sessions use the main checkout.
 - Do not modify: `app/client/src/components/Layout.tsx`, `app/client/src/components/AppUpdate.tsx`, `app/vite.config.ts`, `app/server/services/appUpdate.ts`, `app/server/routes/notion.ts`, `app/server/services/notion/connection.ts`.
 - The repo is public: no machine names, personal paths, emails or Notion IDs in code, tests, docs or the skill.
 - Bridge tools stay provider-agnostic (plain names, no client-specific behavior); other assistant providers share the table.
@@ -38,7 +38,7 @@ bridge calls as activity so a background-started app idles out 10 minutes after 
 - [ ] Install dependencies in the worktree (it has no `node_modules`):
 
 ```bash
-cd C:/Github/skill-vault/.claude/worktrees/agent-access/app && npm ci
+cd <worktree>/app && npm ci
 ```
 
 - [ ] Baseline: `npm test` passes (606 tests on `a25a664`) and `npm run typecheck` is clean.

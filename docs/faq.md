@@ -73,8 +73,9 @@ Yes. When you clone from GitHub, the guide finds `skills.json` at the repo root 
 
 **Can Claude Desktop save skills to my vault?**
 Yes. In Settings → Agent access, connect Claude Desktop and install the `skill-vault` skill (zip or
-copy-paste prompt). Then ask a Desktop chat to "save this skill to my vault". It shows you the changes
-before it overwrites anything.
+copy-paste prompt). Then ask a Desktop chat to "save this skill to my vault". Before it changes a skill
+that's already in your vault, the skill tells it to show you the changes and ask first, and every update
+is kept in the skill's version history.
 
 **Why do I have to restart Claude Desktop after connecting?**
 Claude Desktop reads its MCP servers only when it starts. Quit it from the tray icon (closing the
