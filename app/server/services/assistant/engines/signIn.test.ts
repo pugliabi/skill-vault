@@ -10,6 +10,31 @@ test("powershellLoginCommand quotes every piece and sets the title", () => {
   );
 });
 
+test("powershellLoginCommand doubles curly single quotes too", () => {
+  assert.equal(
+    powershellLoginCommand("t", { command: "C:\\Users\\Dan\u2019s PC\\x.exe", prefixArgs: [], label: "x" }, ["login"]),
+    "$Host.UI.RawUI.WindowTitle = 't'; & 'C:\\Users\\Dan\u2019\u2019s PC\\x.exe' 'login'",
+  );
+});
+
+test("a window the user closed is finished: no pending, and later close/finish never kill", () => {
+  let open = true;
+  let kills = 0;
+  const m = createSignInManager({
+    platform: "win32",
+    openWindow: () => ({ isOpen: () => open, close: () => void kills++ }),
+    setTimer: () => ({ cancel: () => {} }),
+  });
+  m.start(fakeEngine(), {});
+  assert.equal(m.pending(), true);
+  open = false;
+  assert.equal(m.pending(), false);
+  assert.equal(m.current(), null);
+  m.cancel();
+  m.finish("codex");
+  assert.equal(kills, 0);
+});
+
 test("start opens one window; a second start replaces it; cancel and timeout close it", () => {
   const opened: Array<{ title: string; command: string; closed: boolean }> = [];
   let fire: () => void = () => {};
@@ -18,7 +43,7 @@ test("start opens one window; a second start replaces it; cancel and timeout clo
     openWindow: (title, command) => {
       const w = { title, command, closed: false };
       opened.push(w);
-      return { close: () => (w.closed = true) };
+      return { isOpen: () => true, close: () => (w.closed = true) };
     },
     setTimer: (fn) => {
       fire = fn;
@@ -41,13 +66,13 @@ test("start opens one window; a second start replaces it; cancel and timeout clo
 });
 
 test("start refuses an engine that isn't installed, a window that didn't open, and non-Windows", () => {
-  const m = createSignInManager({ platform: "win32", openWindow: () => ({ close: () => {} }), setTimer: () => ({ cancel: () => {} }) });
+  const m = createSignInManager({ platform: "win32", openWindow: () => ({ isOpen: () => true, close: () => {} }), setTimer: () => ({ cancel: () => {} }) });
   const r = m.start(fakeEngine({ target: () => null }), {});
   assert.ok("error" in r && /isn't installed/.test(r.error) && r.reason === "not_installed");
   assert.equal(m.pending(), false);
   const broken = createSignInManager({ platform: "win32", openWindow: () => ({ error: "Couldn't open the sign-in window: spawn powershell.exe ENOENT" }), setTimer: () => ({ cancel: () => {} }) });
   assert.deepEqual(broken.start(fakeEngine(), {}), { error: "Couldn't open the sign-in window: spawn powershell.exe ENOENT", reason: "spawn_failed" });
   assert.equal(broken.pending(), false);
-  const mac = createSignInManager({ platform: "darwin", openWindow: () => ({ close: () => {} }), setTimer: () => ({ cancel: () => {} }) });
+  const mac = createSignInManager({ platform: "darwin", openWindow: () => ({ isOpen: () => true, close: () => {} }), setTimer: () => ({ cancel: () => {} }) });
   assert.deepEqual(mac.start(fakeEngine(), {}), { error: 'Sign-in from the app is Windows only. Run "codex login" in a terminal.', reason: "unsupported" });
 });

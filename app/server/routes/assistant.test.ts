@@ -123,13 +123,13 @@ test("install: a throwing installer still ends the stream with one done line", a
 });
 
 /** A sign-in manager whose window is recorded instead of opened. */
-async function signInHarness(over: { openWindow?: () => { close(): void } | { error: string } } = {}) {
+async function signInHarness(over: { openWindow?: () => { close(): void; isOpen(): boolean } | { error: string } } = {}) {
   const { createSignInManager } = await import("../services/assistant/engines/signIn.ts");
   const { createEngineJobs } = await import("../services/assistant/engines/jobs.ts");
   const win = { opened: 0, closed: 0 };
   const signIn = createSignInManager({
     platform: "win32",
-    openWindow: over.openWindow ?? (() => (win.opened++, { close: () => void win.closed++ })),
+    openWindow: over.openWindow ?? (() => (win.opened++, { isOpen: () => true, close: () => void win.closed++ })),
     setTimer: () => ({ cancel: () => {} }),
   });
   return { win, jobs: createEngineJobs({ signIn }) };
