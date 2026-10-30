@@ -138,9 +138,16 @@ export function createCopilotEngine(deps: EngineDeps = defaultEngineDeps()): Ass
  * has no `data`. Text comes from assistant.message_delta (the full
  * assistant.message repeats it); session.*, tool_call_delta, shell_output and
  * turn_start/turn_end (one per model call, not per chat turn) are ignored.
+ *
+ * A subagent's own text (a `task` call) is dropped: its answer already shows as
+ * that tool's result. Its messages carry parentToolCallId, and its model calls
+ * are bracketed by turn_start/turn_end with parentToolCallId (live check
+ * 2026-10-30), which also covers deltas that might not carry the field.
  */
 export function createCopilotParser(hint: (m: string) => string): TurnParser {
   const streamed = new Set<string>();
+  const subagentTurns = new Set<string>();
+  const fromSubagent = (d: Record<string, unknown>) => typeof d.parentToolCallId === "string" || subagentTurns.size > 0;
   let ended = false;
   return {
     parse(line) {
@@ -152,11 +159,18 @@ export function createCopilotParser(hint: (m: string) => string): TurnParser {
       }
       const d = (msg?.data ?? {}) as Record<string, any>;
       switch (msg?.type) {
+        case "assistant.turn_start":
+          if (typeof d.parentToolCallId === "string") subagentTurns.add(d.parentToolCallId);
+          return [];
+        case "assistant.turn_end":
+          if (typeof d.parentToolCallId === "string") subagentTurns.delete(d.parentToolCallId);
+          return [];
         case "assistant.message_delta":
-          if (typeof d.deltaContent !== "string" || !d.deltaContent) return [];
+          if (typeof d.deltaContent !== "string" || !d.deltaContent || fromSubagent(d)) return [];
           if (typeof d.messageId === "string") streamed.add(d.messageId);
           return [{ type: "text_delta", text: d.deltaContent }];
         case "assistant.message":
+          if (fromSubagent(d)) return [];
           return typeof d.content === "string" && d.content && !streamed.has(String(d.messageId)) ? [{ type: "text_delta", text: d.content }] : [];
         case "tool.execution_start": {
           if (typeof d.toolCallId !== "string" || typeof d.toolName !== "string") return [];

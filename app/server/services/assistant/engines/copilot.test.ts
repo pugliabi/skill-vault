@@ -151,6 +151,31 @@ test("parser: deltas, tools (vault + a denied write), one end of turn", () => {
   assert.deepEqual(failed.map((e) => e.type), ["error"]);
 });
 
+test("parser: a subagent's own text is dropped; its answer shows as the task result", () => {
+  // Shapes from a live run's session-state (2026-10-30): the subagent's turn and message carry parentToolCallId.
+  const lines = (deltaHasParent: boolean) => [
+    { type: "assistant.turn_start", data: { turnId: "0" } },
+    { type: "tool.execution_start", data: { toolCallId: "t1", toolName: "task", arguments: { agent_type: "skill-vault-assistant:repo-hunter", prompt: "Run hostname" } } },
+    { type: "subagent.started", data: { toolCallId: "t1", agentName: "repo-hunter" } },
+    { type: "assistant.turn_start", data: { turnId: "0", parentToolCallId: "t1" } },
+    { type: "assistant.message_delta", data: { messageId: "s1", deltaContent: "I can't run it.", ...(deltaHasParent ? { parentToolCallId: "t1" } : {}) } },
+    { type: "assistant.message", data: { messageId: "s1", content: "I can't run it.", parentToolCallId: "t1" } },
+    { type: "assistant.turn_end", data: { turnId: "0", parentToolCallId: "t1" } },
+    { type: "subagent.completed", data: { toolCallId: "t1" } },
+    { type: "tool.execution_complete", data: { toolCallId: "t1", success: true, result: { content: "I can't run it." } } },
+    { type: "assistant.message_delta", data: { messageId: "m2", deltaContent: "The subagent couldn't either." } },
+    { type: "assistant.turn_end", data: { turnId: "0" } },
+    { type: "result", exitCode: 0 },
+  ];
+  for (const withParent of [true, false]) {
+    const p = createCopilotParser((m) => m);
+    const events = lines(withParent).flatMap((l) => p.parse(JSON.stringify(l)));
+    assert.deepEqual(events.map((e) => e.type), ["tool_start", "tool_result", "text_delta", "turn_end"], `delta has parent: ${withParent}`);
+    assert.equal(events[1].type === "tool_result" && events[1].output_preview, "I can't run it.");
+    assert.equal(events[2].type === "text_delta" && events[2].text, "The subagent couldn't either.");
+  }
+});
+
 test("parser: a tool named like an Object.prototype member is just a tool name", () => {
   const p = createCopilotParser((m) => m);
   for (const toolName of ["toString", "__proto__", "constructor", "hasOwnProperty"]) {
