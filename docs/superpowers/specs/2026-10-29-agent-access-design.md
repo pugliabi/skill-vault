@@ -3,7 +3,7 @@
 **Date:** 2026-10-29 · **Status:** approved design, awaiting spec review · Builds on `main` at
 `a25a664` (setup guide and Notion fixes merged). Ships in the combined **0.2.0** release.
 
-**Amended during implementation (2026-10-29):** (1) Claude Code status is read from `~/.claude.json`, not `claude mcp get`; (2) the `.cmd` shim is `@echo off` + CRLF + `"<node>" "<bridge>" --client command %*`; (3) the install prompt wraps SKILL.md in a four-backtick fence; (4) the card's **Update** applies only to an untouched vault copy (local edits go through Updates); (5) the vault copy is ours when its `dir` origin has subpath `skill-vault` under any folder named `bundled-skills`, so a moved or re-cloned app still recognises it, and **Update** re-points `origin.path` at the current checkout; **Add to vault** skips (and reports) a default target whose `skill-vault` folder isn't a link to the vault copy; (6) `launch.ps1 -Headless` resets PATH to the Machine + User PATH and removes `CLAUDECODE` and `CLAUDE_CODE_*` before starting the server; (7) without `--client` the bridge's client is `assistant` only when `SKILL_VAULT_URL` is set, otherwise `agent`; (8) OpenClaw runs in an isolated WSL distro (export only), so it can't reach the vault, run the shared command or be a `push_to_provider` target; (9) command mode takes `--file <path>` (UTF-8, or UTF-16LE with a BOM) instead of stdin, and the docs give the sh, `cmd` and PowerShell forms; (10) `save_skill` refuses path segments Windows or macOS would write elsewhere (ignored names in any casing, trailing dot or space, `:`, `~<digit>` short names, device names, control and reserved characters).
+**Amended during implementation (2026-10-29):** (1) Claude Code status is read from `~/.claude.json`, not `claude mcp get`; (2) the `.cmd` shim is `@echo off` + CRLF + `"<node>" "<bridge>" --client command %*`; (3) the install prompt wraps SKILL.md in a four-backtick fence; (4) the card's **Update** applies only to an untouched vault copy (local edits go through Updates); (5) the vault copy is ours when its `dir` origin has subpath `skill-vault` under any folder named `bundled-skills`, so a moved or re-cloned app still recognises it, and **Update** re-points `origin.path` at the current checkout; **Add to vault** skips (and reports) a default target whose `skill-vault` folder isn't a link to the vault copy; (6) `launch.ps1 -Headless` resets PATH to the Machine + User PATH and removes `CLAUDECODE` and `CLAUDE_CODE_*` before starting the server; (7) without `--client` the bridge's client is `assistant` only when `SKILL_VAULT_URL` is set, otherwise `agent`; (8) a local `~/.openclaw` is an ordinary push target, but an OpenClaw in an isolated WSL distro (export only) can't reach the vault, run the shared command or be a `push_to_provider` target; (9) command mode takes `--file <path>` (UTF-8, or UTF-16LE with a BOM) instead of stdin, and the docs give the sh, `cmd` and PowerShell forms; (10) `save_skill` refuses path segments Windows or macOS would write elsewhere (ignored names in any casing, trailing dot or space, `:`, `~<digit>` short names, device names, control and reserved characters).
 
 ## Problem
 
@@ -26,7 +26,7 @@
    vault: browse/search, use a vault skill in the chat, save a chat skill to the vault, push vault
    skills to other targets, install a skill in Claude Desktop, and run Notion/status checks.
 2. The skill is an **ordinary vault skill**: one click adds it to the vault with an origin pointing at
-   the app's bundled copy, so existing targets push it to Claude Code, Cursor, Codex, Copilot and
+   the app's bundled copy, so existing targets push it to Claude Code, OpenClaw, Cursor, Codex, Copilot and
    Windsurf, and the Claude Desktop package target zips it. App updates that change it show up as
    *Update available*.
 3. **Claude Desktop and Claude Code get the vault tools over MCP**, connected from one Settings card.
@@ -239,8 +239,11 @@ rebuild-if-stale logic are shared with the normal launch, so concurrent bridges 
 - Without `paths`: every text file in `get_skill`'s file tree, `SKILL.md` first, then by path.
 - Reads each through `GET /api/skills/:name/files/*`. Returns
   `{ files: [{ path, content, sha256, size }], skipped: [{ path, reason }] }`.
-- `skipped` reasons: `binary`, `too_large` (over 1 MB, from the route), `over_budget` (the running total
-  would pass 256 KB; later files are listed so the agent can ask for them by `paths`).
+- `skipped` reasons: `binary`, `too_large` (over 1 MB, from the route), `ignored` (inside `.git` or
+  another ignored folder), `over_budget` (the result would pass about 44,000 characters of JSON; later
+  files are listed so the agent can ask for them by `paths`). Claude Code shows the model only a 2 KB
+  preview of an MCP result past 50,000 characters (measured on 2.1.293), so the list has a cap too, and
+  entries past it are counted in `skipped_unlisted`.
 
 **`save_skill { name, mode: "create" | "update", files: [{ path, content, expected_sha256? }] }`**
 

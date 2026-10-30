@@ -1,6 +1,6 @@
 ---
 name: skill-vault
-description: Work with the user's Skill Vault, the local skill library managed by the Skill Vault app. Use when the user asks to save or push a skill to their vault, load or use a skill from their vault, list or search what's in the vault, push a vault skill to another tool (Claude Code, Cursor, Codex, Copilot, Windsurf), install a vault skill in Claude Desktop or claude.ai, sync skills with Notion, or check whether vault skills are in sync or have updates.
+description: Work with the user's Skill Vault, the local skill library managed by the Skill Vault app. Use when the user asks to save or push a skill to their vault, load or use a skill from their vault, list or search what's in the vault, push a vault skill to another tool (Claude Code, OpenClaw, Cursor, Codex, Copilot, Windsurf), install a vault skill in Claude Desktop or claude.ai, sync skills with Notion, or check whether vault skills are in sync or have updates.
 ---
 
 # Skill Vault
@@ -21,9 +21,10 @@ Use the first of these that works:
    - `skill-vault tools` lists every tool and its arguments.
    - `skill-vault <tool> --file args.json` runs a tool with its JSON arguments from a file and prints
      the JSON result. Write the file as UTF-8 with your file-writing tool (from PowerShell:
-     `Set-Content -Encoding utf8`), never by quoting JSON or file contents on the command line.
+     `Set-Content -Encoding utf8`). Never put file contents on the command line, and don't quote JSON
+     there in `cmd` or PowerShell.
 
-     sh (Git Bash, macOS, Linux), where the arguments can also come on stdin:
+     sh (Git Bash, macOS, Linux), where short arguments can also come on stdin:
 
      ```bash
      ~/.skill-vault/bin/skill-vault search_skills --file args.json
@@ -58,8 +59,8 @@ The first call can take up to a minute when the Skill Vault app has to start in 
 ## Use a vault skill in this chat
 
 1. `read_skill_files { name }` returns SKILL.md first, then the other text files, each with its
-   `sha256`. If `skipped` lists files as over budget, ask for them with `paths` when the task needs
-   them.
+   `sha256`. Large skills don't fit in one call: if `skipped` lists files as over budget, or the
+   result counts more it couldn't list, ask for the ones the task needs with `paths`, a few at a time.
 2. Follow the skill as written for the rest of the conversation, as if it were installed.
 
 ## Save a skill from this chat to the vault

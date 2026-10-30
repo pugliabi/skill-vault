@@ -11,6 +11,14 @@ semver; the project is pre-1.0, so minor versions carry feature batches.
   folders, and its shell runs plain `git` for history and clones and nothing else. Before, it could write
   anywhere and run read-only commands such as `hostname`. It can no longer `git push`, `commit` or
   `config`, or chain and pipe commands.
+- **The file editor can no longer write into a skill's `.git` folder.** Saving now follows the same path
+  rules as `save_skill`, so it also refuses other ignored folders such as `dist` and `node_modules`.
+- **Large skills reach Claude Code whole.** `read_skill_files` could return more than Claude Code passes
+  to the model, which then saw only a short preview with no error. It now stops at about 44,000
+  characters and lists the rest to ask for by name. A single file over 50,000 characters still comes
+  back as a preview.
+- **Agent access:** `skill-vault` with no tool name prints usage instead of hanging, a background start
+  keeps the node folder it started with, and the Settings card shows the right PowerShell command.
 
 ## [0.2.0] - 2026-10-30
 

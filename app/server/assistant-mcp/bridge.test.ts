@@ -291,7 +291,7 @@ test("read_skill_files reads SKILL.md first, skips binaries, normalizes Windows 
 });
 
 test("read_skill_files stops at the budget but always returns the first file", async () => {
-  const big = 200 * 1024;
+  const big = 30_000;
   const http = fakeHttp([
     {
       status: 200,
@@ -315,6 +315,53 @@ test("read_skill_files stops at the budget but always returns the first file", a
   };
   assert.deepEqual(out.files.map((f) => f.path), ["SKILL.md", "c.md"]);
   assert.deepEqual(out.skipped, [{ path: "b.md", reason: "over_budget" }]);
+});
+
+// Claude Code 2.1.293 passes an MCP result to the model whole up to 50,000 characters, measured with
+// the real CLI: past that the model gets a 2 KB preview of it and no error.
+test("read_skill_files counts escaped characters, not bytes", async () => {
+  const http = fakeHttp([
+    {
+      status: 200,
+      json: {
+        files: {
+          name: "demo", path: "", type: "dir",
+          children: [
+            { name: "SKILL.md", path: "SKILL.md", type: "file", size: 5 },
+            { name: "lines.md", path: "lines.md", type: "file", size: 30_000 },
+          ],
+        },
+      },
+    },
+    textFile("hello"),
+    textFile("\n".repeat(30_000)),
+  ]);
+  const out = (await TOOLS.read_skill_files.handler({ name: "demo" }, http, noSleep)) as {
+    files: Array<{ path: string }>;
+    skipped: Array<{ path: string; reason: string }>;
+  };
+  assert.deepEqual(out.files.map((f) => f.path), ["SKILL.md"]);
+  assert.deepEqual(out.skipped, [{ path: "lines.md", reason: "over_budget" }]);
+});
+
+test("a skill with thousands of files still fits in one tool result", async () => {
+  const count = 2_000;
+  const children = [
+    { name: "SKILL.md", path: "SKILL.md", type: "file", size: 1_000 },
+    ...Array.from({ length: count }, (_, i) => ({ name: `file-${i}.md`, path: `references/deep/folder/file-${i}.md`, type: "file", size: 1_000 })),
+  ];
+  const http = fakeHttp([
+    { status: 200, json: { files: { name: "demo", path: "", type: "dir", children } } },
+    ...Array.from({ length: count + 1 }, () => textFile("x".repeat(1_000))),
+  ]);
+  const out = (await TOOLS.read_skill_files.handler({ name: "demo" }, http, noSleep)) as {
+    files: unknown[];
+    skipped: unknown[];
+    skipped_unlisted?: number;
+  };
+  assert.ok(JSON.stringify(out).length < 50_000, `result is ${JSON.stringify(out).length} characters`);
+  assert.equal(out.files.length + out.skipped.length + (out.skipped_unlisted ?? 0), count + 1);
+  assert.ok((out.skipped_unlisted ?? 0) > 0);
 });
 
 test("read_skill_files with paths reads only those files", async () => {
