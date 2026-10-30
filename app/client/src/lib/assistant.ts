@@ -132,14 +132,16 @@ export const assistantApi = {
   /** mode: report sign-in for that mode rather than the saved one (the sign-in dialog asks for "login"). */
   engine: (id: EngineId, refresh?: boolean, mode?: "login" | "api_key") => {
     const q = new URLSearchParams({ ...(refresh ? { refresh: "1" } : {}), ...(mode ? { mode } : {}) }).toString();
-    return rest<EngineView>("GET", `/api/assistant/engines/${id}${q ? `?${q}` : ""}`);
+    return rest<EngineView & { sign_in?: SignInWindowState | null }>("GET", `/api/assistant/engines/${id}${q ? `?${q}` : ""}`);
   },
   setEngine: (id: EngineId) => rest<{ engine: EngineId }>("PUT", "/api/assistant/engine", { engine: id }),
   /** An omitted field is kept; an empty string clears it. */
   setEngineAuth: (id: EngineId, body: { auth?: "login" | "api_key"; api_key?: string; workspace_id?: string }) =>
     rest<EngineView>("PUT", `/api/assistant/engines/${id}/auth`, body),
-  login: (id: EngineId) => rest<{ started: true; hint: string }>("POST", `/api/assistant/engines/${id}/login`),
+  /** already_signed_in: the provider read as signed in at start, so only the window's exit code 0 means done. */
+  login: (id: EngineId) => rest<{ started: true; hint: string; already_signed_in?: boolean }>("POST", `/api/assistant/engines/${id}/login`),
   cancelLogin: (id: EngineId) => rest<{ ok: true }>("POST", `/api/assistant/engines/${id}/login/cancel`),
+  cancelInstall: (id: EngineId) => rest<{ ok: true }>("POST", `/api/assistant/engines/${id}/install/cancel`),
   installable: () => rest<{ skills: string[] }>("GET", "/api/assistant/install-skills"),
   installSkills: (body: { skills?: string[]; agents?: boolean; overwrite?: boolean }) =>
     rest<{
@@ -176,6 +178,14 @@ export interface EngineView {
   login_hint: string;
 }
 
+/** The sign-in window GET /engines/:id reports for that provider (server engines/signIn.ts). */
+export interface SignInWindowState {
+  open: boolean;
+  /** Set once the window exited on its own: 0 = the login command succeeded. */
+  exit_code: number | null;
+  already_signed_in: boolean;
+}
+
 export type InstallEvent =
   | { type: "step"; index: number; label: string; display: string }
   | { type: "line"; text: string }
@@ -184,6 +194,8 @@ export type InstallEvent =
 /** Mirrors the server's readiness rule (engines/state.ts ready()). */
 export function engineReady(v: EngineView): boolean {
   if (!v.installed) return false;
+  // Claude only needs to be installed: its CLI reports its own sign-in errors.
+  if (v.id === "claude") return true;
   if (v.auth.mode === "api_key") return v.auth.has_saved_key || v.auth.env_key_present;
   return v.auth.signed_in !== false;
 }

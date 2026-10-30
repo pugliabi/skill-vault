@@ -1,6 +1,7 @@
 /**
  * A plain modal: dimmed backdrop, focus moved in and trapped, Escape and
  * backdrop click close it (unless busy), focus returned to the opener.
+ * Escape never reaches anything behind it.
  */
 import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 
@@ -21,12 +22,17 @@ export function Modal({
 }) {
   const panel = useRef<HTMLDivElement>(null);
 
+  // Capture phase, before any other Escape handler (the assistant panel collapses on Escape): the modal
+  // owns Escape while it's open, busy or not.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !busy) onClose();
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (!busy) onClose();
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [busy, onClose]);
 
   useEffect(() => {

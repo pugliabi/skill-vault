@@ -62,7 +62,7 @@ export function AssistantStep({ draft, commit, goTo, apiKey, setApiKey }: StepPr
       </StepHeader>
 
       {error && <Hint tone="warn">{error instanceof Error ? error.message : "Couldn't load the providers."}</Hint>}
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, margin: "18px 0" }}>
+      <div role="group" aria-label="Provider" style={{ display: "flex", flexDirection: "column", gap: 8, margin: "18px 0" }}>
         {engines.map((v) => (
           <ChoiceCard
             key={v.id}
@@ -83,7 +83,7 @@ export function AssistantStep({ draft, commit, goTo, apiKey, setApiKey }: StepPr
       {current?.installed && <Hint tone="good">Installed: {current.version}</Hint>}
 
       {current?.installed && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, margin: "12px 0" }}>
+        <div role="group" aria-label="How to sign in" style={{ display: "flex", flexDirection: "column", gap: 8, margin: "12px 0" }}>
           <ChoiceCard selected={mode === "login"} onSelect={() => setAuth("login")} title="Sign in with my account" description="Uses the tool's own sign-in. Best for most people." />
           <ChoiceCard selected={mode === "api_key"} onSelect={() => setAuth("api_key")} title="Use an API key" description="Usage is billed to that key." />
         </div>

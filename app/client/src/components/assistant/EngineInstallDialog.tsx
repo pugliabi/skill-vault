@@ -2,7 +2,8 @@
  * Confirm → install (streamed output) → installed, or what failed with the
  * command to run yourself. When the provider signs in with an account and
  * isn't signed in yet, a finished install goes straight on to the sign-in
- * dialog.
+ * dialog. While it runs, Escape and the backdrop do nothing, but Cancel
+ * install stops it.
  */
 import { useState } from "react";
 import { assistantApi, installEngine, type EngineView } from "../../lib/assistant";
@@ -44,6 +45,7 @@ export function EngineInstallDialog({
   const [message, setMessage] = useState<string | null>(null);
   const [version, setVersion] = useState<string | null>(null);
   const [installed, setInstalled] = useState<EngineView | null>(null);
+  const [stopping, setStopping] = useState(false);
   const commands = engine.install.map((s) => s.display).join("\n");
   const sources = [...new Set(engine.install.map((s) => s.source))].join(", ");
 
@@ -57,6 +59,7 @@ export function EngineInstallDialog({
 
   const run = async () => {
     setPhase("running");
+    setStopping(false);
     setLines([]);
     setMessage(null);
     let ok = false;
@@ -83,6 +86,17 @@ export function EngineInstallDialog({
       // Installed, but the fresh state didn't load: say so and skip the hand-off.
       setMessage(errorText(err, "Couldn't check the provider again."));
       setPhase("done");
+    }
+  };
+
+  /** Stops the running install; its stream then ends with "The install was stopped." and the dialog shows it. */
+  const stop = async () => {
+    setStopping(true);
+    try {
+      await assistantApi.cancelInstall(engine.id);
+    } catch (err) {
+      setStopping(false);
+      setMessage(errorText(err, "Couldn't stop the install."));
     }
   };
 
@@ -115,6 +129,16 @@ export function EngineInstallDialog({
         </>
       )}
       {phase !== "confirm" && <pre style={logStyle}>{(phase === "failed" ? lines.slice(-20) : lines).join("\n") || "Starting…"}</pre>}
+      {phase === "running" && (
+        <>
+          {message && <p style={{ margin: 0, color: "var(--warn)" }}>{message}</p>}
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <Button kind="ghost" size="sm" disabled={stopping} onClick={() => void stop()}>
+              {stopping ? "Stopping…" : "Cancel install"}
+            </Button>
+          </div>
+        </>
+      )}
       {phase === "done" && (
         <>
           <p style={{ margin: 0, color: "var(--ok)" }}>Installed{version ? ` — ${version}` : ""}.</p>

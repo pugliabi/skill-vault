@@ -1,9 +1,10 @@
 /**
  * Settings → AI assistant → Provider: which CLI runs new assistant chats,
  * whether it's installed and signed in, and how it signs in. Claude keeps
- * its existing panel (login vs API key + workspace ID).
+ * its existing panel (login vs API key + workspace ID), plus the same Sign in
+ * button as the other rows when it uses the login.
  */
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ApiError } from "../../lib/api";
@@ -51,45 +52,60 @@ export function ProviderSettings() {
   const engines = data?.engines ?? [];
   const selected = engines.find((e) => e.selected);
   const muted = { color: "var(--ink-3)", fontSize: 12 } as const;
+  const headingId = useId();
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingBottom: 12, borderBottom: "0.5px solid var(--border)" }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-        <span style={{ fontWeight: 600, color: "var(--ink)" }}>Provider</span>
+        <span id={headingId} style={{ fontWeight: 600, color: "var(--ink)" }}>Provider</span>
         <span style={muted}>runs new assistant chats</span>
         <span style={{ flex: 1 }} />
         <Button kind="ghost" size="sm" disabled={isFetching} onClick={() => void checkAgain()}>
           {isFetching ? "Checking…" : "Check again"}
         </Button>
       </div>
-      {engines.map((v) => (
-        <div key={v.id} style={{ border: "0.5px solid var(--border)", borderRadius: 6, padding: "8px 10px", background: v.selected ? "var(--bg)" : undefined }}>
-          <label style={{ display: "flex", alignItems: "baseline", gap: 8, cursor: "pointer", fontSize: 12.5 }}>
-            <input type="radio" name="assistant-provider" checked={v.selected} onChange={() => select.mutate(v.id)} style={{ accentColor: "var(--accent)" }} />
-            <span style={{ fontWeight: 500, color: "var(--ink)" }}>{v.label}</span>
-            <span style={muted}>{stateText(v)}</span>
-            {v.installed && v.version && (
-              <span style={{ ...muted, marginLeft: "auto" }}>
-                {v.version} · checked with {v.verified_version}
-              </span>
-            )}
-          </label>
-          {v.selected && (
-            <div style={{ paddingLeft: 22, paddingTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
-              {!v.installed ? (
-                <div>
-                  <Button kind="primary" size="sm" onClick={() => setDialog({ kind: "install", engine: v })}>Install {v.label}</Button>
-                </div>
-              ) : v.id === "claude" ? (
-                <ClaudeSignIn />
-              ) : (
-                <EngineAuth view={v} onSignIn={() => setDialog({ kind: "signin", engine: v })} onSaved={refresh} />
+      <fieldset aria-labelledby={headingId} style={FIELDSET_STYLE}>
+        {engines.map((v) => (
+          <div key={v.id} style={{ border: "0.5px solid var(--border)", borderRadius: 6, padding: "8px 10px", background: v.selected ? "var(--bg)" : undefined }}>
+            {/* Wraps when the panel is narrow: the version line drops below instead of squeezing every column. */}
+            <label style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: 8, rowGap: 2, cursor: "pointer", fontSize: 12.5 }}>
+              <input
+                type="radio"
+                name="assistant-provider"
+                value={v.id}
+                aria-label={v.label}
+                checked={v.selected}
+                onChange={() => select.mutate(v.id)}
+                style={{ accentColor: "var(--accent)", flexShrink: 0 }}
+              />
+              <span style={{ fontWeight: 500, color: "var(--ink)" }}>{v.label}</span>
+              <span style={muted}>{stateText(v)}</span>
+              {v.installed && v.version && (
+                <span style={{ ...muted, marginLeft: "auto" }}>
+                  {v.version} · checked with {v.verified_version}
+                </span>
               )}
-              {!v.subagents && <span style={muted}>Runs without the specialist subagents; the lead does their work using the same skills.</span>}
-            </div>
-          )}
-        </div>
-      ))}
+            </label>
+            {v.selected && (
+              <div style={{ paddingLeft: 22, paddingTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+                {!v.installed ? (
+                  <div>
+                    <Button kind="primary" size="sm" onClick={() => setDialog({ kind: "install", engine: v })}>Install {v.label}</Button>
+                  </div>
+                ) : v.id === "claude" ? (
+                  <>
+                    {v.auth.mode === "login" && <SignInButton view={v} onClick={() => setDialog({ kind: "signin", engine: v })} />}
+                    <ClaudeSignIn />
+                  </>
+                ) : (
+                  <EngineAuth view={v} onSignIn={() => setDialog({ kind: "signin", engine: v })} onSaved={refresh} />
+                )}
+                {!v.subagents && <span style={muted}>Runs without the specialist subagents; the lead does their work using the same skills.</span>}
+              </div>
+            )}
+          </div>
+        ))}
+      </fieldset>
       {selected && selected.id !== "claude" && <span style={muted}>AI tagging and merge-on-update still use Claude Code.</span>}
       {dialog?.kind === "install" && (
         <EngineInstallDialog
@@ -116,6 +132,20 @@ export function ProviderSettings() {
   );
 }
 
+/** An unstyled fieldset: it only groups (and names) a set of radios. */
+const FIELDSET_STYLE = { border: 0, margin: 0, padding: 0, minWidth: 0, display: "flex", flexDirection: "column", gap: 8 } as const;
+
+/** Every provider's account sign-in button, Claude's included: "Sign in again" once it reads as signed in. */
+function SignInButton({ view, onClick }: { view: EngineView; onClick: () => void }) {
+  return (
+    <div>
+      <Button kind={view.auth.signed_in === true ? "ghost" : "primary"} size="sm" onClick={onClick}>
+        {view.auth.signed_in === true ? "Sign in again" : "Sign in"}
+      </Button>
+    </div>
+  );
+}
+
 function EngineAuth({ view, onSignIn, onSaved }: { view: EngineView; onSignIn: () => void; onSaved: () => void }) {
   const [mode, setMode] = useState(view.auth.mode);
   const [key, setKey] = useState("");
@@ -135,21 +165,18 @@ function EngineAuth({ view, onSignIn, onSaved }: { view: EngineView; onSignIn: (
   };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      <label style={radio}>
-        <input type="radio" name={`auth-${view.id}`} checked={mode === "login"} onChange={() => choose("login")} style={{ accentColor: "var(--accent)" }} />
-        <span>Account login</span>
-      </label>
-      <label style={radio}>
-        <input type="radio" name={`auth-${view.id}`} checked={mode === "api_key"} onChange={() => choose("api_key")} style={{ accentColor: "var(--accent)" }} />
-        <span>API key</span>
-      </label>
-      {mode === "login" && (
-        <div>
-          <Button kind={view.auth.signed_in === true ? "ghost" : "primary"} size="sm" onClick={onSignIn}>
-            {view.auth.signed_in === true ? "Sign in again" : "Sign in"}
-          </Button>
-        </div>
-      )}
+      <fieldset style={{ ...FIELDSET_STYLE, gap: 6 }}>
+        <legend style={{ padding: 0, marginBottom: 6, fontSize: 12, color: "var(--ink-3)" }}>Sign in with</legend>
+        <label style={radio}>
+          <input type="radio" name={`auth-${view.id}`} value="login" aria-label="Account login" checked={mode === "login"} onChange={() => choose("login")} style={{ accentColor: "var(--accent)" }} />
+          <span>Account login</span>
+        </label>
+        <label style={radio}>
+          <input type="radio" name={`auth-${view.id}`} value="api_key" aria-label="API key" checked={mode === "api_key"} onChange={() => choose("api_key")} style={{ accentColor: "var(--accent)" }} />
+          <span>API key</span>
+        </label>
+      </fieldset>
+      {mode === "login" && <SignInButton view={view} onClick={onSignIn} />}
       {mode === "api_key" && (
         <div style={{ display: "flex", gap: 6, maxWidth: 520 }}>
           <input

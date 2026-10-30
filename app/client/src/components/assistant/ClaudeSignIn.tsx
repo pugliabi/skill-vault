@@ -68,31 +68,37 @@ export function ClaudeSignIn() {
         borderBottom: "0.5px solid var(--border)",
       }}
     >
-      <span style={{ fontWeight: 600, color: "var(--ink)" }}>Sign in with</span>
-      <label style={radioRow}>
-        <input
-          type="radio"
-          name="assistant-auth"
-          checked={mode === "login"}
-          onChange={() => setMode("login")}
-          style={{ accentColor: "var(--accent)" }}
-        />
-        <span>
-          Claude login <span style={muted}>(your Claude Code subscription; ignores ANTHROPIC_API_KEY)</span>
-        </span>
-      </label>
-      <label style={radioRow}>
-        <input
-          type="radio"
-          name="assistant-auth"
-          checked={mode === "api_key"}
-          onChange={() => setMode("api_key")}
-          style={{ accentColor: "var(--accent)" }}
-        />
-        <span>
-          API key <span style={muted}>(billed to your Anthropic API account)</span>
-        </span>
-      </label>
+      <fieldset style={{ border: 0, margin: 0, padding: 0, minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+        <legend style={{ padding: 0, marginBottom: 8, fontWeight: 600, color: "var(--ink)" }}>Sign in with</legend>
+        <label style={radioRow}>
+          <input
+            type="radio"
+            name="assistant-auth"
+            value="login"
+            aria-label="Claude login"
+            checked={mode === "login"}
+            onChange={() => setMode("login")}
+            style={{ accentColor: "var(--accent)" }}
+          />
+          <span>
+            Claude login <span style={muted}>(your Claude Code subscription; ignores ANTHROPIC_API_KEY)</span>
+          </span>
+        </label>
+        <label style={radioRow}>
+          <input
+            type="radio"
+            name="assistant-auth"
+            value="api_key"
+            aria-label="API key"
+            checked={mode === "api_key"}
+            onChange={() => setMode("api_key")}
+            style={{ accentColor: "var(--accent)" }}
+          />
+          <span>
+            API key <span style={muted}>(billed to your Anthropic API account)</span>
+          </span>
+        </label>
+      </fieldset>
       {mode === "api_key" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 6, paddingLeft: 22, maxWidth: 460 }}>
           <input
