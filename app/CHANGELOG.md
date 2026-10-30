@@ -13,6 +13,11 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
   a Bash hook (`assistant-plugin/hooks/git-gate.mjs`) that lets through one
   plain git command for history or clones, and `safe.bareRepository=explicit`.
   The assistant can no longer `git push`, `commit` or `config`.
+- The git gate let `git clone <url> -- -/../../x` and the same with
+  `--end-of-options` write outside the vault and repos folder: after either one,
+  git takes a word starting with `-` as the target, and the gate skipped those.
+  Clone now refuses both, and a URL-shaped word with `..` in it counts as a path
+  (`a://../../x` is a relative folder on macOS and Linux).
 - The file editor's save (`PUT /api/skills/:name/files/*`) only checked for
   traversal, so it could overwrite a skill's `.git/config`, also as `.GIT` or
   `GIT~1`. It now has `save_skill`'s path rules: ignored folders, Windows short

@@ -11,6 +11,8 @@ semver; the project is pre-1.0, so minor versions carry feature batches.
   folders, and its shell runs plain `git` for history and clones and nothing else. Before, it could write
   anywhere and run read-only commands such as `hostname`. It can no longer `git push`, `commit` or
   `config`, or chain and pipe commands.
+- **The assistant's `git clone` stays in the vault and repos folders.** A clone written with `--` could
+  land anywhere; the git gate now refuses that form.
 - **The file editor can no longer write into a skill's `.git` folder.** Saving now follows the same path
   rules as `save_skill`, so it also refuses other ignored folders such as `dist` and `node_modules`.
 - **Large skills reach Claude Code whole.** `read_skill_files` could return more than Claude Code passes
