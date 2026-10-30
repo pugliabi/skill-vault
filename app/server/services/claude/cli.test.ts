@@ -601,16 +601,16 @@ test("createStreamRunner with a target spawns it directly, with its prefix args 
     },
   );
   const p = runner(["exec", "--json"], "line one\nline two", {
-    cwd: "C:\vault",
-    target: { command: "C:\node\node.exe", prefixArgs: ["C:\npm\codex.js"], label: "codex CLI" },
+    cwd: "C:\\vault",
+    target: { command: "C:\\node\\node.exe", prefixArgs: ["C:\\npm\\codex.js"], label: "codex CLI" },
     env: { ONLY: "this" },
     idleTimeoutMs: 20,
     hardTimeoutMs: 10_000,
     onLine: () => {},
   });
   await assert.rejects(p, /codex CLI produced no output/);
-  assert.equal(seen[0].command, "C:\node\node.exe");
-  assert.deepEqual(seen[0].args, ["C:\npm\codex.js", "exec", "--json"]);
+  assert.equal(seen[0].command, "C:\\node\\node.exe");
+  assert.deepEqual(seen[0].args, ["C:\\npm\\codex.js", "exec", "--json"]);
   assert.deepEqual(seen[0].options.env, { ONLY: "this" });
   assert.equal(seen[0].options.shell, undefined);
   assert.equal(child.writtenStdin, "line one\nline two");
@@ -623,8 +623,8 @@ test("createStreamRunner: a turn aborted before it starts names the target's CLI
   abort.abort();
   await assert.rejects(
     runner([], "", {
-      cwd: "C:\vault",
-      target: { command: "C:\codex.exe", prefixArgs: [], label: "codex CLI" },
+      cwd: "C:\\vault",
+      target: { command: "C:\\codex.exe", prefixArgs: [], label: "codex CLI" },
       signal: abort.signal,
       idleTimeoutMs: 1000,
       hardTimeoutMs: 1000,
@@ -636,10 +636,10 @@ test("createStreamRunner: a turn aborted before it starts names the target's CLI
 });
 
 test("claudeExeSearchDirs: process PATH, then the registry PATH, then ~/.local/bin", () => {
-  assert.deepEqual(claudeExeSearchDirs(`C:\a${path.delimiter}C:\b`, ["C:\reg"], "C:\Users\me"), [
-    "C:\a",
-    "C:\b",
-    "C:\reg",
-    path.join("C:\Users\me", ".local", "bin"),
+  assert.deepEqual(claudeExeSearchDirs(`C:\\a${path.delimiter}C:\\b`, ["C:\\reg"], "C:\\Users\\me"), [
+    "C:\\a",
+    "C:\\b",
+    "C:\\reg",
+    path.join("C:\\Users\\me", ".local", "bin"),
   ]);
 });
