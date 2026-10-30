@@ -3,9 +3,9 @@
 The Skill Vault App has a built-in AI assistant: a docked chat pane available on
 every page that can research, explain, and **fix** vault problems — repair broken
 update sources, apply updates, push and pull skills, drive Notion sync, and
-diagnose failed operations. It runs on your local [Claude Code](https://claude.com/claude-code)
-CLI, so it uses your existing Claude subscription and nothing leaves your machine
-except the model calls Claude Code itself makes.
+diagnose failed operations. It runs on a local command-line tool you pick ([Claude Code](https://claude.com/claude-code) by default; see [Providers](#providers)),
+so it uses that tool's own sign-in and subscription and nothing leaves your machine
+except the model calls that tool makes.
 
 ![The skill-scout specialist returning a star-ranked table of GitHub skills](images/assistant-discovery.png)
 
@@ -50,6 +50,11 @@ The assistant can run on any of four command-line tools. Pick one in **Settings 
 | OpenAI Codex | `npm install -g @openai/codex` | ChatGPT account | OpenAI API key |
 | GitHub Copilot CLI | `npm install -g @github/copilot` | GitHub (Copilot plan), one-time code | Fine-grained token with *Copilot Requests* |
 | Grok Build | `irm https://x.ai/cli/install.ps1 \| iex` | grok.com account (a separate sign-in just for Skill Vault) | xAI API key |
+
+**Grok Build support is new.** Its install folder, sign-in check, tool names and git-only shell come from
+xAI's documentation and haven't been checked against the real Grok CLI yet. If install, sign-in or the
+git-only shell behave differently from what's described here, treat this page as the expected behaviour
+and tell us.
 
 **Install** shows the exact command before it runs and streams the output. **Sign in** opens a window
 running the tool's own login; Skill Vault notices when you're signed in and closes it.

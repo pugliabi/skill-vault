@@ -83,7 +83,7 @@ Sensitive values (API keys) are masked in `sv config show` output.
 
 ### assistant
 
-- **Purpose**: How the app's `claude` CLI calls sign in — the AI assistant, AI tagging and Claude merge. Edited in **Settings → AI assistant → Sign in with**.
+- **Purpose**: The AI assistant's provider and how each provider signs in. The top-level fields are Claude Code's sign-in, which the AI assistant, AI tagging and Claude merge all use. Edited in **Settings → AI assistant** (**Provider**, **Sign in with**).
 - **Type**: object
 - **Fields**:
   - `auth` — `"login"` (default: Claude Code's own login; `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` are removed from the CLI's environment so a key set for another tool can't take over) or `"api_key"`
@@ -92,7 +92,7 @@ Sensitive values (API keys) are masked in `sv config show` output.
   - `engine` — the provider for new chats: `claude` (default), `codex`, `copilot`, `grok`
   - `engines.<id>.auth` — `login` (default) or `api_key`, for each non-Claude provider
   - `engines.<id>.api_key` — a saved key, stored in plain text in this file; never sent to the browser
-- **Provider files**: per-turn files live in `~/.skill-vault/engines/<id>/`. Grok's app-only sign-in is in `~/.skill-vault/engines/grok/` (API-key mode uses `grok-apikey/`). Pick the provider in **Settings → AI assistant → Provider**; see [assistant.md](./assistant.md#providers).
+- **Provider files**: per-turn files live in `~/.skill-vault/engines/<id>/`. Grok's app-only sign-in is expected in `~/.skill-vault/engines/grok/` (API-key mode uses `grok-apikey/`). Pick the provider in **Settings → AI assistant → Provider**; see [assistant.md](./assistant.md#providers).
 - **Example**:
   ```json
   "assistant": { "auth": "api_key", "workspace_id": "wrkspc_…" }

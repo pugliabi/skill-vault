@@ -74,7 +74,7 @@ Yes. When you clone from GitHub, the guide finds `skills.json` at the repo root 
 ### Why does Grok ask me to sign in again inside Skill Vault?
 Grok Build reads MCP servers from your other tools' configs (Claude, Cursor). Skill Vault runs Grok with its
 own home folder that holds only the vault tools, so your other servers can't join a chat — and that folder
-has its own sign-in.
+is expected to have its own sign-in. (Grok support hasn't been checked against the real Grok CLI yet.)
 
 ### Why can Codex run commands other than git?
 Codex can't limit its shell to particular commands. Skill Vault runs it in Codex's workspace-write

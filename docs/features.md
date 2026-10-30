@@ -101,7 +101,7 @@ The app's **Devices** page shows the same snapshots with a visual compare. See [
 
 ## Setup guide — first run and re-run
 
-A six-step guide opens on first run (and any time from **Settings → Run setup guide…** or the command bar): **Vault** (new, existing, or cloned from GitHub; **Browse…** opens the Windows folder picker), **Tools** (known tools detected, plus defaults), **Skills** (adopt from your tools, push to your defaults), **Notion** (connect and pick the Skills database), **Assistant** (Claude login or API key), and **Finish** (a list of exactly what will happen, then live progress with retry for anything that fails). Nothing is saved until Finish, and you can re-run it from Settings with your current settings filled in. Details: [Getting Started](./getting-started.md#first-run-the-setup-guide).
+A six-step guide opens on first run (and any time from **Settings → Run setup guide…** or the command bar): **Vault** (new, existing, or cloned from GitHub; **Browse…** opens the Windows folder picker), **Tools** (known tools detected, plus defaults), **Skills** (adopt from your tools, push to your defaults), **Notion** (connect and pick the Skills database), **Assistant** (pick a provider, install it and sign in, or use an API key), and **Finish** (a list of exactly what will happen, then live progress with retry for anything that fails). Nothing is saved until Finish, and you can re-run it from Settings with your current settings filled in. Details: [Getting Started](./getting-started.md#first-run-the-setup-guide).
 
 ## Providers — manage where skills go
 
