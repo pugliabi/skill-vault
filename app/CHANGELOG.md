@@ -33,10 +33,10 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
   well as Claude Code (Settings → AI assistant → Provider, or the setup guide). Skill Vault installs the
   chosen tool (showing the command first; **Cancel install** stops it, and a step is stopped after 10
   minutes) and opens its own sign-in in a window (**Sign in again** waits for that login to finish), or
-  takes an API key. Each chat remembers its provider. The shell is git-only on Claude; Copilot gets no
-  shell; Grok runs without a shell or direct file edits until it's checked against the real CLI; Codex
-  runs in its workspace-write sandbox with no network (so a command can't reach the app's own API).
-  AI tagging and merge-on-update still use Claude Code.
+  takes an API key. Each chat remembers its provider. The shell is git-only on Claude; Codex, Copilot
+  and Grok get no shell (none can be limited to git, and on Windows Codex's sandbox reached the app's
+  own API with its network off); Grok also gets no direct file edits. Checked live with Codex 0.144.4,
+  Copilot CLI 1.0.105 and Grok 1.0.70. AI tagging and merge-on-update still use Claude Code.
 
 ### Fixed
 - Notion sign-in returns to the page that started it (`POST /api/notion/connect`

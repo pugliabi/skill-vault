@@ -53,11 +53,10 @@ The assistant can run on any of four command-line tools. Pick one in **Settings 
 | GitHub Copilot CLI | `npm install -g @github/copilot` | GitHub (Copilot plan), one-time code | Fine-grained token with *Copilot Requests* |
 | Grok Build | `irm https://x.ai/cli/install.ps1 \| iex` | grok.com account (a separate sign-in just for Skill Vault) | xAI API key |
 
-**Grok Build support is new, and runs locked down for now.** Its install folder, sign-in check and tool
-names come from xAI's documentation and haven't been checked against the real Grok CLI yet. Until they
-are, Grok runs **without a shell and without direct file edits**: it reads files and the web, and can
-change only what the vault tools change. If install or sign-in behave differently from what's described
-here, treat this page as the expected behaviour and tell us.
+**Grok Build runs without a shell and without direct file edits.** It reads files and the web, and
+changes only what the vault tools change. Its shell can't be limited to git: Grok runs commands it
+considers read-only (like `hostname`) without asking, and it applies the allow rules in your Claude Code
+settings files. Its install (to `~/.grok/bin`) and its separate sign-in were checked with Grok 1.0.70.
 
 **Install** shows the exact command before it runs and streams the output; **Cancel install** stops it,
 and a step still running after 10 minutes is stopped for you. **Sign in** opens a window running the
@@ -67,15 +66,16 @@ already reads as signed in) waits for that window's login to finish instead, and
 **What differs by provider**
 - *Subagents*: Claude and Copilot use the five specialist subagents; on Codex and Grok the lead does
   that work itself with the same skills.
-- *Shell*: git only on Claude. Copilot has no shell at all (it can't be limited to git), and Grok runs
-  without one until its limits are verified; on both, the assistant uses the vault tools and tells you
-  any command to run yourself. Codex can run any command inside its sandbox, which can write only the
-  vault and repos folders and has **no network**: `git clone`, `git pull` and `curl` don't work there,
-  so Codex checks updates, adopts and clones through the vault tools, which run in the app. (With the
-  network on, a sandboxed command could reach the app's own local API and change things outside the
-  sandbox.)
-- *File edits*: Claude, Codex and Copilot edit files in the vault and repos folders directly. Grok can't
-  edit files directly yet; it can make only the changes the vault tools offer.
+- *Shell*: git only on Claude (recent Claude Code versions also run a few read-only commands, such as
+  `hostname`, on their own). Codex, Copilot and Grok have **no shell**, because none of them can be
+  limited to git: Copilot and Grok run "read-only" commands without asking, and on Windows Codex's
+  sandbox can't keep a command off the network, so a command could reach the app's own local API. On
+  those three the assistant checks updates, adopts and clones through the vault tools, which run in the
+  app, and tells you any other command to run yourself.
+- *File edits*: Claude, Codex and Copilot edit files directly. Codex's and Copilot's edits stay in the
+  vault and repos folders (Copilot can also write the system temp folder); Claude Code's file tools
+  aren't limited to those folders. Grok can't edit files directly; it makes only the changes the vault
+  tools offer.
 - *Cost*: shown for Claude and Grok; the others don't report it.
 - AI tagging and merge-on-update always use Claude Code.
 
@@ -244,19 +244,16 @@ deliberately bounded:
   updates, repair origins (or clear one whose source you have confirmed is
   dead), adopt, push/pull to providers, Notion push/pull, repair audit
   findings. Depending on the [provider](#providers), it can also edit skill
-  files directly (not on Grok yet) and run `git` for clones and history
-  (Claude; on Codex only local git such as history, since its sandbox has
-  no network; not on Copilot or Grok).
+  files directly (not on Grok) and run `git` for clones and history
+  (Claude only).
 - **Cannot (by design):** delete skills, force-overwrite Notion or connect
   Notion OAuth through its vault tools; those stay in the UI, with you. How
   far its shell and file edits reach depends on the provider: on Claude the
-  shell runs git only; Copilot and Grok have no shell; **Codex can run any
-  command** inside its sandbox, which keeps writes to the vault and your
-  clones folder and has no network — so on Codex a command could still
-  change or delete files in the vault, but can't reach the internet or the
-  app's own API. File edits stay inside the vault and your clones folder
-  (Copilot can also write the system temp folder). See "What differs by
-  provider" under [Providers](#providers).
+  shell runs git only; Codex, Copilot and Grok have no shell. On Codex and
+  Copilot file edits stay inside the vault and your clones folder (Copilot
+  can also write the system temp folder); Claude Code's file tools are not
+  limited to those folders. See "What differs by provider" under
+  [Providers](#providers).
 
 ## Install the assistant's skills into your vault
 
@@ -277,8 +274,9 @@ conversation is remembered across turns and app restarts), a plugin bundle
 providing the agents and skills above, and an MCP bridge that exposes vault
 operations as tools by calling the app's own HTTP API — which is why every
 agent action shows up in Activity and history like your own clicks. Tool access
-is allowlisted (`git` is the only shell command; file edits are scoped to the
-vault and clones folder). The other providers get the same instructions, skills
-and vault tools, with the shell and file limits listed under [Providers](#providers).
+is allowlisted (`git` is the only shell command it's given; see
+[Providers](#providers) for what recent Claude Code versions do beyond that). The
+other providers get the same instructions, skills and vault tools, with the shell
+and file limits listed under [Providers](#providers).
 Technical details: [tech reference](tech_reference.md) and the app's
 `server/services/assistant/` source.

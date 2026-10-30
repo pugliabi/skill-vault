@@ -74,22 +74,21 @@ Yes. When you clone from GitHub, the guide finds `skills.json` at the repo root 
 ### Why does Grok ask me to sign in again inside Skill Vault?
 Grok Build reads MCP servers from your other tools' configs (Claude, Cursor). Skill Vault runs Grok with its
 own home folder that holds only the vault tools, so your other servers can't join a chat — and that folder
-is expected to have its own sign-in. (Grok support hasn't been checked against the real Grok CLI yet.)
+has its own sign-in (`auth.json` in `~/.skill-vault/engines/grok`).
 
 ### Why can't the assistant run commands or edit files on Grok?
-Nobody has yet seen headless Grok refuse a non-git command or a write outside the vault, so Skill Vault
-doesn't give it a shell or file-edit tools until that's been checked. On Grok the assistant reads files
-and the web and makes changes only through the vault tools; for anything else it tells you what to do.
+Grok's shell can't be limited to git. Grok runs commands it considers read-only (like `hostname`) without
+asking, and it also applies the allow rules in your Claude Code settings files (`~/.claude/settings.json`
+and the vault repo's `.claude/settings.local.json`); nothing turns that off. So Skill Vault gives Grok no
+shell and no file-edit tools. On Grok the assistant reads files and the web and makes changes only through
+the vault tools; for anything else it tells you what to do.
 
-### Why can Codex run commands other than git?
-Codex can't limit its shell to particular commands. Skill Vault runs it in Codex's workspace-write
-sandbox instead: commands run, but can only write inside the vault and repos folders, and they have no
-network access.
-
-### Why can't Codex clone or pull with git?
-Its sandbox has no network. With the network on, a command in the sandbox could call Skill Vault's own
-local API and change things outside the sandbox. Checking for updates, adopting and cloning still work:
-Codex does them through the vault tools, which run in the app. Local git commands (history, diffs) work.
+### Why can't the assistant run commands on Codex?
+Codex can't limit its shell to particular commands, and on Windows its sandbox can't keep a command off
+the network: in testing, a sandboxed `curl` reached Skill Vault's own local API even with the sandbox's
+network switched off. So Skill Vault turns Codex's shell off entirely. Checking for updates, adopting and
+cloning still work: Codex does them through the vault tools, which run in the app. Codex still edits
+files directly, but only inside the vault and repos folders.
 
 ### Why can't the assistant run git on Copilot?
 Copilot CLI runs commands it considers read-only even when only git is allowed, so its shell can't be

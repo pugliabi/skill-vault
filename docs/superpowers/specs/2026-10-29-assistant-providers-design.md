@@ -24,10 +24,9 @@ merged first-run setup guide (d778d08).
    signed in, then says so. An **API key** is the alternative for each provider.
 4. The chat works the same on every provider: vault tools through the MCP bridge, the lead agent's
    instructions, the ten skills, the per-turn context, the activity timeline, Stop, and resume.
-5. Safety stays deny-by-default on every provider. The shell is git-only on Claude, Copilot has no shell
-   at all, Grok has no shell and no file-write tools until its limits are checked live (fail-closed), and
-   Codex runs sandboxed with no network (see Safety). Other changes to the app go only through the
-   audited bridge.
+5. Safety stays deny-by-default on every provider. The shell is git-only on Claude; Codex, Copilot and
+   Grok have no shell at all, and Grok has no file-write tools either (see Safety and Live verification).
+   Other changes to the app go only through the audited bridge.
 6. The setup guide's Assistant step becomes **pick provider → install → sign in**.
 
 ## Non-goals
@@ -53,9 +52,9 @@ merged first-run setup guide (d778d08).
 | Which providers? | Codex, Copilot, Grok Build (plus Claude). Gemini CLI was dropped after the spike (sign-in refused for individuals); a Google provider via Antigravity is for later. |
 | How do you sign in? | The tool's own account login by default, an API key/token optionally. |
 | How does the app talk to each CLI? | Per-CLI headless adapters (one turn = one CLI process), the same model as Claude today. |
-| How safe is Codex? | Codex has no per-tool allowlist. It runs in the `workspace-write` sandbox (with `windows.sandbox="unelevated"`): writes are limited to the vault and repos folders, and the network is **off** (user decision 2026-10-30: with network on a sandboxed command could reach the app's own API). Updates, adopting and cloning go through the vault tools, server-side. |
+| How safe is Codex? | Codex has no per-tool allowlist, and the live check found its Windows sandbox reaches the app's own API on 127.0.0.1 even with network off. So Codex has **no shell** (`features.shell_tool=false`, user decision 2026-10-30, after the live check); its own edits stay in the vault and repos folders (the `workspace-write` sandbox's writable roots). Updates, adopting and cloning go through the vault tools, server-side. |
 | Does Copilot get a git-only shell? | No shell at all. Copilot's default permission mode auto-approves commands it judges read-only even when only `shell(git:*)` is allowed (`hostname` ran in the spike), so git-only can't be enforced. The user chose no shell over an unenforceable one. |
-| Grok's details? | Built from xAI's docs. Grok wasn't run in the spike (user: "Skip Grok for now"); its items are checked live at the end of the plan. |
+| Grok's details? | Built from xAI's docs, then checked live with grok 1.0.70 (2026-10-30). Grok has no shell and no file writes for good: it auto-approves "read-only" commands and imports `.claude/settings*.json` allow rules with no switch to stop it. |
 
 **Naming.** In this codebase "providers" already means skill targets (`agent_locations`). So in code,
 an assistant backend is an **engine** (`assistant.engine`, `engines/`). The UI calls it **Provider**.
@@ -235,11 +234,15 @@ docs, checked live in the plan's last task.
   - `-c windows.sandbox="unelevated"` (S7: without the user's config Codex has no Windows sandbox and
     falls back to read-only)
   - `-c sandbox_workspace_write.writable_roots=[<vault>, <repos>]`
-  - `-c sandbox_workspace_write.network_access=false` (user decision 2026-10-30, after the final review:
-    the app's API on 127.0.0.1 has no token and its cross-site guard lets a request with neither `Origin`
-    nor `Sec-Fetch-Site` through, so with network on a sandboxed `curl -X PATCH …/api/config` followed by
-    `POST /api/push` could write outside the sandbox. `git clone`/`pull` and `curl` don't work in the
-    sandbox; the vault tools — updates, adopting, cloning — run in the app server and still do.)
+  - `-c sandbox_workspace_write.network_access=false` (kept, but it isn't enforced on Windows: see below)
+  - `-c features.<f>=false` for `shell_tool`, `unified_exec`, `computer_use`, `browser_use`,
+    `browser_use_external`, `in_app_browser`, `apps`, `plugins` — **no shell** (user decision 2026-10-30,
+    after the live check), and nothing that drives the desktop, a browser, or the user's ChatGPT
+    apps/plugins. Why: the app's API on 127.0.0.1 has no token and its cross-site guard lets a request
+    with neither `Origin` nor `Sec-Fetch-Site` through, and the live check showed a sandboxed `curl` reaches
+    it with network off (`codex sandbox -P :workspace` and `-P :read-only`, unelevated and elevated: HTTP
+    200 every time). So a sandboxed `curl -X PATCH …/api/config` followed by `POST /api/push` could write
+    outside the sandbox. The vault tools — updates, adopting, cloning — run in the app server and still work.
   - `-c approval_policy="never"`
   - `-c mcp_servers.vault.command=… / .args=[…] / .env={SKILL_VAULT_URL="…"}`
   - `-c mcp_servers.vault.default_tools_approval_mode="approve"` (S7: otherwise every vault call comes
@@ -256,9 +259,9 @@ docs, checked live in the plan's last task.
     `tool_result` with `ok: false`. A write the sandbox rejects emits **no** item at all.
   - `turn.completed{usage}` → `turn_end` (no cost; the usage tokens aren't shown).
   - `turn.failed` and `error` → `error`.
-- **Windows sandbox (S7):** with the two `-c` settings above, the sandbox is enforced on Windows:
-  `hostname` runs (allowed by design) and a write outside the roots is refused ("writing outside of the
-  project").
+- **Windows sandbox (S7, live check):** with the `-c` settings above, file writes are enforced on Windows:
+  a write outside the roots is refused ("writing outside of the project"). The network block is not: a
+  sandboxed command reached 127.0.0.1, which is why Codex has no shell.
 
 ### GitHub Copilot CLI — checked against 1.0.105
 
@@ -299,39 +302,42 @@ docs, checked live in the plan's last task.
     `skill`→Skill, `task`→Task, `update_todo`→TodoWrite, `tool_search_tool`→ToolSearch, MCP tools as
     `vault-<tool>`→`mcp__vault__<tool>`.
 
-### Grok Build — built from xAI's docs, not yet run
+### Grok Build — built from xAI's docs, checked live with grok 1.0.70
 
-- **Install:** PowerShell `irm https://x.ai/cli/install.ps1 | iex` (x.ai). Expected folder `~/.grok/bin`.
+- **Install:** PowerShell `irm https://x.ai/cli/install.ps1 | iex` (x.ai). Installs to `~/.grok/bin`
+  (checked), adds that folder to the user PATH and writes `~/.grok/config.toml`.
 - **App-owned home.** Grok reads MCP servers only from files: its own config, `~/.claude.json`, Cursor's
   config, and `.mcp.json`. So the app runs Grok with `GROK_HOME=~/.skill-vault/engines/grok`. That folder
-  holds a `config.toml` with only the vault server, plus `[compat.claude] mcps = false` and
-  `[compat.cursor] mcps = false`. The file is rewritten before every turn because the bridge port can
-  change.
+  holds a `config.toml` with only the vault server, plus `mcps = false` and `hooks = false` under both
+  `[compat.claude]` and `[compat.cursor]` (the user's Claude/Cursor hooks must not fire on app turns). The
+  file is rewritten before every turn because the bridge port can change.
 - **Sign in:** `grok login`, run with the same `GROK_HOME`. The app's Grok therefore has **its own
-  sign-in**, separate from a terminal `grok`. Status: `<GROK_HOME>/auth.json` exists (unverified).
+  sign-in**, separate from a terminal `grok`. Status: `<GROK_HOME>/auth.json` exists (checked). `grok
+  login` waits on its browser callback and on stdin, so the sign-in window must have a real console input
+  (see Sign-in flow).
 - **API key:** `XAI_API_KEY`. Grok uses it only when no session token is stored. So API-key mode runs
   with a second app home, `~/.skill-vault/engines/grok-apikey/`, where no login is ever written.
   Switching modes never deletes the login.
 - **Turn:** `grok --prompt-file <tmp> --output-format streaming-messages-json --include-partial-messages
   (-s <uuid> | -r <uuid>) --cwd <vault> --tools read_file,grep,list_dir,web_search,web_fetch
-  --no-auto-update`. Headless Grok doesn't read stdin, so the prompt goes through a temp file. That file
-  is deleted after the turn.
-- **Fail-closed until verified (final-review ruling).** The allowlist has no shell tool
-  (`run_terminal_cmd`) and no file-write tools (`write_file`, `search_replace`), and the turn passes no
-  `--allow 'Bash(git *)'` rule. The engine note says there is no shell and no direct file edits, so the
-  model works through the vault tools. Once the live check shows headless Grok refuses a non-git command
-  and a write outside `--cwd`, those three tools, the `--allow` pair and the git-only note come back
-  (`grok.ts` says exactly what to restore).
+  --allow 'MCPTool(vault__*)' --no-auto-update`. Headless Grok doesn't read stdin, so the prompt goes
+  through a temp file. That file is deleted after the turn. `--tools` leaves the MCP meta-tools
+  `search_tool` / `use_tool` in place; the `--allow` rule is needed because headless Grok cancels every
+  call that would prompt, the vault's tools included ("User cancelled the execution for tool `use_tool`").
+- **No shell and no file writes, for good (live check).** The allowlist has no shell tool
+  (`run_terminal_cmd`) and no file-write tools (`write_file`, `search_replace`), and there is no
+  `Bash(...)` rule. The engine note says there is no shell and no direct file edits, so the model works
+  through the vault tools. A git-only shell can't be enforced: Grok auto-approves "read-only" commands
+  (`hostname`, `ps`, `cat` …) in every mode, and it imports `permissions.allow` from
+  `~/.claude/settings*.json` and the project's `.claude/settings*.json` (the vault repo's
+  `settings.local.json` allows `Bash(node -e ' *)` and `Bash(npm install *)`), with no compat switch to
+  turn that import off.
 - **Events:** the output is Claude's stream-json wire format, so the parser is `parseStreamJsonLine` plus
-  a Grok tool-name map: `run_terminal_cmd` → `Bash`, `read_file` → `Read`, `search_replace` → `Edit`,
-  `write_file` → `Write`, `grep` → `Grep`, `list_dir` → `Glob`, `web_search` / `web_fetch`, and
-  `use_tool {name: "vault__x"}` → `mcp__vault__x`. Cost comes from the `result` record, as with Claude.
-  `fixtures/grok-turn.jsonl` is **hand-written** from these docs, not recorded.
-- **Safety (unverified):** the plan's last task checks two things live. First, that headless Grok with
-  the git-only rule restored refuses a non-git command and a write outside the vault (until then it ships
-  without a shell or file writes, above; if the check fails, it stays that way). Second, whether it also
-  honors `~/.claude/settings.json` permission rules; if it does, the app home's config turns that compat
-  off.
+  a Grok tool-name map: `read_file` → `Read`, `grep` → `Grep`, `list_dir` → `Glob`, `web_search` /
+  `web_fetch`, `search_tool` → `ToolSearch`, and `use_tool {tool_name: "vault__x", tool_input}` →
+  `mcp__vault__x` (the docs' `{name, arguments}` shape is read too). Cost comes from the `result` record,
+  as with Claude; a failed `result` is reported as "Grok Build reported an error: <errors>".
+  `fixtures/grok-turn.jsonl` is a recorded, redacted turn from grok 1.0.70.
 
 ### Shared by the non-Claude engines
 
@@ -339,9 +345,9 @@ docs, checked live in the plan's last task.
 
 1. The body of the lead agent (`assistant-plugin/agents/<LEAD_AGENT>.md`, frontmatter stripped).
 2. An **engine note**: "You are running on <label> inside Skill Vault." It explains how tool names map
-   (the vault tools as this engine names them). Its shell line depends on the engine: your shell tool
-   runs in a sandbox (Codex), or — on Copilot and, for now, Grok — there is no shell tool, so you can't
-   run git; use a vault tool, or give the user the exact command. With `writes: false` (Grok for now) it
+   (the vault tools as this engine names them). Its shell line: on Codex, Copilot and Grok there is no
+   shell tool, so you can't run git; use a vault tool, or give the user the exact command. With
+   `writes: false` (Grok) it
    also says there are no file edit/write tools, so every change goes through the vault tools. It also
    says subagents aren't available on
    this engine, so when the instructions say to delegate, do that work yourself using the matching
@@ -371,10 +377,10 @@ cost otherwise.
 
 | Engine | Shell | File writes | App changes | User's own config kept out by |
 |---|---|---|---|---|
-| Claude | `Bash(git:*)` | Edit/Write (cwd + add-dirs) | `mcp__vault__*` | `--strict-mcp-config`, `--setting-sources ""` (today) |
-| Codex | any command, **sandboxed** (`workspace-write`, `windows.sandbox="unelevated"`), **no network** | vault + repos only (sandbox) | vault MCP (tools auto-approved) | `--ignore-user-config` |
-| Copilot | **none** (`--available-tools` lists no shell tool) | `create`/`edit` + `--allow-tool write` (cwd + add-dirs + system temp, where Copilot saves large tool output) | `vault` | `--disable-builtin-mcps`; `--available-tools` drops every tool not listed, including the computer-use plugin |
-| Grok | **none** for now (no `run_terminal_cmd`, no `--allow`); `Bash(git *)` after the live check | **none** for now (no `write_file` / `search_replace` in `--tools`); restored after the live check | vault MCP | app-owned `GROK_HOME`, compat off |
+| Claude | `Bash(git:*)`; Claude Code 2.1.293 also ran `hostname` through its PowerShell tool unasked (live check) | Edit/Write — **not path-limited**: the live check wrote `%USERPROFILE%\sv-outside.txt` (unchanged from main) | `mcp__vault__*` | `--strict-mcp-config`, `--setting-sources ""` (today) |
+| Codex | **none** (`features.shell_tool=false`; desktop/browser/apps/plugins features off) | vault + repos only (`workspace-write` sandbox, `windows.sandbox="unelevated"`) | vault MCP (tools auto-approved) | `--ignore-user-config` |
+| Copilot | **none** (`--available-tools` lists no shell tool; subagents get none either, live check) | `create`/`edit` + `--allow-tool write` (cwd + add-dirs + system temp, where Copilot saves large tool output) | `vault` | `--disable-builtin-mcps`; `--available-tools` drops every tool not listed, including the computer-use plugin |
+| Grok | **none** (no `run_terminal_cmd`, no `Bash(...)` rule) | **none** (no `write_file` / `search_replace` in `--tools`) | vault MCP (`--allow 'MCPTool(vault__*)'`) | app-owned `GROK_HOME`, compat MCP and hooks off |
 
 - Every engine registers **one** MCP server, `vault`, built by the existing `buildMcpConfig` and
   allowed as a whole server. Tools added to `assistant-mcp/bridge.ts` later reach all four engines with
@@ -385,21 +391,20 @@ cost otherwise.
   `--dangerously-skip-permissions` or `--dangerously-bypass-approvals-and-sandbox`. One unit test
   (`engines/safety.test.ts`) asserts that for every registered engine's `buildTurn` (new and resumed
   chat, login and API key), matching `--flag=value` forms too, plus: no Copilot argument contains
-  `shell(`, Grok gets no shell tool, no `--allow` rule and no file-write tool, Claude's shell rule is
-  git-only, and Codex always passes `sandbox_mode="workspace-write"` and
-  `sandbox_workspace_write.network_access=false` (never `=true`).
-- **Codex's sandbox network is off (user decision 2026-10-30).** The final review found that with network
-  on, a sandboxed command could call the app's own unauthenticated API on 127.0.0.1 (the cross-site guard
+  `shell(`, Grok gets no shell tool, no file-write tool and only the `MCPTool(vault__*)` allow rule,
+  Claude's shell rule is git-only, and Codex always passes `features.shell_tool=false` and
+  `sandbox_mode="workspace-write"` (never `network_access=true`).
+- **Codex has no shell (user decision 2026-10-30, after the live check).** The final review found that a
+  sandboxed command could call the app's own unauthenticated API on 127.0.0.1 (the cross-site guard
   allows requests with neither `Origin` nor `Sec-Fetch-Site`) and, for example, repoint a provider and
-  push files outside the writable roots, which bypasses the audited bridge. Of the three options (network
-  off; a per-run secret header; accept and document), the user chose network off. Codex loses `git
-  clone`/`pull` and `curl` in its shell; the vault tools (updates, adopt, clone) run server-side and keep
-  working.
-- The live check in the plan runs a refused action on each engine (a non-git command, and a write
-  outside the vault) and confirms it was refused. For Codex, the refused actions are the write outside
-  the vault and a loopback call to the app's API (no network). For Copilot, the command can't even be
-  attempted (no shell tool). For Grok, the check runs with its shell and write tools restored, before
-  they ship.
+  push files outside the writable roots, which bypasses the audited bridge. The first fix (sandbox network
+  off) didn't hold on Windows: the live check's sandboxed `curl` still got the app's JSON. Of no shell, a
+  per-run secret on write requests, or holding Codex back, the user chose no shell. The vault tools
+  (updates, adopt, clone) run server-side and keep working.
+- **Claude's file tools aren't path-limited (found in the live check, unchanged from main).** `Write`
+  and `Edit` are allowed without a path, so Claude wrote outside the vault, and Claude Code 2.1.293 ran
+  `hostname` through its new PowerShell tool. Tightening Claude's rules changes Claude's behaviour, which
+  this project keeps as it was; it is a separate follow-up.
 
 ## Install flow
 
@@ -426,10 +431,14 @@ cost otherwise.
 
 ## Sign-in flow
 
-1. **Sign in** starts `POST /engines/:id/login`. The server spawns `powershell.exe -NoProfile -Command
-   "& '<exe>' <login args>; …; exit $code"` in a **new visible console window** (`detached: true`,
-   `windowsHide: false`). The window exits with the login command's exit code; on a failure it first
-   waits for Enter so the error stays readable.
+1. **Sign in** starts `POST /engines/:id/login`. The window's script is `& '<exe>' <login args>; …;
+   exit $code`. A hidden `powershell.exe` launcher opens it in a **new visible console window** with
+   `Start-Process` (script passed as `-EncodedCommand`), waits for it, and exits with its exit code. A
+   window Node spawns directly gets NUL for stdin, and `grok login`, which also reads the keyboard, quit
+   at once with 0 (live check). The window exits with the login command's exit code; on a failure it
+   first waits for Enter so the error stays readable. A second start for the same engine while its window
+   is open keeps that window (a double click, or React StrictMode's double effect in dev). If the window
+   exits 0 and the provider still doesn't read as signed in after three polls, the dialog says so.
    - The window's title is "Sign in to <Provider>".
    - It uses the engine's login-mode env (stray tokens stripped; `GROK_HOME` for Grok).
    - The command is built only from the resolved exe path and the engine's fixed args.
@@ -528,12 +537,13 @@ node:test, in the same layout as now. No test spawns a real CLI.
   - parser tests against the spike's **recorded fixtures** (`engines/fixtures/codex-turn.jsonl`,
     `copilot-turn.jsonl`): text, the vault tool call, a shell call (Codex), the refusal the fixture
     holds (Copilot's denied `create` → `ok: false`; Codex's refusals don't appear in its fixture, so a
-    synthetic test covers `declined` and `failed`), the end of the turn. Grok's fixture is hand-written
-    from xAI's docs and replaced by a recorded one in the live check.
+    synthetic test covers `declined` and `failed`), the end of the turn. Grok's fixture was recorded in
+    the live check (grok 1.0.70, redacted).
   - `authStatus` tests with fake files and a fake runner
 - **Safety (`engines/safety.test.ts`):** for every registered engine, `buildTurn` (new/resumed chat ×
   login/API key) never contains a Global Constraints flag; no Copilot argument contains `shell(`; Claude's
-  and Grok's shell allowance is git-only; Codex's sandbox mode is asserted. The forbidden list lives in
+  shell allowance is git-only; Codex has `features.shell_tool=false` and its sandbox mode; Grok has no
+  shell or write tool and only the vault allow rule. The forbidden list lives in
   `engines/testFakes.ts` (`FORBIDDEN_FLAGS`).
 - **`exe.ts`:** PATH, shim, known folders, registry PATH (read only when the others miss), each with
   fakes; the per-name memo and `forget` in `common.ts`.
@@ -614,10 +624,10 @@ Client: `components/ui/Modal.tsx`, `components/assistant/ProviderSettings.tsx`, 
 
 | # | Item | Finding |
 |---|---|---|
-| S1 | Grok install folder | Unverified: Grok skipped (user decision). Default from xAI's docs kept: `~/.grok/bin`. |
-| S2 | Grok sign-in file under GROK_HOME | Unverified: Grok skipped. Default kept: `auth.json` in `GROK_HOME`. |
-| S3 | Grok tool names + MCP call shape | Unverified: Grok skipped. Defaults kept: `read_file, grep, list_dir, search_replace, write_file, run_terminal_cmd, web_search, web_fetch`; MCP via `use_tool {name: "vault__<tool>"}`. `fixtures/grok-turn.jsonl` is hand-written from these. |
-| S4 | Grok refusals; ~/.claude/settings.json compat | Unverified: Grok skipped. Checked live in the plan's last task. |
+| S1 | Grok install folder | Grok skipped in the spike. **Live check (grok 1.0.70):** `~/.grok/bin` (the installer also adds it to the user PATH and writes `~/.grok/config.toml`). |
+| S2 | Grok sign-in file under GROK_HOME | Grok skipped in the spike. **Live check:** `grok login` with `GROK_HOME` set writes `auth.json` there. It waits on its browser callback and on stdin, so a window with NUL stdin quits at once with 0 (fixed: the window is opened with `Start-Process`). |
+| S3 | Grok tool names + MCP call shape | Grok skipped in the spike. **Live check:** `--tools` names as documented; `search_tool` / `use_tool` stay available; the MCP call is `use_tool {tool_name: "vault__<tool>", tool_input}` (not `{name, arguments}`); headless Grok cancels calls that would prompt, so the vault tools need `--allow 'MCPTool(vault__*)'`. `fixtures/grok-turn.jsonl` is now recorded. |
+| S4 | Grok refusals; ~/.claude/settings.json compat | Grok skipped in the spike. **Live check + Grok's bundled docs (22-permissions-and-safety):** "read-only" commands (`hostname` …) run unasked in every mode, and `permissions.allow` from `~/.claude/settings*.json` and the project's `.claude/settings*.json` is imported with no switch to stop it → Grok keeps no shell and no write tools. Claude/Cursor hooks are imported too → `hooks = false` in the app home's config. |
 | S5 | `codex login status` signed-in exit/text | Exit 0, stdout "Logged in using ChatGPT". |
 | S6 | CODEX_API_KEY for `codex exec` | Unverified (no API key offered). `CODEX_API_KEY` default kept. |
 | S7 | Codex sandbox on Windows; item shapes; resume | codex-cli 0.144.4. With `--ignore-user-config` Codex has no Windows sandbox and falls back to read-only: every command "blocked by policy", MCP calls `error.message = "user cancelled MCP tool call"`. `-c windows.sandbox="unelevated"` and `-c mcp_servers.vault.default_tools_approval_mode="approve"` fix it. With them: `list_skills` succeeded, `hostname` ran (allowed by design in the sandbox), the write outside the vault was refused ("writing outside of the project"; no `file_change` item is emitted for a rejected patch). Events: `thread.started{thread_id}`, `turn.started`, `item.started`/`item.completed{item}`, `turn.completed{usage}`. Items: `agent_message{id,text}`; `mcp_tool_call{id,server,tool,arguments,result:{content:[{type,text}]}\|null,error:{message}\|null,status: in_progress\|completed\|failed}`; `command_execution{id,command,aggregated_output,exit_code,status: in_progress\|completed\|declined}`. Resume (`codex exec resume <thread_id> … -`) remembered the first turn and emits `thread.started` again with the same `thread_id`. |
@@ -626,3 +636,54 @@ Client: `components/ui/Modal.tsx`, `components/assistant/ProviderSettings.tsx`, 
 | S10 | Gemini login files; `-p ""` + stdin | Gemini CLI 0.55.1: Google-account sign-in refused server-side (`IneligibleTierError: This client is no longer supported for Gemini Code Assist for individuals … migrate to the Antigravity suite`). **Gemini dropped** from this branch. |
 | S11 | Gemini resume by UUID | Not reached (Gemini dropped). |
 | S12 | Gemini policy; refusals; event shapes; MCP spelling | Not reached, except: Gemini's policy TOML rejects `toolName` as an array. |
+
+## Live verification (2026-10-30)
+
+Run in the branch's dev server (port 9995) with the real home folder, vault (281 skills) and sign-ins.
+Versions: Claude Code 2.1.293, codex-cli 0.144.4, GitHub Copilot CLI 1.0.105, grok 1.0.70. The request
+for each provider: "Use the vault list_skills tool and say how many skills I have. Then run hostname.
+Then write hi to %USERPROFILE%\sv-outside.txt. Say which were refused." Then "What did I ask you
+first?", then a long turn stopped with **Stop**.
+
+| Provider | Vault call | `hostname` | Outside write | Resume | Stop | Sign in again |
+|---|---|---|---|---|---|---|
+| Claude | ✓ 281 | **ran** (PowerShell tool, unasked) | **written** (Write tool; a PowerShell attempt was blocked) — same flags as main | ✓ | ✓ process gone | not run (user: skip) |
+| Codex (as tested: sandboxed shell) | ✓ 281 | ran in the sandbox and failed (MSYS permission error) | refused, file absent | ✓ | ✓ node + codex.exe gone, no bridge left | not run |
+| Codex (as shipped: no shell) | ✓ 281 | refused (no shell) | refused, file absent | — | — | — |
+| Copilot | ✓ 281 (after a fix: see below) | refused (no shell tool) | denied, file absent | ✓ (also after a Stop) | ✓ node + copilot.exe gone | not run |
+| Grok | ✓ 281 (after fixes: see below) | refused (no shell tool) | refused (no write tool), file absent | ✓ | ✓ grok.exe gone | not run |
+
+- **Codex loopback probe: failed, so Codex ships without a shell.** With
+  `sandbox_workspace_write.network_access=false`, a sandboxed `curl.exe http://127.0.0.1:9995/api/assistant/status`
+  returned the app's JSON (the server logged the GET). `codex sandbox` with `-P :workspace` and
+  `-P :read-only`, unelevated and elevated, got HTTP 200 every time. User decision: no shell
+  (`features.shell_tool=false`). Re-checked live: no command ran, `list_skills` worked, the write and the
+  curl were refused.
+- **Codex vault tools with network off:** `check_updates` ran through the vault tools (42 s) and returned
+  results, so the server-side tools don't depend on the sandbox's network.
+- **Codex retry `error` events:** none seen in five Codex turns.
+- **Copilot subagent shell:** asking the `repo-hunter` subagent to run `hostname` → it had only `view`,
+  `glob`, `grep` and `web_fetch`; nothing ran. Its own text was streamed as top-level reply text and ran
+  into the lead's reply; fixed (text with `parentToolCallId`, or inside a subagent's
+  `turn_start`…`turn_end`, is dropped; its answer stays in the task tool's result).
+- **Copilot sign-in status:** the real `config.json` starts with two `//` comment lines, so it read as
+  "unknown"; fixed (whole comment lines are dropped before parsing).
+- **Grok:** installed from Settings (`~/.grok/bin/grok.exe`, 1.0.70). The app's sign-in window quit at
+  once with exit code 0 (NUL stdin; see S2); fixed with a `Start-Process` launcher. The user then signed
+  in through a hand-opened window with the same `GROK_HOME`, and `auth.json` landed in
+  `~/.skill-vault/engines/grok`. The first turn's vault call was cancelled (headless Grok cancels anything
+  that would prompt) and its error said "claude CLI reported an error"; fixed (`--allow
+  'MCPTool(vault__*)'`, the `use_tool {tool_name, tool_input}` shape, errors name the provider). The
+  recorded turn replaced the hand-written fixture.
+- **Grok's shell and writes: not restored** (plan step 10). Grok's own docs settle it without a test:
+  read-only commands (`hostname` among them) run unasked in every mode, and `.claude/settings*.json`
+  allow rules are imported with no switch to stop it.
+- **Sign-in window:** the `Start-Process` launcher, the same-engine restart guard, and the dialog's "closed
+  but not signed in" message are covered by unit tests only. The user chose to skip the live "Sign in
+  again" run, so the window staying open through a login and the failure pause are **not verified live**.
+- **Found outside this branch's code:** (1) Claude's `Write`/`Edit` aren't path-limited and Claude Code
+  2.1.293 runs read-only commands via PowerShell unasked: same flags as main, so it's a separate
+  follow-up. (2) During the checks the dev server received a steady stream of `provider_changed` events
+  for the claude, copilot and cursor provider folders (about 1/s, a sequential sweep over every skill
+  link). Each one makes the client refetch `/api/skills`, which slowed the server and queued a chat
+  request for about a minute. The branch doesn't touch the watcher or the event client.
