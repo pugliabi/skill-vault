@@ -87,3 +87,29 @@ test("writes from another site are refused", async () => {
   const res = await fetch(`${base}/engine`, { ...send("PUT", { engine: "codex" }), headers: { "content-type": "application/json", Origin: "http://evil.example" } });
   assert.equal(res.status, 403);
 });
+
+test("install: streams the engine's own steps and a done line; one at a time", async () => {
+  const { createInstaller } = await import("../services/assistant/engines/install.ts");
+  const { createEngineJobs } = await import("../services/assistant/engines/jobs.ts");
+  let release!: () => void;
+  const gate = new Promise<number>((r) => (release = () => r(0)));
+  const seen: string[][] = [];
+  const installer = createInstaller({
+    platform: "win32",
+    npmPath: () => "npm.cmd",
+    spawnLines: (_c, args, _o, onLine) => {
+      seen.push(args);
+      onLine("working");
+      return { done: gate, kill: () => {} };
+    },
+  });
+  const base = await serve(mod.assistantRouter({ mode: "development", appRoot: APP_ROOT, registry: reg.createRegistry([fakes.fakeEngine()]), jobs: createEngineJobs({ installer }) }));
+  const first = fetch(`${base}/engines/codex/install`, send("POST", { args: ["evil"] }));
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal((await fetch(`${base}/engines/codex/install`, send("POST", {}))).status, 409);
+  release();
+  const lines = (await (await first).text()).trim().split("\n").map((l) => JSON.parse(l));
+  assert.deepEqual(lines.map((l) => l.type), ["step", "line", "done"]);
+  assert.equal(lines.at(-1).ok, true);
+  assert.ok(!seen.flat().join(" ").includes("evil"), "commands never come from the request");
+});

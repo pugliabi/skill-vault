@@ -31,6 +31,8 @@ import { runTurn } from "../services/assistant/turn.ts";
 import { defaultRegistry, engineWorkDir, type EngineRegistry } from "../services/assistant/engines/registry.ts";
 import { applyEngineAuthPatch, engineAuth, isEngineId, selectedEngine, withSelectedEngine } from "../services/assistant/engines/config.ts";
 import { createEngineStates, type EngineStates } from "../services/assistant/engines/state.ts";
+import { createEngineJobs, type EngineJobs } from "../services/assistant/engines/jobs.ts";
+import type { InstallEvent } from "../services/assistant/engines/install.ts";
 import type { TurnInput, TurnSpec } from "../services/assistant/engines/types.ts";
 import {
   anyTurnCapacity,
@@ -60,6 +62,7 @@ export interface AssistantRouterOpts {
   sweeper?: Pick<UpdateSweeper, "runNow" | "isRunning">;
   registry?: EngineRegistry;
   states?: EngineStates;
+  jobs?: EngineJobs;
   /** Tests replace the CLI spawn. */
   streamRunner?: ClaudeStreamRunner;
 }
@@ -109,6 +112,7 @@ export function assistantRouter(opts: AssistantRouterOpts): Router {
   router.use(refuseCrossSiteWrites);
   const registry = opts.registry ?? defaultRegistry();
   const states = opts.states ?? createEngineStates({ registry, readBlock: readAssistantBlock });
+  const jobs = opts.jobs ?? createEngineJobs();
 
   /** Claude's fields, for PUT /auth and PUT /engines/claude/auth alike. Throws on a bad auth value. */
   const saveClaudeAuth = (patch: ClaudeAuthPatch): ClaudeAuthConfig => {
@@ -183,6 +187,40 @@ export function assistantRouter(opts: AssistantRouterOpts): Router {
       return;
     }
     res.json(await states.view(id));
+  });
+
+  router.post("/engines/:id/install", async (req, res) => {
+    const id = req.params.id;
+    const engine = isEngineId(id) ? registry.get(id) : undefined;
+    if (!engine) {
+      res.status(404).json({ error: "unknown provider" });
+      return;
+    }
+    if (jobs.installer.isRunning()) {
+      res.status(409).json({ error: "an install is already running" });
+      return;
+    }
+    res.setHeader("Content-Type", "application/x-ndjson");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.flushHeaders?.();
+    const write = (e: InstallEvent): void => {
+      if (!res.writableEnded) res.write(`${JSON.stringify(e)}\n`);
+    };
+    const r = await jobs.installer.run(engine, write);
+    states.invalidate(engine.id);
+    const view = await states.view(engine.id, { refresh: true });
+    const found = Boolean(view?.installed);
+    write({
+      type: "done",
+      ok: r.ok && found,
+      ...(view?.version ? { version: view.version } : {}),
+      ...(!r.ok
+        ? { message: r.message }
+        : found
+          ? {}
+          : { message: "Installed, but Skill Vault can't find it yet. Close and reopen Skill Vault, then check again." }),
+    });
+    res.end();
   });
 
   router.get("/auth", (_req, res) => {
