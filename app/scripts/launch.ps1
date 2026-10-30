@@ -135,6 +135,15 @@ try {
         Pop-Location
       }
 
+      if ($Headless) {
+        # A bridge started this launch, so this is the calling agent's
+        # environment. Give the server the user's own PATH, and drop Claude
+        # Code's session markers so the server and the in-app assistant's
+        # claude don't run as if inside that session.
+        $env:Path = ((@([Environment]::GetEnvironmentVariable('Path', 'Machine'), [Environment]::GetEnvironmentVariable('Path', 'User')) -split ';') | Where-Object { $_ }) -join ';'
+        @(Get-ChildItem Env: | Where-Object { $_.Name -eq 'CLAUDECODE' -or $_.Name -like 'CLAUDE_CODE_*' }) | ForEach-Object { Remove-Item -LiteralPath "Env:$($_.Name)" }
+        Write-Log 'headless: the server gets the user PATH and no Claude Code session variables'
+      }
       $env:NODE_ENV = 'production'
       # 127.0.0.1 explicitly: a HOST setting (.env or config) must not move the
       # server somewhere the health probe below can't reach.
