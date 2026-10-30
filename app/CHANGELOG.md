@@ -29,6 +29,11 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
   `POST /pick-folder`, `POST /inspect`, `GET /targets`, `POST /clone-preview`,
   `POST /plan`, `GET /assistant`, `POST /apply`, `POST /apply/retry`,
   `GET /apply/status`.
+- **Assistant providers.** The assistant can run on OpenAI Codex, GitHub Copilot CLI or Grok Build as
+  well as Claude Code (Settings → AI assistant → Provider, or the setup guide). Skill Vault installs the
+  chosen tool (showing the command first) and opens its own sign-in in a window, or takes an API key.
+  Each chat remembers its provider. The shell is git-only on Claude and Grok; Copilot gets no shell;
+  Codex runs in its workspace-write sandbox. AI tagging and merge-on-update still use Claude Code.
 
 ### Fixed
 - Notion sign-in returns to the page that started it (`POST /api/notion/connect`

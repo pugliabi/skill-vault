@@ -10,6 +10,7 @@ except the model calls Claude Code itself makes.
 ![The skill-scout specialist returning a star-ranked table of GitHub skills](images/assistant-discovery.png)
 
 - [Requirements](#requirements)
+- [Providers](#providers)
 - [Opening the assistant](#opening-the-assistant)
 - [Using it: what to ask](#using-it-what-to-ask)
 - [The agent, its skills, and its specialists](#the-agent-its-skills-and-its-specialists)
@@ -37,6 +38,30 @@ instead, open **Settings → AI assistant → Sign in with**, choose **API key**
 paste a key (or leave it blank to use the environment's), and add a workspace
 ID if the key isn't scoped to one. The same setting covers AI tagging and
 Claude merge. See [configuration](./configuration.md#assistant).
+
+## Providers
+
+The assistant can run on any of four command-line tools. Pick one in **Settings → AI assistant → Provider**
+(or in the setup guide). New chats use it; a chat keeps the provider it started on.
+
+| Provider | Install (the app runs this for you) | Sign in | API key alternative |
+|---|---|---|---|
+| Claude Code (default) | `irm https://claude.ai/install.ps1 \| iex` | Claude account | Anthropic API key (+ workspace ID) |
+| OpenAI Codex | `npm install -g @openai/codex` | ChatGPT account | OpenAI API key |
+| GitHub Copilot CLI | `npm install -g @github/copilot` | GitHub (Copilot plan), one-time code | Fine-grained token with *Copilot Requests* |
+| Grok Build | `irm https://x.ai/cli/install.ps1 \| iex` | grok.com account (a separate sign-in just for Skill Vault) | xAI API key |
+
+**Install** shows the exact command before it runs and streams the output. **Sign in** opens a window
+running the tool's own login; Skill Vault notices when you're signed in and closes it.
+
+**What differs by provider**
+- *Subagents*: Claude and Copilot use the five specialist subagents; on Codex and Grok the lead does
+  that work itself with the same skills.
+- *Shell*: git only on Claude and Grok. Copilot has no shell at all (it can't be limited to git), so it
+  can't run git; it uses the vault tools and tells you any command to run yourself. Codex can run any
+  command inside its sandbox, with writes limited to the vault and repos folders.
+- *Cost*: shown for Claude and Grok; the others don't report it.
+- AI tagging and merge-on-update always use Claude Code.
 
 ## Opening the assistant
 

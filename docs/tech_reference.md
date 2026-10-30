@@ -45,10 +45,22 @@ All JSON under `/api`. The notable groups:
 | Push/pull/sync | `POST /api/push`, `POST /api/pull`, `GET /api/sync/plan` |
 | Notion | `GET /api/notion/{status,summary,plan,guard}`, `POST /api/notion/{run,force,push-selected,…}` (job polling via `GET /api/notion/run/:id`) |
 | History | `GET /api/history/...` (versions, restore, deleted skills) |
-| Assistant | `GET /api/assistant/status` · `GET/PUT /api/assistant/auth` (sign-in mode; never returns the saved key) · `POST /api/assistant/stream` (NDJSON chat turn) · sessions CRUD + stop · `GET /api/assistant/suggestions`, `POST …/suggestions/{dismiss,restore,sweep}` · `POST /api/assistant/install-skills` |
+| Assistant | `GET /api/assistant/status` · `GET/PUT /api/assistant/auth` (sign-in mode; never returns the saved key) · `POST /api/assistant/stream` (NDJSON chat turn) · sessions CRUD + stop · `GET /api/assistant/suggestions`, `POST …/suggestions/{dismiss,restore,sweep}` · `POST /api/assistant/install-skills` · provider routes below |
 | App | `GET /api/health` (pid, port, version, mode) · `GET /api/app/update` · `POST /api/app/update/check` · `POST /api/app/update` (NDJSON progress; cross-site POSTs refused) |
 | Setup guide | `/api/setup/*`: capabilities, draft, pick-folder, inspect, targets, clone-preview, plan, assistant, apply (see [Setup guide](#setup-guide)); `POST /api/notion/connect` also takes `return_to` |
 | Events | `GET /api/events` (SSE) |
+
+Assistant provider routes (`/api/assistant`):
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/assistant/engines` | Every provider: installed, version, signed in, install commands (`?refresh=1`) |
+| GET | `/api/assistant/engines/:id` | One provider (`?refresh=1`; `?mode=login` reports the login status whatever mode is saved); closes its sign-in window once signed in |
+| PUT | `/api/assistant/engine` | `{engine}` — provider for new chats |
+| PUT | `/api/assistant/engines/:id/auth` | `{auth?, api_key?, workspace_id?}`; key never echoed |
+| POST | `/api/assistant/engines/:id/install` | NDJSON install job (409 while one runs) |
+| POST | `/api/assistant/engines/:id/login` | Opens the provider's login window (this PC only) |
+| POST | `/api/assistant/engines/:id/login/cancel` | Closes it |
 
 ## Install, launch, and self-update
 
@@ -268,6 +280,14 @@ single-flight, yields to foreground checks, lite cache in
 `~/.skill-vault/update-sweep.json`). Dismissals persist server-side with
 fingerprint-revival semantics. Voice input is the browser Web Speech API
 (`client/src/lib/speech.ts`).
+
+### Assistant engines
+
+Everything above describes Claude Code's turn. Each provider is one module in
+`server/services/assistant/engines/` (`claude.ts`, `codex.ts`, `copilot.ts`, `grok.ts`) implementing
+`AssistantEngine` (`types.ts`): detect, install steps, sign-in, and how to build and parse one turn.
+`registry.ts` lists them in the order claude, codex, copilot, grok; `state.ts` builds the views the routes
+return. AI tagging and merge-on-update always use Claude.
 
 ## Repository roles
 
