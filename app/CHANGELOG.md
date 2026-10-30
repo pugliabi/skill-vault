@@ -35,7 +35,8 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
   minutes) and opens its own sign-in in a window (**Sign in again** waits for that login to finish), or
   takes an API key. Each chat remembers its provider. The shell is git-only on Claude; Copilot gets no
   shell; Grok runs without a shell or direct file edits until it's checked against the real CLI; Codex
-  runs in its workspace-write sandbox. AI tagging and merge-on-update still use Claude Code.
+  runs in its workspace-write sandbox with no network (so a command can't reach the app's own API).
+  AI tagging and merge-on-update still use Claude Code.
 
 ### Fixed
 - Notion sign-in returns to the page that started it (`POST /api/notion/connect`

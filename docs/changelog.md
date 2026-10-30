@@ -19,7 +19,7 @@ semver; the project is pre-1.0, so minor versions carry feature batches.
   chosen tool (showing the command first) and opens its own sign-in in a window, or takes an API key.
   Each chat remembers its provider. The shell is git-only on Claude; Copilot gets no shell; Grok runs
   without a shell or direct file edits until it's checked against the real CLI; Codex runs in its
-  workspace-write sandbox. AI tagging and merge-on-update still use Claude Code.
+  workspace-write sandbox with no network. AI tagging and merge-on-update still use Claude Code.
 
 ### Fixed
 - Notion sign-in returns to the page that started it, and a slow Notion

@@ -91,5 +91,9 @@ test("shell: none on Copilot and Grok, git-only on Claude, sandboxed on Codex", 
   for (const args of turns(byId("codex"))) {
     assert.ok(args.includes('sandbox_mode="workspace-write"'));
     assert.ok(!args.some((a) => a.includes("danger-full-access")));
+    // User decision 2026-10-30: no network, so a sandboxed command can't reach the app's own API.
+    const i = args.indexOf("sandbox_workspace_write.network_access=false");
+    assert.ok(i > 0 && args[i - 1] === "-c", "Codex's sandbox has no network");
+    assert.ok(!args.some((a) => a.includes("network_access=true")), "never network on");
   }
 });

@@ -52,7 +52,7 @@ test("first turn: exec --json with the sandbox, the vault server, prompt on stdi
     'sandbox_mode="workspace-write"',
     'windows.sandbox="unelevated"',
     'sandbox_workspace_write.writable_roots=["C:\\\\vault","C:\\\\repos"]',
-    "sandbox_workspace_write.network_access=true",
+    "sandbox_workspace_write.network_access=false",
     'approval_policy="never"',
     'mcp_servers.vault.command="C:\\\\node.exe"',
     'mcp_servers.vault.args=["C:\\\\app\\\\dist\\\\assistant-mcp.js"]',
@@ -63,6 +63,9 @@ test("first turn: exec --json with the sandbox, the vault server, prompt on stdi
     assert.ok(i > 0 && spec.args[i - 1] === "-c", `missing -c ${setting}`);
   }
   for (const bad of [...FORBIDDEN_FLAGS, ...CODEX_FORBIDDEN]) assert.ok(!spec.args.some((a) => a.includes(bad)), `must not pass ${bad}`);
+  // User decision 2026-10-30: with network on, a sandboxed command could call the app's own API on 127.0.0.1.
+  assert.ok(!spec.args.some((a) => a.includes("network_access=true")), "the sandbox never gets the network");
+  assert.match(spec.stdin, /no network access/);
   assert.equal(spec.cwd, "C:\\vault");
   assert.match(spec.stdin, /^<skill-vault-instructions>/);
   assert.match(spec.stdin, /running on OpenAI Codex/);
@@ -76,6 +79,8 @@ test("later turns resume the thread and skip the instructions", () => {
   assert.deepEqual(spec.args.slice(0, 2), ["exec", "resume"]);
   assert.deepEqual(spec.args.slice(-2), ["thread-1", "-"]);
   assert.ok(spec.args.includes('windows.sandbox="unelevated"'));
+  assert.ok(spec.args.includes("sandbox_workspace_write.network_access=false"), "resumed turns have no network either");
+  assert.ok(!spec.args.some((a) => a.includes("network_access=true")));
   assert.ok(!spec.stdin.includes("<skill-vault-instructions>"));
   // A failed first turn left no thread id: start a fresh thread with instructions.
   const fresh = createCodexEngine(deps()).buildTurn({ ...INPUT, isFirstTurn: false });

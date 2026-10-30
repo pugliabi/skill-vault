@@ -26,7 +26,8 @@ merged first-run setup guide (d778d08).
    instructions, the ten skills, the per-turn context, the activity timeline, Stop, and resume.
 5. Safety stays deny-by-default on every provider. The shell is git-only on Claude, Copilot has no shell
    at all, Grok has no shell and no file-write tools until its limits are checked live (fail-closed), and
-   Codex runs sandboxed (see Safety). Other changes to the app go only through the audited bridge.
+   Codex runs sandboxed with no network (see Safety). Other changes to the app go only through the
+   audited bridge.
 6. The setup guide's Assistant step becomes **pick provider → install → sign in**.
 
 ## Non-goals
@@ -52,7 +53,7 @@ merged first-run setup guide (d778d08).
 | Which providers? | Codex, Copilot, Grok Build (plus Claude). Gemini CLI was dropped after the spike (sign-in refused for individuals); a Google provider via Antigravity is for later. |
 | How do you sign in? | The tool's own account login by default, an API key/token optionally. |
 | How does the app talk to each CLI? | Per-CLI headless adapters (one turn = one CLI process), the same model as Claude today. |
-| How safe is Codex? | Codex has no per-tool allowlist. It runs in the `workspace-write` sandbox (with `windows.sandbox="unelevated"`): writes are limited to the vault and repos folders, and network is on so `git clone` works. |
+| How safe is Codex? | Codex has no per-tool allowlist. It runs in the `workspace-write` sandbox (with `windows.sandbox="unelevated"`): writes are limited to the vault and repos folders, and the network is **off** (user decision 2026-10-30: with network on a sandboxed command could reach the app's own API). Updates, adopting and cloning go through the vault tools, server-side. |
 | Does Copilot get a git-only shell? | No shell at all. Copilot's default permission mode auto-approves commands it judges read-only even when only `shell(git:*)` is allowed (`hostname` ran in the spike), so git-only can't be enforced. The user chose no shell over an unenforceable one. |
 | Grok's details? | Built from xAI's docs. Grok wasn't run in the spike (user: "Skip Grok for now"); its items are checked live at the end of the plan. |
 
@@ -234,7 +235,11 @@ docs, checked live in the plan's last task.
   - `-c windows.sandbox="unelevated"` (S7: without the user's config Codex has no Windows sandbox and
     falls back to read-only)
   - `-c sandbox_workspace_write.writable_roots=[<vault>, <repos>]`
-  - `-c sandbox_workspace_write.network_access=true`
+  - `-c sandbox_workspace_write.network_access=false` (user decision 2026-10-30, after the final review:
+    the app's API on 127.0.0.1 has no token and its cross-site guard lets a request with neither `Origin`
+    nor `Sec-Fetch-Site` through, so with network on a sandboxed `curl -X PATCH …/api/config` followed by
+    `POST /api/push` could write outside the sandbox. `git clone`/`pull` and `curl` don't work in the
+    sandbox; the vault tools — updates, adopting, cloning — run in the app server and still do.)
   - `-c approval_policy="never"`
   - `-c mcp_servers.vault.command=… / .args=[…] / .env={SKILL_VAULT_URL="…"}`
   - `-c mcp_servers.vault.default_tools_approval_mode="approve"` (S7: otherwise every vault call comes
@@ -367,7 +372,7 @@ cost otherwise.
 | Engine | Shell | File writes | App changes | User's own config kept out by |
 |---|---|---|---|---|
 | Claude | `Bash(git:*)` | Edit/Write (cwd + add-dirs) | `mcp__vault__*` | `--strict-mcp-config`, `--setting-sources ""` (today) |
-| Codex | any command, **sandboxed** (`workspace-write`, `windows.sandbox="unelevated"`) | vault + repos only (sandbox), network on | vault MCP (tools auto-approved) | `--ignore-user-config` |
+| Codex | any command, **sandboxed** (`workspace-write`, `windows.sandbox="unelevated"`), **no network** | vault + repos only (sandbox) | vault MCP (tools auto-approved) | `--ignore-user-config` |
 | Copilot | **none** (`--available-tools` lists no shell tool) | `create`/`edit` + `--allow-tool write` (cwd + add-dirs + system temp, where Copilot saves large tool output) | `vault` | `--disable-builtin-mcps`; `--available-tools` drops every tool not listed, including the computer-use plugin |
 | Grok | **none** for now (no `run_terminal_cmd`, no `--allow`); `Bash(git *)` after the live check | **none** for now (no `write_file` / `search_replace` in `--tools`); restored after the live check | vault MCP | app-owned `GROK_HOME`, compat off |
 
@@ -381,11 +386,20 @@ cost otherwise.
   (`engines/safety.test.ts`) asserts that for every registered engine's `buildTurn` (new and resumed
   chat, login and API key), matching `--flag=value` forms too, plus: no Copilot argument contains
   `shell(`, Grok gets no shell tool, no `--allow` rule and no file-write tool, Claude's shell rule is
-  git-only, and Codex always passes `sandbox_mode="workspace-write"`.
+  git-only, and Codex always passes `sandbox_mode="workspace-write"` and
+  `sandbox_workspace_write.network_access=false` (never `=true`).
+- **Codex's sandbox network is off (user decision 2026-10-30).** The final review found that with network
+  on, a sandboxed command could call the app's own unauthenticated API on 127.0.0.1 (the cross-site guard
+  allows requests with neither `Origin` nor `Sec-Fetch-Site`) and, for example, repoint a provider and
+  push files outside the writable roots, which bypasses the audited bridge. Of the three options (network
+  off; a per-run secret header; accept and document), the user chose network off. Codex loses `git
+  clone`/`pull` and `curl` in its shell; the vault tools (updates, adopt, clone) run server-side and keep
+  working.
 - The live check in the plan runs a refused action on each engine (a non-git command, and a write
-  outside the vault) and confirms it was refused. For Codex, the refused action is only the write
-  outside the vault. For Copilot, the command can't even be attempted (no shell tool). For Grok, the
-  check runs with its shell and write tools restored, before they ship.
+  outside the vault) and confirms it was refused. For Codex, the refused actions are the write outside
+  the vault and a loopback call to the app's API (no network). For Copilot, the command can't even be
+  attempted (no shell tool). For Grok, the check runs with its shell and write tools restored, before
+  they ship.
 
 ## Install flow
 

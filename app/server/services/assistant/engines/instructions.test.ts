@@ -29,6 +29,10 @@ test("engineNote says whether subagents and a shell exist", () => {
   assert.match(codex, /running on OpenAI Codex/);
   assert.match(codex, /aren't available here/);
   assert.match(codex, /runs in a sandbox/);
+  assert.match(codex, /no network access/);
+  assert.match(codex, /git pull, git clone and curl won't work/);
+  assert.match(codex, /use the vault tools/);
+  assert.doesNotMatch(codex, /network is on/);
   assert.doesNotMatch(codex, /only git commands are allowed/);
   const grok = engineNote({ label: "Grok Build", vaultToolSpelling: "vault__<tool>", subagents: false, shell: "git" });
   assert.match(grok, /only git commands are allowed/);

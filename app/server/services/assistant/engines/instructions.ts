@@ -28,7 +28,7 @@ export function engineNote(o: EngineNoteOpts): string {
     o.shell === "none"
       ? 'There is no shell tool here ("Bash" doesn\'t exist), so you can\'t run git or any other command. When these instructions call for one, use a vault tool that does the job; if none does, give the user the exact command to run themselves.'
       : o.shell === "sandboxed"
-        ? 'Your shell tool stands in for "Bash". It runs in a sandbox: commands can write only inside the vault and the repos folder, and the network is on. Ask the user before anything destructive.'
+        ? 'Your shell tool stands in for "Bash". It runs in a sandbox: commands can write only inside the vault and the repos folder, and they have no network access, so git pull, git clone and curl won\'t work. For updates, adopting or cloning, use the vault tools (they run in the app); local git commands like git log still work. Ask the user before anything destructive.'
         : '"Bash" is your shell tool, and only git commands are allowed.';
   const equivalents = writes
     ? '"Read", "Edit", "Write", "Glob", "Grep", "WebSearch" and "WebFetch" are your equivalent tools.'

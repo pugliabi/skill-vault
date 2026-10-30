@@ -83,7 +83,13 @@ and the web and makes changes only through the vault tools; for anything else it
 
 ### Why can Codex run commands other than git?
 Codex can't limit its shell to particular commands. Skill Vault runs it in Codex's workspace-write
-sandbox instead: commands run, but can only write inside the vault and repos folders.
+sandbox instead: commands run, but can only write inside the vault and repos folders, and they have no
+network access.
+
+### Why can't Codex clone or pull with git?
+Its sandbox has no network. With the network on, a command in the sandbox could call Skill Vault's own
+local API and change things outside the sandbox. Checking for updates, adopting and cloning still work:
+Codex does them through the vault tools, which run in the app. Local git commands (history, diffs) work.
 
 ### Why can't the assistant run git on Copilot?
 Copilot CLI runs commands it considers read-only even when only git is allowed, so its shell can't be

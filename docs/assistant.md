@@ -69,8 +69,11 @@ already reads as signed in) waits for that window's login to finish instead, and
   that work itself with the same skills.
 - *Shell*: git only on Claude. Copilot has no shell at all (it can't be limited to git), and Grok runs
   without one until its limits are verified; on both, the assistant uses the vault tools and tells you
-  any command to run yourself. Codex can run any command inside its sandbox, with writes limited to the
-  vault and repos folders.
+  any command to run yourself. Codex can run any command inside its sandbox, which can write only the
+  vault and repos folders and has **no network**: `git clone`, `git pull` and `curl` don't work there,
+  so Codex checks updates, adopts and clones through the vault tools, which run in the app. (With the
+  network on, a sandboxed command could reach the app's own local API and change things outside the
+  sandbox.)
 - *File edits*: Claude, Codex and Copilot edit files in the vault and repos folders directly. Grok can't
   edit files directly yet; it can make only the changes the vault tools offer.
 - *Cost*: shown for Claude and Grok; the others don't report it.
@@ -242,14 +245,16 @@ deliberately bounded:
   dead), adopt, push/pull to providers, Notion push/pull, repair audit
   findings. Depending on the [provider](#providers), it can also edit skill
   files directly (not on Grok yet) and run `git` for clones and history
-  (Claude; Codex inside its sandbox; not on Copilot or Grok).
+  (Claude; on Codex only local git such as history, since its sandbox has
+  no network; not on Copilot or Grok).
 - **Cannot (by design):** delete skills, force-overwrite Notion or connect
   Notion OAuth through its vault tools; those stay in the UI, with you. How
   far its shell and file edits reach depends on the provider: on Claude the
   shell runs git only; Copilot and Grok have no shell; **Codex can run any
   command** inside its sandbox, which keeps writes to the vault and your
-  clones folder — so on Codex a command could still change or delete files
-  in the vault. File edits stay inside the vault and your clones folder
+  clones folder and has no network — so on Codex a command could still
+  change or delete files in the vault, but can't reach the internet or the
+  app's own API. File edits stay inside the vault and your clones folder
   (Copilot can also write the system temp folder). See "What differs by
   provider" under [Providers](#providers).
 
