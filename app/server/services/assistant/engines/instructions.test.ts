@@ -25,10 +25,13 @@ test("skillsIndex lists each skill with its description and absolute SKILL.md pa
 });
 
 test("engineNote says whether subagents and a shell exist", () => {
-  const codex = engineNote({ label: "OpenAI Codex", vaultToolSpelling: "vault.<tool>", subagents: false, shell: "git" });
+  const codex = engineNote({ label: "OpenAI Codex", vaultToolSpelling: "vault.<tool>", subagents: false, shell: "sandboxed" });
   assert.match(codex, /running on OpenAI Codex/);
   assert.match(codex, /aren't available here/);
-  assert.match(codex, /only git commands are allowed/);
+  assert.match(codex, /runs in a sandbox/);
+  assert.doesNotMatch(codex, /only git commands are allowed/);
+  const grok = engineNote({ label: "Grok Build", vaultToolSpelling: "vault__<tool>", subagents: false, shell: "git" });
+  assert.match(grok, /only git commands are allowed/);
   const copilot = engineNote({ label: "GitHub Copilot CLI", vaultToolSpelling: "vault-<tool>", subagents: true, shell: "none" });
   assert.match(copilot, /Subagents work as described/);
   assert.match(copilot, /There is no shell tool here/);

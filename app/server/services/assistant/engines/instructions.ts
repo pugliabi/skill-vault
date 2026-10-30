@@ -17,14 +17,16 @@ export interface EngineNoteOpts {
   vaultToolSpelling: string;
   subagents: boolean;
   /** "git": the shell tool runs git commands only. "none": this engine has no shell tool at all (Copilot). */
-  shell: "git" | "none";
+  shell: "git" | "none" | "sandboxed";
 }
 
 export function engineNote(o: EngineNoteOpts): string {
   const shell =
     o.shell === "none"
       ? 'There is no shell tool here ("Bash" doesn\'t exist), so you can\'t run git or any other command. When these instructions call for one, use a vault tool that does the job; if none does, give the user the exact command to run themselves.'
-      : '"Bash" is your shell tool, and only git commands are allowed.';
+      : o.shell === "sandboxed"
+        ? 'Your shell tool stands in for "Bash". It runs in a sandbox: commands can write only inside the vault and the repos folder, and the network is on. Ask the user before anything destructive.'
+        : '"Bash" is your shell tool, and only git commands are allowed.';
   return [
     `You are running on ${o.label} inside Skill Vault, not on Claude Code.`,
     `- Tool names in these instructions are Claude Code's. \`mcp__vault__<tool>\` is the vault MCP server's <tool> (here: ${o.vaultToolSpelling}). "Read", "Edit", "Write", "Glob", "Grep", "WebSearch" and "WebFetch" are your equivalent tools.`,
