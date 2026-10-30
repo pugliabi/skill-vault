@@ -1,0 +1,12 @@
+{"type":"_fixture_note","text":"Hand-written from xAI's docs (Claude-style stream-json, use_tool for MCP calls). Not recorded from a real grok run: unverified until plan Task 20."}
+{"type":"system","subtype":"init","session_id":"11111111-2222-3333-4444-555555555555","cwd":"C:\\Users\\user\\sv-spike\\vault","tools":["read_file","grep","list_dir","search_replace","write_file","run_terminal_cmd","web_search","web_fetch","use_tool"]}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"I'll check the vault first."}}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I'll check the vault first."},{"type":"tool_use","id":"call_1","name":"use_tool","input":{"name":"vault__list_skills","arguments":{}}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_1","content":[{"type":"text","text":"{\"total\":3,\"skills\":[{\"name\":\"alpha\",\"status\":\"synced\",\"targets\":[\"claude\"],\"tags\":[]},{\"name\":\"beta\",\"status\":\"vault-only\",\"targets\":[],\"tags\":[]},{\"name\":\"gamma\",\"status\":\"synced\",\"targets\":[\"claude\"],\"tags\":[]}]}"}]}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"call_2","name":"run_terminal_cmd","input":{"command":"hostname"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_2","is_error":true,"content":"Permission denied: only commands matching Bash(git *) are allowed."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"call_3","name":"write_file","input":{"target_file":"C:\\Users\\user\\sv-spike-outside.txt","contents":"hi"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_3","is_error":true,"content":"Permission denied: C:\\Users\\user\\sv-spike-outside.txt is outside the workspace."}]}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"There are 3 skills. hostname and the write outside the vault were refused."}}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"There are 3 skills. hostname and the write outside the vault were refused."}]}}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":4210,"num_turns":4,"total_cost_usd":0.0042,"session_id":"11111111-2222-3333-4444-555555555555","result":"There are 3 skills. hostname and the write outside the vault were refused."}

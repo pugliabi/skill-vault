@@ -2,8 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** The Skill Vault assistant can run on OpenAI Codex, GitHub Copilot CLI, Grok Build or Gemini CLI as
-well as Claude Code. The app installs the chosen CLI and walks the user through sign-in.
+**Goal:** The Skill Vault assistant can run on OpenAI Codex, GitHub Copilot CLI or Grok Build as well as
+Claude Code. The app installs the chosen CLI and walks the user through sign-in.
 
 **Architecture:** One adapter module per CLI ("engine") under `app/server/services/assistant/engines/`.
 Each adapter builds that CLI's headless command line and parses its JSONL output into the existing
@@ -13,8 +13,10 @@ engine-aware. Claude's path is wrapped, not changed.
 **Tech Stack:** Node 24 + TypeScript (tsx), Express 5, node:test, React 18 + TanStack Query, Windows.
 
 **Spec:** `docs/superpowers/specs/2026-10-29-assistant-providers-design.md`. Read it before starting any
-task. It holds the reasons behind each choice. Items marked † there are settled by Task 1 and recorded in
-its "Spike findings" section. Later tasks refer to those findings as S1–S12.
+task. It holds the reasons behind each choice. Items marked † there were settled by Task 1 and recorded in
+its "Spike findings" section. Later tasks refer to those findings as S1–S9. Grok's S1–S4 are unverified
+(Grok wasn't run): its adapter is built from xAI's docs and checked live in Task 20. S10–S12 belonged to
+a provider that was dropped after the spike (see Task 1).
 
 ## Global Constraints
 
@@ -29,8 +31,9 @@ its "Spike findings" section. Later tasks refer to those findings as S1–S12.
 - No engine's turn ever includes `--yolo`, `--allow-all`, `--allow-all-tools`, `--allow-all-paths`,
   `--allow-all-urls`, `bypassPermissions`, `--dangerously-skip-permissions` or
   `--dangerously-bypass-approvals-and-sandbox`.
-- The shell is git-only on Claude, Copilot, Grok and Gemini. Codex runs in
-  `sandbox_mode="workspace-write"` with writable roots = vault + repos and network on, and never
+- The shell is git-only on Claude and Grok. Copilot has no shell tool (allowlist via
+  `--available-tools`). Codex runs in `sandbox_mode="workspace-write"` (with
+  `windows.sandbox="unelevated"`) with writable roots = vault + repos and network on, and never
   unsandboxed.
 - Saved API keys are never returned to the browser. Views report `has_saved_key` only.
 - UI copy says **Provider**; code says **engine**. "Providers" in this codebase already means skill
@@ -41,7 +44,15 @@ its "Spike findings" section. Later tasks refer to those findings as S1–S12.
   `assistant:`, `setup:`, `client:`, `docs:`) and end with
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - Deliberate narrowing of the spec: Claude keeps its own `resolveClaudeExe` (only extended to also
-  search the registry PATH and `~/.local/bin`). The new `engines/exe.ts` resolver serves the other four.
+  search the registry PATH and `~/.local/bin`), and Claude's `target()` uses it. The new
+  `engines/exe.ts` resolver serves the other three: it searches the process PATH, then the known install
+  folders, and reads the registry PATH only when both miss. `defaultEngineDeps().resolve` (Task 9)
+  remembers each name's result; an engine's `detect({ refresh: true })` forgets it.
+- Deliberate narrowing: the engine contract in Task 4 (`engines/types.ts`) is the authoritative one.
+  The spec's interface block now mirrors it: `TurnInput` carries `leadAgent`, `auth` and `baseEnv`;
+  engines expose `target()`, `cliName`, `loginArgs` / `loginHint` / `loginEnv()`; `TurnParser` is
+  `{ parse, engineSessionId? }`; `InstallStep` is a `kind` union; `signed_in` is `boolean | null`.
+- Engine order everywhere (registry, Settings, setup guide, docs): claude, codex, copilot, grok.
 
 ## File map
 
@@ -51,15 +62,17 @@ its "Spike findings" section. Later tasks refer to those findings as S1–S12.
 - `config.ts`: the assistant block's `engine` / `engines`
 - `instructions.ts`: lead agent + engine note + skills index → prompt
 - `common.ts`: shared engine helpers
-- `claude.ts`, `codex.ts`, `copilot.ts`, `grok.ts`, `gemini.ts`: one per CLI
+- `claude.ts`, `codex.ts`, `copilot.ts`, `grok.ts`: one per CLI
 - `registry.ts`: which engines exist, and their work folders
 - `state.ts`: cached installed / signed-in views and readiness
 - `install.ts`: the install job
 - `signIn.ts`: the sign-in window
 - `jobs.ts`: install + sign-in handles, for busy and shutdown
-- `fixtures/`: real CLI output from Task 1
-- `testFakes.ts`: a test-only fake engine
-- a `*.test.ts` file next to each module
+- `fixtures/`: `codex-turn.jsonl` and `copilot-turn.jsonl` recorded in Task 1; `grok-turn.jsonl`
+  hand-written from xAI's docs (Grok wasn't run)
+- `testFakes.ts`: a test-only fake engine and the forbidden-flag list
+- a `*.test.ts` file next to each module, plus `safety.test.ts` (every engine against the Global
+  Constraints)
 
 Also new: `app/server/routes/assistant.test.ts`.
 
@@ -77,9 +90,10 @@ Client: `app/client/src/components/ui/Modal.tsx`, plus these in `app/client/src/
 - `server/routes/assistant.ts`
 - `server/index.ts`
 - `server/services/appConfig.ts`
-- `server/services/setup/{types,draft,apply}.ts`
+- `server/services/setup/{types,draft,apply}.ts` and their `draft.test.ts` / `apply.test.ts`
 - `server/routes/setup.ts` and `setup.test.ts`
-- client: `lib/assistant.ts`, `lib/assistantStore.ts`, `lib/setup.ts`, `pages/Settings.tsx`,
+- client: `lib/api.ts`, `lib/appUpdate.ts`, `lib/assistant.ts`, `lib/assistantStore.ts`, `lib/setup.ts`,
+  `pages/Settings.tsx`,
   `pages/setup/steps/AssistantStep.tsx`, `pages/setup/steps/ReviewStep.tsx`,
   `components/assistant/AssistantPanel.tsx`, `components/assistant/SessionList.tsx`
 - docs
@@ -88,6 +102,13 @@ Client: `app/client/src/components/ui/Modal.tsx`, plus these in `app/client/src/
 
 ### Task 1: Verification spike (run by the lead session, not a subagent)
 
+> **Status (2026-10-29): done — kept as history.** Codex (Step 5) and Copilot (Step 6) were recorded.
+> Grok (Steps 4 and 7) was skipped (user decision: "Skip Grok for now"), so S1–S4 are unverified and
+> `fixtures/grok-turn.jsonl` is hand-written from xAI's docs. Gemini (Step 8) was attempted and then
+> dropped: Google refuses Gemini CLI's Google-account sign-in for individuals (S10), so Gemini is gone
+> from this branch. The findings are in the spec's "Spike findings (2026-10-29)" table, and the fixtures
+> plus the plan and spec fixes were committed together (Step 9 below is superseded by that commit).
+
 This task spends real model requests and installs Grok. **Ask the user before Step 3.** A subagent
 can't ask, so the lead session runs this task itself.
 
@@ -95,7 +116,7 @@ can't ask, so the lead session runs this task itself.
 - Create: `app/server/services/assistant/engines/fixtures/{codex,copilot,grok,gemini}-turn.jsonl`
 - Modify: `docs/superpowers/specs/2026-10-29-assistant-providers-design.md` (append "Spike findings")
 
-- [ ] **Step 1: Prepare the worktree**
+- [x] **Step 1: Prepare the worktree**
 
 ```powershell
 cd C:\Github\skill-vault\.claude\worktrees\assistant-providers\app
@@ -104,7 +125,7 @@ npm test
 ```
 Expected: all tests pass (606 on merged main). Record the count.
 
-- [ ] **Step 2: Start a dev server for the vault bridge and build the bridge command**
+- [x] **Step 2: Start a dev server for the vault bridge and build the bridge command**
 
 Run `npm run dev` in the background and note the port it prints (`http://127.0.0.1:<port>`). Then:
 
@@ -119,13 +140,13 @@ $PROMPT = "Use the vault MCP tool list_skills once and say how many skills there
 
 `list_skills` is read-only. `hostname` and a file in `%TEMP%` are harmless if allowed.
 
-- [ ] **Step 3: Ask the user**
+- [x] **Step 3: Ask the user**
 
 Message: "Task 1 needs about 8 short real requests: one turn plus one resumed turn for each of Codex,
 Copilot, Grok and Gemini. It also installs Grok Build (`irm https://x.ai/cli/install.ps1 | iex`) and
 needs you to sign in to Grok and Gemini once. OK to go ahead?" Wait for a yes.
 
-- [ ] **Step 4: Grok install and sign-in (S1, S2)**
+- [x] **Step 4: Grok install and sign-in (S1, S2)** — skipped (user decision)
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://x.ai/cli/install.ps1 | iex"
@@ -139,7 +160,7 @@ Record:
 - S2: which file appears in `GROK_HOME` after login (expected `auth.json`), and whether `GROK_HOME`
   redirected it there.
 
-- [ ] **Step 5: Codex turn (S5, S6, S7)**
+- [x] **Step 5: Codex turn (S5, S6, S7)**
 
 ```powershell
 codex login status; echo "exit=$LASTEXITCODE"
@@ -170,7 +191,7 @@ Record:
 If Codex reports that the Windows sandbox is unavailable, record that too. Task 9 then makes Codex
 turns refuse to start.
 
-- [ ] **Step 6: Copilot turn (S8, S9)**
+- [x] **Step 6: Copilot turn (S8, S9)**
 
 ```powershell
 Get-Content $env:USERPROFILE\.copilot\config.json | ConvertFrom-Json | Get-Member -MemberType NoteProperty
@@ -192,7 +213,7 @@ Record:
   start, tool end and the end of the turn; the MCP tool name spelling (expected `vault-list_skills`);
   that `hostname` and the outside write were refused; that resume remembered.
 
-- [ ] **Step 7: Grok turn (S3, S4)**
+- [x] **Step 7: Grok turn (S3, S4)** — skipped (user decision)
 
 Write `$env:GROK_HOME\config.toml`:
 ```toml
@@ -226,7 +247,8 @@ Record:
   that would have let `hostname` through. If it would, find the `[compat.claude]` key that turns
   settings import off (docs `05-configuration.md` / `26-config-reference.md`) and record it.
 
-- [ ] **Step 8: Gemini turn (S10, S11, S12)**
+- [x] **Step 8: Gemini turn (S10, S11, S12)** — skipped (user decision): sign-in was refused
+  server-side, so Gemini was dropped
 
 Write `$env:TEMP\sv-spike\gemini-settings.json`:
 ```json
@@ -272,7 +294,7 @@ Record:
 - S12: whether the policy file loaded; whether `hostname` and the outside write were refused; the event
   shapes; the MCP tool name spelling.
 
-- [ ] **Step 9: Redact and commit the fixtures and findings**
+- [x] **Step 9: Redact and commit the fixtures and findings** — done, in the amendment commit
 
 In each fixture, replace email addresses and account names with `user@example.com` / `user`. Make sure
 no token or key appears:
@@ -325,7 +347,10 @@ commit. Tasks 9–12 name the S-item each constant depends on.
   - `registryPathDirs(): string[]`
   - `knownInstallDirs(env?: NodeJS.ProcessEnv, nodePath?: string): string[]`
   - `interface ResolveDeps { platform?; pathDirs?; registryPathDirs?; knownDirs?; exists?; readFile?; nodePath? }`
-  - `resolveTarget(name: string, label: string, deps?: ResolveDeps): SpawnTarget | null`
+  - `resolveTarget(name: string, label: string, deps?: ResolveDeps): SpawnTarget | null` — searches the
+    process PATH, then `deps.knownDirs`, and only when both miss (Windows) the registry PATH, so a CLI
+    that is already on PATH never costs the two `reg query` spawns. It caches nothing itself; Task 9's
+    `defaultEngineDeps().resolve` remembers results per name.
   - `interface CommandResult { code: number | null; stdout: string; stderr: string }`
   - `type CommandRunner = (target: SpawnTarget, args: string[], opts: { env?: NodeJS.ProcessEnv; timeoutMs: number; cwd?: string; stdin?: string }) => Promise<CommandResult>`
   - `runCommand: CommandRunner`
@@ -410,9 +435,15 @@ test("resolveTarget: an npm shim runs its script with the app's node", () => {
   });
 });
 
-test("resolveTarget: falls back to the registry PATH, then known install folders", () => {
-  assert.equal(resolveTarget("grok", "grok CLI", fakeDeps({ "C:\\reg\\grok.exe": "" }))?.command, "C:\\reg\\grok.exe");
-  assert.equal(resolveTarget("grok", "grok CLI", fakeDeps({ "C:\\known\\grok.exe": "" }))?.command, "C:\\known\\grok.exe");
+test("resolveTarget: PATH, then known install folders; the registry PATH is read only when both miss", () => {
+  let regReads = 0;
+  const counting = (files: Record<string, string>) => fakeDeps(files, { registryPathDirs: () => (regReads++, ["C:\\reg"]) });
+  const both = { "C:\\b\\grok.exe": "", "C:\\known\\grok.exe": "", "C:\\reg\\grok.exe": "" };
+  assert.equal(resolveTarget("grok", "grok CLI", counting(both))?.command, "C:\\b\\grok.exe");
+  assert.equal(resolveTarget("grok", "grok CLI", counting({ "C:\\known\\grok.exe": "", "C:\\reg\\grok.exe": "" }))?.command, "C:\\known\\grok.exe");
+  assert.equal(regReads, 0, "found without the registry: no reg query");
+  assert.equal(resolveTarget("grok", "grok CLI", counting({ "C:\\reg\\grok.exe": "" }))?.command, "C:\\reg\\grok.exe");
+  assert.equal(regReads, 1);
 });
 
 test("resolveTarget: a shim whose target is missing is skipped; nothing found → null", () => {
@@ -453,8 +484,9 @@ Expected: FAIL — `Cannot find module './exe.ts'`.
  * cuts a multi-line argument at the first newline (see claude/cli.ts), so a
  * shim is resolved to what it wraps: a real `.exe`, or a node script run with
  * the app's own node. Installers update the PATH stored in the registry, not
- * the running server's, so after an install the registry PATH and the known
- * install folders are searched too.
+ * the running server's, so when the process PATH and the known install
+ * folders both miss, the registry PATH is searched too (two `reg query`
+ * spawns, so only then). Callers remember the result per name (common.ts).
  */
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -511,7 +543,7 @@ export function knownInstallDirs(env: NodeJS.ProcessEnv = process.env, nodePath:
     path.dirname(nodePath), // nvm4w and the Node installer: npm puts global shims next to node
     ...(env.APPDATA ? [path.join(env.APPDATA, "npm")] : []), // npm's default global prefix
     path.join(home, ".local", "bin"), // Claude Code's native installer
-    path.join(home, ".grok", "bin"), // Grok Build's installer (spike S1)
+    path.join(home, ".grok", "bin"), // Grok Build's installer, per xAI's docs (unverified until Task 20)
   ];
 }
 
@@ -529,41 +561,47 @@ export interface ResolveDeps {
 const processPathDirs = (): string[] =>
   (process.env.PATH || process.env.Path || "").split(path.delimiter).filter(Boolean);
 
-/** Find `name` as something spawnable without a shell, or null when it isn't installed. */
+/**
+ * Find `name` as something spawnable without a shell, or null when it isn't installed.
+ * Order: the process PATH, the known install folders, then (Windows, only when both
+ * missed) the PATH stored in the registry.
+ */
 export function resolveTarget(name: string, label: string, deps: ResolveDeps = {}): SpawnTarget | null {
   const platform = deps.platform ?? process.platform;
   const exists = deps.exists ?? fs.existsSync;
   const readFile = deps.readFile ?? ((p: string) => fs.readFileSync(p, "utf-8"));
   const node = deps.nodePath ?? process.execPath;
-  const dirs = [
-    ...(deps.pathDirs ?? processPathDirs)(),
-    ...(platform === "win32" ? (deps.registryPathDirs ?? registryPathDirs)() : []),
-    ...(deps.knownDirs ?? []),
-  ];
   const seen = new Set<string>();
-  for (const dir of dirs) {
-    const key = dir.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    if (platform !== "win32") {
-      const p = path.join(dir, name);
-      if (exists(p)) return { command: p, prefixArgs: [], label };
-      continue;
+
+  const search = (dirs: string[]): SpawnTarget | null => {
+    for (const dir of dirs) {
+      const key = dir.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (platform !== "win32") {
+        const p = path.join(dir, name);
+        if (exists(p)) return { command: p, prefixArgs: [], label };
+        continue;
+      }
+      const exe = path.join(dir, `${name}.exe`);
+      if (exists(exe)) return { command: exe, prefixArgs: [], label };
+      const cmd = path.join(dir, `${name}.cmd`);
+      if (!exists(cmd)) continue;
+      let shim: ShimTarget | null = null;
+      try {
+        shim = parseCmdShim(readFile(cmd), dir);
+      } catch {
+        shim = null;
+      }
+      if (shim?.kind === "exe" && exists(shim.path)) return { command: shim.path, prefixArgs: [], label };
+      if (shim?.kind === "node" && exists(shim.script)) return { command: node, prefixArgs: [shim.script], label };
     }
-    const exe = path.join(dir, `${name}.exe`);
-    if (exists(exe)) return { command: exe, prefixArgs: [], label };
-    const cmd = path.join(dir, `${name}.cmd`);
-    if (!exists(cmd)) continue;
-    let shim: ShimTarget | null = null;
-    try {
-      shim = parseCmdShim(readFile(cmd), dir);
-    } catch {
-      shim = null;
-    }
-    if (shim?.kind === "exe" && exists(shim.path)) return { command: shim.path, prefixArgs: [], label };
-    if (shim?.kind === "node" && exists(shim.script)) return { command: node, prefixArgs: [shim.script], label };
-  }
-  return null;
+    return null;
+  };
+
+  const found = search([...(deps.pathDirs ?? processPathDirs)(), ...(deps.knownDirs ?? [])]);
+  if (found || platform !== "win32") return found;
+  return search((deps.registryPathDirs ?? registryPathDirs)());
 }
 
 /** Kill a process and everything it started. */
@@ -629,7 +667,7 @@ export const runCommand: CommandRunner = (target, args, opts) =>
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `node --import tsx --test server/services/assistant/engines/exe.test.ts`
-Expected: PASS (10 tests).
+Expected: PASS (9 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -653,7 +691,7 @@ git commit -m "engines: find CLIs without a shell (npm shims, registry PATH, ins
     the runner spawns `target.command` with `[...target.prefixArgs, ...args]`, uses `opts.env`, and
     names `target.label` in timeout/abort errors.
   - `claudeExeSearchDirs(processPath: string, registryDirs: string[], home: string): string[]`
-  - `resolveClaudeExe` now searches those dirs and is exported.
+  - `resolveClaudeExe` now searches those dirs and is exported (Task 7's Claude `target()` uses it).
 
 - [ ] **Step 1: Write the failing tests** (append to `cli.test.ts`; add `claudeExeSearchDirs` to the
   import list, plus `import type { SpawnOptions } from "node:child_process";`)
@@ -692,6 +730,25 @@ test("createStreamRunner with a target spawns it directly, with its prefix args 
   assert.equal(child.writtenStdin, "line one\nline two");
 });
 
+test("createStreamRunner: a turn aborted before it starts names the target's CLI and spawns nothing", async () => {
+  let spawned = 0;
+  const runner = createStreamRunner(() => (spawned++, makeFakeChild()), () => {}, { platform: "win32" });
+  const abort = new AbortController();
+  abort.abort();
+  await assert.rejects(
+    runner([], "", {
+      cwd: "C:\\vault",
+      target: { command: "C:\\codex.exe", prefixArgs: [], label: "codex CLI" },
+      signal: abort.signal,
+      idleTimeoutMs: 1000,
+      hardTimeoutMs: 1000,
+      onLine: () => {},
+    }),
+    /codex CLI call aborted/,
+  );
+  assert.equal(spawned, 0);
+});
+
 test("claudeExeSearchDirs: process PATH, then the registry PATH, then ~/.local/bin", () => {
   assert.deepEqual(claudeExeSearchDirs(`C:\\a${path.delimiter}C:\\b`, ["C:\\reg"], "C:\\Users\\me"), [
     "C:\\a",
@@ -705,7 +762,7 @@ test("claudeExeSearchDirs: process PATH, then the registry PATH, then ~/.local/b
 - [ ] **Step 2: Run them to verify they fail**
 
 Run: `node --import tsx --test server/services/claude/cli.test.ts`
-Expected: FAIL — `claudeExeSearchDirs` is not exported; the target test spawns `claude`.
+Expected: FAIL — `claudeExeSearchDirs` is not exported; the target tests spawn `claude` / say "claude CLI".
 
 - [ ] **Step 3: Implement**
 
@@ -743,8 +800,15 @@ const dirs = claudeExeSearchDirs(
     env?: NodeJS.ProcessEnv;
 ```
 
-5. In `createStreamRunner`, replace the `invocation = buildSpawnInvocation(...)` line inside the `try`
-   with:
+5. In `createStreamRunner`, make the returned function's first line, above `return new Promise(…)` and
+   so before the `if (opts.signal?.aborted)` branch that needs it:
+
+```ts
+    const label = opts.target?.label ?? "claude CLI";
+```
+
+   (Declaring it after that branch would be a TS2448 / runtime TDZ error: the pre-abort message uses
+   it.) Then replace the `invocation = buildSpawnInvocation(...)` line inside the `try` with:
 
 ```ts
         invocation = opts.target
@@ -760,10 +824,9 @@ const dirs = claudeExeSearchDirs(
           : buildSpawnInvocation(args, opts.cwd, resolveExe, platform, deps.env?.());
 ```
 
-   Then add `const label = opts.target?.label ?? "claude CLI";` right after the `if (opts.signal?.aborted)`
-   block. Replace the literal `claude CLI` in the four messages inside `createStreamRunner` with
-   `${label}`: the pre-abort, `onAbort`, `onIdle` and hard-timer messages. Do not touch `createRunner`'s
-   messages.
+   Replace the literal `claude CLI` in the four messages inside `createStreamRunner` with `${label}`
+   (making them template literals): the pre-abort (`` `${label} call aborted` ``), `onAbort`, `onIdle`
+   and hard-timer messages. Do not touch `createRunner`'s messages.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -788,15 +851,17 @@ git commit -m "claude: stream runner can spawn another CLI; claude.exe found aft
 
 **Interfaces:**
 - Consumes: `SpawnTarget` (Task 2).
-- Produces (`types.ts`):
-  - `EngineId`, `ENGINE_IDS`
+- Produces (`types.ts`) — the authoritative engine contract (see Global Constraints):
+  - `EngineId = "claude" | "codex" | "copilot" | "grok"`, `ENGINE_IDS` in that order
   - `EngineAuthConfig`, `EngineDetect`, `EngineAuthStatus`
   - `InstallStep`, `installDisplay(step)`
   - `TurnInput`, `TurnSpec`, `TurnParser`
-  - `AssistantEngine`
+  - `AssistantEngine`, including `cliName: string` (the command as typed in a terminal, e.g. `"codex"`;
+    Task 14's "run this yourself" message uses it) and `detect(opts?: { refresh?: boolean })`
 - Produces (`streamEvents.ts`):
   - `type ToolAliases = Record<string, string>`
-  - `canonicalTool(aliases, name, input): { name; input }`
+  - `canonicalTool(aliases, name, input): { name; input }` — vault tools arrive as `mcp__vault__x`
+    (Claude, Codex), `vault__x` (Grok, inside `use_tool`) or `vault-x` (Copilot)
   - `toolStartEvent(id, name, input): AssistantStreamEvent`
   - `toolResultEvent(id, ok, content): AssistantStreamEvent`
   - `parseStreamJsonLine(line, opts?: { aliases?: ToolAliases; authHint?: (m: string) => string })`
@@ -819,7 +884,7 @@ test("canonicalTool: native names map to Claude's, with the fields labelForTool 
 });
 
 test("canonicalTool: every engine's spelling of a vault tool becomes mcp__vault__<tool>", () => {
-  for (const n of ["mcp__vault__list_skills", "vault__list_skills", "mcp_vault_list_skills", "vault-list_skills"]) {
+  for (const n of ["mcp__vault__list_skills", "vault__list_skills", "vault-list_skills"]) {
     assert.equal(canonicalTool({}, n, {}).name, "mcp__vault__list_skills");
   }
   // Grok calls MCP tools through a use_tool meta-tool.
@@ -869,7 +934,7 @@ Expected: FAIL — `canonicalTool` is not exported.
 // app/server/services/assistant/engines/types.ts
 /**
  * The contract every assistant engine implements. One engine = one CLI the
- * assistant can run on (Claude Code, Codex, Copilot, Grok Build, Gemini).
+ * assistant can run on (Claude Code, Codex, Copilot, Grok Build).
  * An engine knows how to find, install and sign in to its CLI, how to build
  * one headless chat turn, and how to read that CLI's JSONL back into the
  * panel's AssistantStreamEvents. "Engine" in code, "Provider" in the UI —
@@ -879,9 +944,9 @@ import type { AssistantStreamEvent } from "../streamEvents.ts";
 import type { VaultMcpServer } from "../mcpConfig.ts";
 import type { SpawnTarget } from "./exe.ts";
 
-export type EngineId = "claude" | "codex" | "copilot" | "grok" | "gemini";
+export type EngineId = "claude" | "codex" | "copilot" | "grok";
 /** Settings lists engines in this order. */
-export const ENGINE_IDS: EngineId[] = ["claude", "codex", "copilot", "grok", "gemini"];
+export const ENGINE_IDS: EngineId[] = ["claude", "codex", "copilot", "grok"];
 
 export interface EngineAuthConfig {
   auth?: "login" | "api_key";
@@ -913,7 +978,7 @@ export function installDisplay(step: InstallStep): string {
 }
 
 export interface TurnInput {
-  /** The app's chat id (a UUID); Claude, Copilot, Grok and Gemini use it as their session id. */
+  /** The app's chat id (a UUID); Claude, Copilot and Grok use it as their session id. */
   sessionId: string;
   /** An id the engine assigned on an earlier turn (Codex thread ids). */
   engineSessionId?: string;
@@ -956,6 +1021,8 @@ export interface TurnParser {
 export interface AssistantEngine {
   id: EngineId;
   label: string;
+  /** The command as typed in a terminal ("codex"); names it in "run this yourself" messages. */
+  cliName: string;
   /** CLI version this adapter and its fixtures were checked against. */
   verifiedVersion: string;
   /** Can the lead delegate to the plugin's subagents on this engine? */
@@ -969,10 +1036,11 @@ export interface AssistantEngine {
   loginEnv(): Record<string, string>;
   /** The CLI to spawn, or null when it isn't installed. */
   target(): SpawnTarget | null;
+  /** refresh: forget the remembered executable and look again (after an install, "Check again"). */
   detect(opts?: { refresh?: boolean }): Promise<EngineDetect>;
   authStatus(cfg: EngineAuthConfig): Promise<EngineAuthStatus>;
   childEnv(cfg: EngineAuthConfig, base: NodeJS.ProcessEnv): NodeJS.ProcessEnv;
-  /** Throws when the CLI can't run (not installed, unsafe on this machine). */
+  /** Throws when the CLI can't run (not installed). */
   buildTurn(input: TurnInput): TurnSpec;
   createParser(): TurnParser;
   /** Appends where-to-fix-it text to an error that means "signed out". */
@@ -999,8 +1067,8 @@ export type VaultMcpServer = McpBridgeConfig["mcpServers"]["vault"];
 export type ToolAliases = Record<string, string>;
 
 const PATH_KEYS = ["file_path", "path", "absolute_path", "target_file", "filePath"];
-/** The vault tool across engines: mcp__vault__x (Claude), vault__x (Grok), mcp_vault_x, vault-x (Copilot). */
-const VAULT_TOOL = /^(?:mcp__vault__|vault__|mcp_vault_|vault-)(.+)$/;
+/** The vault tool across engines: mcp__vault__x (Claude, Codex), vault__x (Grok), vault-x (Copilot). */
+const VAULT_TOOL = /^(?:mcp__vault__|vault__|vault-)(.+)$/;
 
 function firstString(input: Record<string, unknown>, keys: string[]): string | undefined {
   for (const k of keys) {
@@ -1109,7 +1177,8 @@ git commit -m "engines: the engine contract; one tool vocabulary for every CLI's
 - Consumes: `frontmatterDescription`, `stripFrontmatter` (`server/services/skillText.ts`);
   `listPluginSkills` (`server/services/assistant/installer.ts`).
 - Produces:
-  - `interface EngineNoteOpts { label: string; vaultToolSpelling: string; subagents: boolean }`
+  - `interface EngineNoteOpts { label: string; vaultToolSpelling: string; subagents: boolean; shell: "git" | "none" }`
+    (`"none"` is Copilot's: it has no shell tool, so the note tells the model it can't run git)
   - `engineNote(o): string`
   - `skillsIndex(pluginDir): string`
   - `leadAgentBody(pluginDir, lead): string`
@@ -1146,16 +1215,21 @@ test("skillsIndex lists each skill with its description and absolute SKILL.md pa
   assert.ok(index.includes("- vault-operations — Push, pull and update."));
 });
 
-test("engineNote says whether subagents exist", () => {
-  const without = engineNote({ label: "OpenAI Codex", vaultToolSpelling: "vault.<tool>", subagents: false });
-  assert.match(without, /running on OpenAI Codex/);
-  assert.match(without, /aren't available here/);
-  assert.match(engineNote({ label: "GitHub Copilot CLI", vaultToolSpelling: "vault-<tool>", subagents: true }), /Subagents work as described/);
+test("engineNote says whether subagents and a shell exist", () => {
+  const codex = engineNote({ label: "OpenAI Codex", vaultToolSpelling: "vault.<tool>", subagents: false, shell: "git" });
+  assert.match(codex, /running on OpenAI Codex/);
+  assert.match(codex, /aren't available here/);
+  assert.match(codex, /only git commands are allowed/);
+  const copilot = engineNote({ label: "GitHub Copilot CLI", vaultToolSpelling: "vault-<tool>", subagents: true, shell: "none" });
+  assert.match(copilot, /Subagents work as described/);
+  assert.match(copilot, /There is no shell tool here/);
+  assert.match(copilot, /can't run git/);
+  assert.doesNotMatch(copilot, /only git commands are allowed/);
 });
 
 test("composeInstructions: lead body (frontmatter stripped) + note + skills; or note only", () => {
   const dir = fixturePlugin();
-  const note = { label: "Grok Build", vaultToolSpelling: "vault__<tool>", subagents: false };
+  const note = { label: "Grok Build", vaultToolSpelling: "vault__<tool>", subagents: false, shell: "git" as const };
   const full = composeInstructions({ pluginDir: dir, lead: "vault-assistant", note, includeLead: true });
   assert.ok(full.startsWith("You run the vault."));
   assert.ok(!full.includes("name: vault-assistant"));
@@ -1203,12 +1277,19 @@ export interface EngineNoteOpts {
   /** How this engine spells a vault tool, e.g. "vault__<tool>". */
   vaultToolSpelling: string;
   subagents: boolean;
+  /** "git": the shell tool runs git commands only. "none": this engine has no shell tool at all (Copilot). */
+  shell: "git" | "none";
 }
 
 export function engineNote(o: EngineNoteOpts): string {
+  const shell =
+    o.shell === "none"
+      ? 'There is no shell tool here ("Bash" doesn\'t exist), so you can\'t run git or any other command. When these instructions call for one, use a vault tool that does the job; if none does, give the user the exact command to run themselves.'
+      : '"Bash" is your shell tool, and only git commands are allowed.';
   return [
     `You are running on ${o.label} inside Skill Vault, not on Claude Code.`,
-    `- Tool names in these instructions are Claude Code's. \`mcp__vault__<tool>\` is the vault MCP server's <tool> (here: ${o.vaultToolSpelling}). "Bash" is your shell tool, and only git commands are allowed. "Read", "Edit", "Write", "Glob", "Grep", "WebSearch" and "WebFetch" are your equivalent tools.`,
+    `- Tool names in these instructions are Claude Code's. \`mcp__vault__<tool>\` is the vault MCP server's <tool> (here: ${o.vaultToolSpelling}). "Read", "Edit", "Write", "Glob", "Grep", "WebSearch" and "WebFetch" are your equivalent tools.`,
+    `- ${shell}`,
     o.subagents
       ? "- Subagents work as described."
       : "- Subagents (the Task/Agent tool) aren't available here. When these instructions say to delegate to a specialist, do that work yourself, following the specialist's skill.",
@@ -1309,7 +1390,7 @@ test("selectedEngine: missing or unknown → claude", () => {
   assert.equal(selectedEngine({}), "claude");
   assert.equal(selectedEngine({ engine: "codex" }), "codex");
   assert.equal(selectedEngine({ engine: "bard" as never }), "claude");
-  assert.ok(isEngineId("gemini") && !isEngineId("bard"));
+  assert.ok(isEngineId("grok") && !isEngineId("bard"));
 });
 
 test("engineAuth: Claude reads the top-level fields; others read engines.<id>, default login", () => {
@@ -1433,8 +1514,8 @@ runtime. The cast only widens the type.
 - [ ] **Step 4: Widen the appConfig types**
 
 In `appConfig.ts`, add `import type { AssistantBlock } from "./assistant/engines/config.ts";`. Change
-`readAssistantBlock(): ClaudeAuthConfig` to `readAssistantBlock(): AssistantBlock`, along with its two
-inner casts. Change `writeAssistantBlock(block: ClaudeAuthConfig)` to
+`readAssistantBlock(): ClaudeAuthConfig` to `readAssistantBlock(): AssistantBlock`, along with its inner
+`(block as ClaudeAuthConfig)` cast. Change `writeAssistantBlock(block: ClaudeAuthConfig)` to
 `writeAssistantBlock(block: AssistantBlock)`. Leave `writeSetupConfig` for Task 18.
 
 - [ ] **Step 5: Run the tests to verify they pass**
@@ -1465,9 +1546,11 @@ git commit -m "engines: assistant.engine and assistant.engines in the config blo
   - `app/server/services/assistant/engines/claude.test.ts`
 
 **Interfaces:**
-- Consumes: Tasks 2–6.
+- Consumes: Tasks 2–6; `resolveClaudeExe`, `resetResolvedExeCache`, `claudeAvailable`,
+  `claudeLoginStatus`, `resetClaudeAvailableCache` (`claude/cli.ts`, Task 3).
 - Produces:
-  - `createClaudeEngine(): AssistantEngine`
+  - `createClaudeEngine(): AssistantEngine` (`cliName: "claude"`; `target()` wraps `resolveClaudeExe()`,
+    per the Global Constraints, not `exe.ts`)
   - `interface EngineRegistry { get(id): AssistantEngine | undefined; list(): AssistantEngine[] }`
   - `createRegistry(engines)`, `defaultRegistry()`
   - `engineWorkDir(id, home?): string`
@@ -1648,19 +1731,27 @@ unchanged.
 /**
  * Claude Code as an engine: a thin wrapper over the code that already ran
  * every assistant turn (turn.ts buildTurnArgs, the stream-json parser, the
- * claude auth env). Nothing about Claude's turns changes.
+ * claude auth env). Nothing about Claude's turns changes. Claude keeps its
+ * own executable resolver (claude/cli.ts resolveClaudeExe); exe.ts serves
+ * the other engines.
  */
 import { buildTurnArgs } from "../turn.ts";
 import { parseStreamJsonLine } from "../streamEvents.ts";
 import { claudeChildEnv, withAuthHint } from "../../claude/auth.ts";
-import { claudeAvailable, claudeLoginStatus, resetClaudeAvailableCache, resetResolvedExeCache } from "../../claude/cli.ts";
-import { knownInstallDirs, resolveTarget } from "./exe.ts";
+import {
+  claudeAvailable,
+  claudeLoginStatus,
+  resetClaudeAvailableCache,
+  resetResolvedExeCache,
+  resolveClaudeExe,
+} from "../../claude/cli.ts";
 import type { AssistantEngine } from "./types.ts";
 
 export function createClaudeEngine(): AssistantEngine {
   return {
     id: "claude",
     label: "Claude Code",
+    cliName: "claude",
     verifiedVersion: "2.1.177",
     subagents: true,
     apiKeyEnv: ["ANTHROPIC_API_KEY"],
@@ -1668,7 +1759,10 @@ export function createClaudeEngine(): AssistantEngine {
     loginArgs: ["auth", "login"],
     loginHint: "Finish signing in in the browser window that opens.",
     loginEnv: () => ({}),
-    target: () => resolveTarget("claude", "claude CLI", { knownDirs: knownInstallDirs() }),
+    target: () => {
+      const exe = resolveClaudeExe();
+      return exe ? { command: exe, prefixArgs: [], label: "claude CLI" } : null;
+    },
     async detect(opts) {
       if (opts?.refresh) {
         resetClaudeAvailableCache();
@@ -1729,7 +1823,7 @@ export function defaultRegistry(): EngineRegistry {
   return shared;
 }
 
-/** ~/.skill-vault/engines/<id>/ — settings, policy and prompt files an engine writes per turn. */
+/** ~/.skill-vault/engines/<id>/ — the prompt files an engine writes per turn. */
 export function engineWorkDir(id: EngineId, home: string = os.homedir()): string {
   return path.join(home, ".skill-vault", "engines", id);
 }
@@ -1796,7 +1890,7 @@ export function engineWorkDir(id: EngineId, home: string = os.homedir()): string
       });
       endTurn(session, { user: message, events: result.events, costUsd: result.costUsd, engineSessionId: result.engineSessionId });
     } catch (err) {
-      // buildTurn refusals (not installed, unsafe here) land here too.
+      // buildTurn refusals (not installed) land here too.
       endTurn(session, {
         user: message,
         events: [{ type: "error", message: (err as Error).message }],
@@ -1833,13 +1927,19 @@ git commit -m "assistant: turns run through an engine; chats remember theirs (Cl
 - Consumes: Tasks 4, 6, 7.
 - Produces:
   - `interface EngineView { id; label; selected; installed; version: string | null; verified_version; reason: string | null; subagents; auth: { mode; signed_in: boolean | null; account: string | null; has_saved_key; env_key_present }; install: { label; display; source }[]; login_hint }`
-  - `interface EngineStates { view(id, opts?): Promise<EngineView | null>; views(opts?): Promise<EngineView[]>; invalidate(id?): void; ready(id): Promise<{ ok: true } | { ok: false; reason: string }> }`
+  - `interface ViewOpts { refresh?: boolean; mode?: "login" | "api_key" }` — `mode` reports sign-in for
+    that mode instead of the saved one (the setup guide signs in before Finish saves the mode)
+  - `interface EngineStates { view(id, opts?: ViewOpts): Promise<EngineView | null>; views(opts?: { refresh? }): Promise<EngineView[]>; invalidate(id?): void; ready(id): Promise<{ ok: true } | { ok: false; reason: string }> }`
   - `createEngineStates(deps: { registry; readBlock; env?; now? }): EngineStates`
+  - `testFakes.ts`: `fakeEngine(over?)` (id `"codex"`, label `"Fake Codex"`, `cliName` `"codex"`,
+    `loginArgs ["login"]`, `loginHint "Do the thing."`, npm step "Install Fake") and `FORBIDDEN_FLAGS`
+    (the Global Constraints' list; Tasks 9–11 import it)
   - Routes:
     - `GET /engines` → `{ engines: EngineView[] }` (`?refresh=1`)
-    - `GET /engines/:id` → `EngineView` (`?refresh=1`)
+    - `GET /engines/:id` → `EngineView` (`?refresh=1`, `?mode=login|api_key`)
     - `PUT /engine` `{ engine }` → `{ engine }`
-    - `PUT /engines/:id/auth` `{ auth?, api_key?, workspace_id? }` → `EngineView`
+    - `PUT /engines/:id/auth` `{ auth?, api_key?, workspace_id? }` → `EngineView`. For `claude` it runs the
+      same code as `PUT /auth` (one `parseAuthPatch`, one `saveClaudeAuth`), so `""` clears a field.
     - `GET /status` → `{ available, engine, label, version, reason }`
     - `/stream` → 409 JSON when not ready
   - `AssistantRouterOpts.states?: EngineStates`.
@@ -1852,13 +1952,26 @@ it.
 
 ```ts
 // app/server/services/assistant/engines/testFakes.ts
-/** Test-only: a configurable engine that never spawns anything. */
+/** Test-only: a configurable engine that never spawns anything, and the flags no turn may carry. */
 import type { AssistantEngine } from "./types.ts";
+
+/** The Global Constraints' list. Matched with `includes`, so `--flag=value` forms are caught too. */
+export const FORBIDDEN_FLAGS = [
+  "--yolo",
+  "--allow-all",
+  "--allow-all-tools",
+  "--allow-all-paths",
+  "--allow-all-urls",
+  "bypassPermissions",
+  "--dangerously-skip-permissions",
+  "--dangerously-bypass-approvals-and-sandbox",
+];
 
 export function fakeEngine(over: Partial<AssistantEngine> = {}): AssistantEngine {
   return {
     id: "codex",
     label: "Fake Codex",
+    cliName: "codex",
     verifiedVersion: "1.0.0",
     subagents: false,
     apiKeyEnv: ["FAKE_KEY"],
@@ -1923,6 +2036,24 @@ test("view is cached for 30 s unless refreshed; invalidate drops it", async () =
   assert.equal(calls, 4);
 });
 
+test("view with a mode reports sign-in for that mode, not the saved one", async () => {
+  const asked: Array<string | undefined> = [];
+  const states = createEngineStates({
+    registry: createRegistry([
+      fakeEngine({
+        authStatus: async (cfg) => (asked.push(cfg.auth), { signed_in: cfg.auth === "login", method: cfg.auth === "api_key" ? "api_key" : "login" }),
+      }),
+    ]),
+    readBlock: () => ({ engines: { codex: { auth: "api_key", api_key: "k" } } }),
+    env: {},
+  });
+  assert.equal((await states.view("codex"))?.auth.mode, "api_key");
+  const asLogin = await states.view("codex", { mode: "login" });
+  assert.equal(asLogin?.auth.mode, "login");
+  assert.equal(asLogin?.auth.signed_in, true);
+  assert.deepEqual(asked, ["api_key", "login"]);
+});
+
 test("ready: not installed / signed out / no key / unknown signed-in state", async () => {
   const make = (over: Partial<AssistantEngine>, block = {}) =>
     createEngineStates({ registry: createRegistry([fakeEngine(over)]), readBlock: () => block, env: {} });
@@ -1930,7 +2061,8 @@ test("ready: not installed / signed out / no key / unknown signed-in state", asy
   assert.match(((await make({ authStatus: async () => ({ signed_in: false, method: "login" }) }).ready("codex")) as { reason: string }).reason, /isn't signed in/);
   assert.match(((await make({}, { engines: { codex: { auth: "api_key" } } }).ready("codex")) as { reason: string }).reason, /no API key/);
   assert.deepEqual(await make({ authStatus: async () => ({ signed_in: null, method: "login" }) }).ready("codex"), { ok: true });
-  assert.match(((await make({}).ready("gemini")) as { reason: string }).reason, /isn't available/);
+  // "grok" is a real EngineId, but this registry doesn't hold it.
+  assert.match(((await make({}).ready("grok")) as { reason: string }).reason, /isn't available/);
 });
 ```
 
@@ -1981,6 +2113,7 @@ async function serve(router: Router): Promise<string> {
 }
 
 const send = (method: string, body: unknown) => ({ method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+const savedAssistant = () => JSON.parse(fs.readFileSync(path.join(fakeHome, ".skill-vault", "config.json"), "utf-8")).assistant;
 
 test("engines: list, select, save a key that is never echoed", async () => {
   const base = await serve(mod.assistantRouter({ mode: "development", appRoot: APP_ROOT, registry: reg.createRegistry([fakes.fakeEngine()]) }));
@@ -1994,6 +2127,20 @@ test("engines: list, select, save a key that is never echoed", async () => {
   const cfg = JSON.parse(fs.readFileSync(path.join(fakeHome, ".skill-vault", "config.json"), "utf-8"));
   assert.equal(cfg.assistant.engines.codex.api_key, "sk-secret");
   assert.equal(cfg.vault_path, path.join(fakeHome, "vault"));
+});
+
+test("engines/claude/auth takes PUT /auth's path: an empty string clears the saved key", async () => {
+  const claude = fakes.fakeEngine({ id: "claude", label: "Fake Claude" });
+  const base = await serve(mod.assistantRouter({ mode: "development", appRoot: APP_ROOT, registry: reg.createRegistry([claude]) }));
+  await fetch(`${base}/engines/claude/auth`, send("PUT", { auth: "api_key", api_key: "sk-ant-x", workspace_id: "wrk" }));
+  assert.equal(savedAssistant().api_key, "sk-ant-x");
+  const res = await fetch(`${base}/engines/claude/auth`, send("PUT", { api_key: "" }));
+  assert.equal(res.status, 200);
+  assert.equal(savedAssistant().api_key, undefined, '"" clears the key');
+  assert.equal(savedAssistant().workspace_id, "wrk", "omitted fields are kept");
+  assert.equal(savedAssistant().auth, "api_key");
+  assert.equal((await fetch(`${base}/engines/claude/auth`, send("PUT", { api_key: 5 }))).status, 400);
+  assert.equal((await fetch(`${base}/auth`, send("PUT", { auth: "token" }))).status, 400);
 });
 
 test("stream: an engine that isn't ready gets a 409 JSON error before any NDJSON", async () => {
@@ -2029,7 +2176,14 @@ Expected: FAIL — `./state.ts` not found; the routes 404.
  */
 import { engineAuth, selectedEngine, type AssistantBlock } from "./config.ts";
 import type { EngineRegistry } from "./registry.ts";
-import { installDisplay, type AssistantEngine, type EngineAuthStatus, type EngineDetect, type EngineId } from "./types.ts";
+import {
+  installDisplay,
+  type AssistantEngine,
+  type EngineAuthConfig,
+  type EngineAuthStatus,
+  type EngineDetect,
+  type EngineId,
+} from "./types.ts";
 
 export interface EngineView {
   id: EngineId;
@@ -2051,8 +2205,17 @@ export interface EngineView {
   login_hint: string;
 }
 
+export interface ViewOpts {
+  refresh?: boolean;
+  /**
+   * Report sign-in for this mode instead of the saved one. The setup guide's
+   * sign-in runs before Finish saves the mode, so it asks for "login".
+   */
+  mode?: "login" | "api_key";
+}
+
 export interface EngineStates {
-  view(id: EngineId, opts?: { refresh?: boolean }): Promise<EngineView | null>;
+  view(id: EngineId, opts?: ViewOpts): Promise<EngineView | null>;
   views(opts?: { refresh?: boolean }): Promise<EngineView[]>;
   invalidate(id?: EngineId): void;
   ready(id: EngineId): Promise<{ ok: true } | { ok: false; reason: string }>;
@@ -2070,25 +2233,26 @@ export function createEngineStates(deps: {
   const env = deps.env ?? process.env;
   const cache = new Map<EngineId, { at: number; key: string; detect: EngineDetect; auth: EngineAuthStatus }>();
 
-  async function probe(engine: AssistantEngine, refresh: boolean, block: AssistantBlock) {
-    const cfg = engineAuth(block, engine.id);
+  async function probe(engine: AssistantEngine, refresh: boolean, cfg: EngineAuthConfig) {
     const key = `${cfg.auth ?? "login"}|${cfg.api_key ? "key" : ""}`;
     const hit = cache.get(engine.id);
-    if (!refresh && hit && hit.key === key && now() - hit.at < TTL_MS) return { ...hit, cfg };
+    if (!refresh && hit && hit.key === key && now() - hit.at < TTL_MS) return hit;
     const detect = await engine.detect({ refresh });
     const auth: EngineAuthStatus = detect.installed
       ? await engine.authStatus(cfg)
       : { signed_in: false, method: cfg.auth === "api_key" ? "api_key" : "login" };
     const entry = { at: now(), key, detect, auth };
     cache.set(engine.id, entry);
-    return { ...entry, cfg };
+    return entry;
   }
 
-  async function view(id: EngineId, opts: { refresh?: boolean } = {}): Promise<EngineView | null> {
+  async function view(id: EngineId, opts: ViewOpts = {}): Promise<EngineView | null> {
     const engine = deps.registry.get(id);
     if (!engine) return null;
     const block = deps.readBlock();
-    const { detect, auth, cfg } = await probe(engine, opts.refresh === true, block);
+    const saved = engineAuth(block, id);
+    const cfg: EngineAuthConfig = opts.mode ? { ...saved, auth: opts.mode } : saved;
+    const { detect, auth } = await probe(engine, opts.refresh === true, cfg);
     return {
       id,
       label: engine.label,
@@ -2142,11 +2306,68 @@ export function createEngineStates(deps: {
   - `import { refuseCrossSiteWrites } from "./sameOrigin.ts";`
   - `import { createEngineStates, type EngineStates } from "../services/assistant/engines/state.ts";`
   - extend the config import to
-    `import { applyEngineAuthPatch, engineAuth, isEngineId, selectedEngine, withSelectedEngine, type OtherEngineId } from "../services/assistant/engines/config.ts";`
+    `import { applyEngineAuthPatch, engineAuth, isEngineId, selectedEngine, withSelectedEngine } from "../services/assistant/engines/config.ts";`
+  - extend the `claude/auth.ts` import with `type ClaudeAuthConfig` (it already has
+    `applyClaudeAuthPatch`, `claudeAuthStatus`, `type ClaudeAuthPatch`).
+- Above `export function assistantRouter`, add the one body check both auth routes share:
+
+```ts
+/**
+ * The body of PUT /auth and PUT /engines/:id/auth: every field that's present must be a string
+ * (an omitted field is kept, "" clears it). Returns the patch, or the error to answer 400 with.
+ */
+function parseAuthPatch(body: unknown): ClaudeAuthPatch | string {
+  const b = (body ?? {}) as Record<string, unknown>;
+  const patch: ClaudeAuthPatch = {};
+  for (const k of ["auth", "api_key", "workspace_id"] as const) {
+    if (b[k] === undefined) continue;
+    if (typeof b[k] !== "string") return `${k} must be a string`;
+    (patch as Record<string, string>)[k] = b[k] as string;
+  }
+  return patch;
+}
+```
+
 - `AssistantRouterOpts` gains `states?: EngineStates;`. In the factory, after `registry`:
-  `const states = opts.states ?? createEngineStates({ registry, readBlock: readAssistantBlock });`.
+
+```ts
+  const states = opts.states ?? createEngineStates({ registry, readBlock: readAssistantBlock });
+
+  /** Claude's fields, for PUT /auth and PUT /engines/claude/auth alike. Throws on a bad auth value. */
+  const saveClaudeAuth = (patch: ClaudeAuthPatch): ClaudeAuthConfig => {
+    const next = applyClaudeAuthPatch(readAssistantBlock(), patch);
+    writeAssistantBlock(next);
+    states.invalidate("claude");
+    return next;
+  };
+```
+
+  `applyClaudeAuthPatch` copies the whole block (`{ ...cfg }`), so `engine` / `engines` survive, and it
+  deletes a field patched with `""`. Never spread the old block over its result: that would put a
+  cleared key back.
 - Put `router.use(refuseCrossSiteWrites);` as the first line after `const router = Router();`. Every
   write in this router is now same-site only, which the app client always is.
+- Replace the whole existing `router.put("/auth", …)` handler (its validation loop moves into
+  `parseAuthPatch`) with:
+
+```ts
+  router.put("/auth", (req, res) => {
+    const patch = parseAuthPatch(req.body);
+    if (typeof patch === "string") {
+      res.status(400).json({ error: patch });
+      return;
+    }
+    let next: ClaudeAuthConfig;
+    try {
+      next = saveClaudeAuth(patch);
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+      return;
+    }
+    res.json(claudeAuthStatus(next));
+  });
+```
+
 - Replace the whole `router.get("/status", …)` handler with:
 
 ```ts
@@ -2176,7 +2397,8 @@ export function createEngineStates(deps: {
 
   router.get("/engines/:id", async (req, res) => {
     const id = req.params.id;
-    const view = isEngineId(id) ? await states.view(id, { refresh: req.query.refresh === "1" }) : null;
+    const mode = req.query.mode === "login" || req.query.mode === "api_key" ? req.query.mode : undefined;
+    const view = isEngineId(id) ? await states.view(id, { refresh: req.query.refresh === "1", mode }) : null;
     if (!view) {
       res.status(404).json({ error: "unknown provider" });
       return;
@@ -2200,34 +2422,28 @@ export function createEngineStates(deps: {
       res.status(404).json({ error: "unknown provider" });
       return;
     }
-    const body = (req.body ?? {}) as Record<string, unknown>;
-    const patch: Record<string, string> = {};
-    for (const k of ["auth", "api_key", "workspace_id"] as const) {
-      if (body[k] === undefined) continue;
-      if (typeof body[k] !== "string") {
-        res.status(400).json({ error: `${k} must be a string` });
-        return;
-      }
-      patch[k] = body[k] as string;
+    const patch = parseAuthPatch(req.body);
+    if (typeof patch === "string") {
+      res.status(400).json({ error: patch });
+      return;
     }
     try {
-      const block = readAssistantBlock();
-      writeAssistantBlock(
-        id === "claude"
-          ? { ...block, ...applyClaudeAuthPatch(block, patch as ClaudeAuthPatch) }
-          : applyEngineAuthPatch(block, id as OtherEngineId, { auth: patch.auth as "login" | "api_key" | undefined, api_key: patch.api_key }),
-      );
+      if (id === "claude") {
+        saveClaudeAuth(patch); // the same path as PUT /auth
+      } else {
+        writeAssistantBlock(applyEngineAuthPatch(readAssistantBlock(), id, { auth: patch.auth, api_key: patch.api_key }));
+        states.invalidate(id);
+      }
     } catch (err) {
       res.status(400).json({ error: (err as Error).message });
       return;
     }
-    states.invalidate(id);
     res.json(await states.view(id));
   });
 ```
 
-- In the existing `PUT /auth` (Claude) handler, add `states.invalidate("claude");` after
-  `writeAssistantBlock(next);`.
+  In the `else` branch TypeScript has narrowed `id` to the non-Claude ids, so no cast is needed. A
+  `workspace_id` sent for a non-Claude engine is ignored.
 - In `POST /stream`, right after the `if (!engine) { … }` block from Task 7, add:
 
 ```ts
@@ -2246,7 +2462,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add server/services/assistant/engines/state.ts server/services/assistant/engines/state.test.ts server/routes/assistant.ts server/routes/assistant.test.ts
+git add server/services/assistant/engines/state.ts server/services/assistant/engines/state.test.ts server/services/assistant/engines/testFakes.ts server/routes/assistant.ts server/routes/assistant.test.ts
 git commit -m "assistant: engine list, selection, per-engine sign-in mode, readiness before a turn" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
@@ -2260,16 +2476,20 @@ git commit -m "assistant: engine list, selection, per-engine sign-in mode, readi
 - Test: `app/server/services/assistant/engines/codex.test.ts`
 
 **Interfaces:**
-- Consumes: Tasks 2, 4, 5, 7; fixture `fixtures/codex-turn.jsonl` and findings S5–S7 (Task 1).
+- Consumes: Tasks 2, 4, 5, 7; `FORBIDDEN_FLAGS` (`testFakes.ts`, Task 8); the recorded fixture
+  `fixtures/codex-turn.jsonl` (9 lines, codex-cli 0.144.4) and findings S5–S7 (Task 1, in the spec).
 - Produces (`common.ts`):
-  - `interface EngineDeps { resolve(name, label): SpawnTarget | null; run: CommandRunner; home: string; env: NodeJS.ProcessEnv; exists(p): boolean; readFile(p): string; writeFile(p, text): void }`
-  - `defaultEngineDeps(): EngineDeps`
+  - `interface EngineDeps { resolve(name, label): SpawnTarget | null; forget(name): void; run: CommandRunner; home: string; env: NodeJS.ProcessEnv; exists(p): boolean; readFile(p): string; writeFile(p, text): void }`
+  - `defaultEngineDeps(find?: (name, label) => SpawnTarget | null): EngineDeps` — `resolve` remembers
+    `find`'s result per name (a miss too); `forget(name)` drops it. `find` defaults to
+    `resolveTarget(name, label, { knownDirs: knownInstallDirs() })`.
   - `detectWithVersion(deps, target, env): Promise<EngineDetect>`
   - `keyEnv(cfg, base, keys, extra?): NodeJS.ProcessEnv`
   - `makeAuthHint(label, pattern): (m: string) => string`
   - `apiKeyPresent(cfg, env, keys): boolean`
-- Produces (`codex.ts`): `createCodexEngine(deps?: EngineDeps): AssistantEngine`,
-  `createCodexParser(authHint): TurnParser`, `CODEX_SAFETY_FLAGS`.
+- Produces (`codex.ts`): `createCodexEngine(deps?: EngineDeps): AssistantEngine` (its
+  `detect({ refresh: true })` calls `deps.forget("codex")` first), `createCodexParser(authHint): TurnParser`.
+- Every engine test's fake `EngineDeps` needs `forget: () => {}` (Tasks 10 and 11 follow the same shape).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2280,16 +2500,19 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { createCodexEngine, createCodexParser } from "./codex.ts";
-import type { EngineDeps } from "./common.ts";
+import { defaultEngineDeps, type EngineDeps } from "./common.ts";
+import { FORBIDDEN_FLAGS } from "./testFakes.ts";
 import type { TurnInput } from "./types.ts";
 
 const PLUGIN = path.resolve(import.meta.dirname, "..", "..", "..", "..", "assistant-plugin");
 const FIXTURE = path.join(import.meta.dirname, "fixtures", "codex-turn.jsonl");
-const FORBIDDEN = ["--yolo", "--dangerously-bypass-approvals-and-sandbox", "danger-full-access", "--full-auto"];
+/** Codex's own ways out of the sandbox, on top of the shared list. */
+const CODEX_FORBIDDEN = ["danger-full-access", "--full-auto"];
 
 function deps(over: Partial<EngineDeps> = {}): EngineDeps {
   return {
     resolve: () => ({ command: "C:\\node\\node.exe", prefixArgs: ["C:\\npm\\codex.js"], label: "codex CLI" }),
+    forget: () => {},
     run: async () => ({ code: 0, stdout: "Logged in using ChatGPT\n", stderr: "" }),
     home: "C:\\Users\\me",
     env: {},
@@ -2320,21 +2543,22 @@ test("first turn: exec --json with the sandbox, the vault server, prompt on stdi
   assert.deepEqual(spec.target, { command: "C:\\node\\node.exe", prefixArgs: ["C:\\npm\\codex.js"], label: "codex CLI" });
   assert.equal(spec.args[0], "exec");
   assert.equal(spec.args.at(-1), "-");
-  for (const flag of [
-    "--json",
-    "--ignore-user-config",
-    "--skip-git-repo-check",
+  for (const flag of ["--json", "--ignore-user-config", "--skip-git-repo-check"]) assert.ok(spec.args.includes(flag), `missing ${flag}`);
+  for (const setting of [
     'sandbox_mode="workspace-write"',
+    'windows.sandbox="unelevated"',
     'sandbox_workspace_write.writable_roots=["C:\\\\vault","C:\\\\repos"]',
     "sandbox_workspace_write.network_access=true",
     'approval_policy="never"',
     'mcp_servers.vault.command="C:\\\\node.exe"',
     'mcp_servers.vault.args=["C:\\\\app\\\\dist\\\\assistant-mcp.js"]',
     'mcp_servers.vault.env={ SKILL_VAULT_URL = "http://127.0.0.1:9994" }',
+    'mcp_servers.vault.default_tools_approval_mode="approve"',
   ]) {
-    assert.ok(spec.args.includes(flag), `missing ${flag}`);
+    const i = spec.args.indexOf(setting);
+    assert.ok(i > 0 && spec.args[i - 1] === "-c", `missing -c ${setting}`);
   }
-  for (const bad of FORBIDDEN) assert.ok(!spec.args.some((a) => a.includes(bad)), `must not pass ${bad}`);
+  for (const bad of [...FORBIDDEN_FLAGS, ...CODEX_FORBIDDEN]) assert.ok(!spec.args.some((a) => a.includes(bad)), `must not pass ${bad}`);
   assert.equal(spec.cwd, "C:\\vault");
   assert.match(spec.stdin, /^<skill-vault-instructions>/);
   assert.match(spec.stdin, /running on OpenAI Codex/);
@@ -2347,6 +2571,7 @@ test("later turns resume the thread and skip the instructions", () => {
   const spec = createCodexEngine(deps()).buildTurn({ ...INPUT, isFirstTurn: false, engineSessionId: "thread-1" });
   assert.deepEqual(spec.args.slice(0, 2), ["exec", "resume"]);
   assert.deepEqual(spec.args.slice(-2), ["thread-1", "-"]);
+  assert.ok(spec.args.includes('windows.sandbox="unelevated"'));
   assert.ok(!spec.stdin.includes("<skill-vault-instructions>"));
   // A failed first turn left no thread id: start a fresh thread with instructions.
   const fresh = createCodexEngine(deps()).buildTurn({ ...INPUT, isFirstTurn: false });
@@ -2367,34 +2592,65 @@ test("authStatus: login status exit code decides; api key mode needs a key", asy
   assert.equal((await out.authStatus({ auth: "api_key", api_key: "k" })).signed_in, true);
 });
 
-test("parser: thread id, whole messages, tool calls with results, end of turn", () => {
+test("the executable is looked up once per name; detect({ refresh: true }) forgets it first", async () => {
+  const looked: string[] = [];
+  const d = defaultEngineDeps((name, label) => (looked.push(name), { command: `C:\\${name}.exe`, prefixArgs: [], label }));
+  d.resolve("codex", "codex CLI");
+  d.resolve("codex", "codex CLI");
+  d.resolve("grok", "grok CLI");
+  d.forget("codex");
+  d.resolve("codex", "codex CLI");
+  d.resolve("grok", "grok CLI");
+  assert.deepEqual(looked, ["codex", "grok", "codex"]);
+
+  const forgot: string[] = [];
+  const engine = createCodexEngine(deps({ forget: (n) => forgot.push(n) }));
+  await engine.detect();
+  assert.deepEqual(forgot, []);
+  await engine.detect({ refresh: true });
+  assert.deepEqual(forgot, ["codex"]);
+});
+
+test("parser: thread id, whole messages, tool calls with results, refusals, end of turn", () => {
   const p = createCodexParser((m) => m);
   const lines = [
     { type: "thread.started", thread_id: "thread-7" },
     { type: "turn.started" },
-    { type: "item.started", item: { id: "i1", type: "mcp_tool_call", server: "vault", tool: "list_skills", arguments: {}, status: "in_progress" } },
-    { type: "item.completed", item: { id: "i1", type: "mcp_tool_call", server: "vault", tool: "list_skills", status: "completed", result: { content: [{ type: "text", text: "12 skills" }] } } },
+    { type: "item.started", item: { id: "i1", type: "mcp_tool_call", server: "vault", tool: "list_skills", arguments: {}, result: null, error: null, status: "in_progress" } },
+    { type: "item.completed", item: { id: "i1", type: "mcp_tool_call", server: "vault", tool: "list_skills", arguments: {}, result: { content: [{ type: "text", text: "12 skills" }] }, error: null, status: "completed" } },
     { type: "item.completed", item: { id: "i2", type: "command_execution", command: "hostname", aggregated_output: "PC1", exit_code: 0, status: "completed" } },
-    { type: "item.completed", item: { id: "i3", type: "agent_message", text: "You have 12 skills." } },
+    { type: "item.completed", item: { id: "i3", type: "command_execution", command: "del x", aggregated_output: "", exit_code: null, status: "declined" } },
+    { type: "item.completed", item: { id: "i4", type: "mcp_tool_call", server: "vault", tool: "push_skill", arguments: {}, result: null, error: { message: "user cancelled MCP tool call" }, status: "failed" } },
+    { type: "item.completed", item: { id: "i5", type: "agent_message", text: "You have 12 skills." } },
     { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 2 } },
   ];
   const events = lines.flatMap((l) => p.parse(JSON.stringify(l)));
   assert.equal(p.engineSessionId?.(), "thread-7");
-  assert.deepEqual(events.map((e) => e.type), ["tool_start", "tool_result", "tool_start", "tool_result", "text_delta", "turn_end"]);
+  assert.deepEqual(events.map((e) => e.type), [
+    "tool_start", "tool_result", "tool_start", "tool_result", "tool_start", "tool_result", "tool_start", "tool_result", "text_delta", "turn_end",
+  ]);
   assert.equal(events[0].type === "tool_start" && events[0].label, "vault: list_skills");
   assert.equal(events[2].type === "tool_start" && events[2].label, "Running: hostname");
   assert.equal(events[1].type === "tool_result" && events[1].output_preview, "12 skills");
+  assert.equal(events[3].type === "tool_result" && events[3].ok, true);
+  assert.equal(events[5].type === "tool_result" && events[5].ok, false, "a declined command is a refusal");
+  assert.equal(events[7].type === "tool_result" && events[7].ok, false, "a failed MCP call is a refusal");
+  assert.equal(events[7].type === "tool_result" && events[7].output_preview, "user cancelled MCP tool call");
   assert.deepEqual(p.parse("not json"), []);
   assert.deepEqual(p.parse(JSON.stringify({ type: "turn.failed", error: { message: "boom" } })), [{ type: "error", message: "boom" }]);
 });
 
-test("parser: the real Codex fixture yields a thread id, the vault call and an end of turn", () => {
+test("parser: the recorded Codex turn (S7) — thread id, the vault call, a shell call, text, end of turn", () => {
   const p = createCodexParser((m) => m);
   const events = fs.readFileSync(FIXTURE, "utf-8").split(/\r?\n/).filter(Boolean).flatMap((l) => p.parse(l));
-  assert.ok(p.engineSessionId?.());
-  assert.ok(events.some((e) => e.type === "tool_start" && e.name === "mcp__vault__list_skills"));
-  assert.ok(events.some((e) => e.type === "text_delta"));
-  assert.equal(events.at(-1)?.type, "turn_end");
+  assert.equal(p.engineSessionId?.(), "01a189ea-394d-7400-b24a-ed9345e12f08");
+  assert.deepEqual(events.map((e) => e.type), ["text_delta", "tool_start", "tool_result", "tool_start", "tool_result", "text_delta", "turn_end"]);
+  const vault = events[1];
+  assert.ok(vault.type === "tool_start" && vault.name === "mcp__vault__list_skills");
+  assert.ok(events[2].type === "tool_result" && events[2].ok && events[2].output_preview?.includes('"total":3'));
+  // The sandbox allows commands by design (hostname ran); the outside write left no item at all.
+  assert.ok(events[3].type === "tool_start" && events[3].name === "Bash");
+  assert.ok(events[4].type === "tool_result" && events[4].ok);
 });
 ```
 
@@ -2415,7 +2671,10 @@ import { knownInstallDirs, resolveTarget, runCommand, type CommandRunner, type S
 import type { EngineAuthConfig, EngineDetect } from "./types.ts";
 
 export interface EngineDeps {
+  /** The CLI, found without a shell. Remembered per name (a miss too) until forget(name). */
   resolve(name: string, label: string): SpawnTarget | null;
+  /** Drop the remembered result for `name`: detect({ refresh: true }) calls it. */
+  forget(name: string): void;
   run: CommandRunner;
   home: string;
   env: NodeJS.ProcessEnv;
@@ -2424,9 +2683,21 @@ export interface EngineDeps {
   writeFile(p: string, text: string): void;
 }
 
-export function defaultEngineDeps(): EngineDeps {
+const findOnThisPc = (name: string, label: string): SpawnTarget | null =>
+  resolveTarget(name, label, { knownDirs: knownInstallDirs() });
+
+/** `find` is the uncached search; tests pass a fake. */
+export function defaultEngineDeps(find: (name: string, label: string) => SpawnTarget | null = findOnThisPc): EngineDeps {
+  // resolveTarget can spawn `reg query` twice, and target() runs on every view and turn.
+  const found = new Map<string, SpawnTarget | null>();
   return {
-    resolve: (name, label) => resolveTarget(name, label, { knownDirs: knownInstallDirs() }),
+    resolve: (name, label) => {
+      if (!found.has(name)) found.set(name, find(name, label));
+      return found.get(name) ?? null;
+    },
+    forget: (name) => {
+      found.delete(name);
+    },
     run: runCommand,
     home: os.homedir(),
     env: process.env,
@@ -2485,15 +2756,19 @@ export function makeAuthHint(label: string, pattern: RegExp): (message: string) 
 ```ts
 // app/server/services/assistant/engines/codex.ts
 /**
- * OpenAI Codex (`codex exec --json`). Checked against codex-cli 0.144.4.
+ * OpenAI Codex (`codex exec --json`). Checked against codex-cli 0.144.4 (spike S5–S7).
  *
  * Codex has no per-tool allowlist, so the shell can't be limited to git the
- * way the other engines are. Instead every turn runs in the workspace-write
+ * way Claude's and Grok's are. Instead every turn runs in the workspace-write
  * sandbox: commands can run, but writes land only in the vault and repos
  * folders (network on so `git clone` works). --ignore-user-config keeps the
  * user's own Codex MCP servers and settings out; auth still comes from
- * CODEX_HOME. Codex assigns its own thread id (thread.started), saved as the
- * chat's engine_session_id and resumed with `codex exec resume <id>`.
+ * CODEX_HOME. Without the user's config Codex has no Windows sandbox and
+ * falls back to read-only (every command "blocked by policy", MCP calls
+ * "user cancelled"), so two settings put it back: windows.sandbox =
+ * "unelevated" and auto-approval for the vault server's tools. Codex assigns
+ * its own thread id (thread.started), saved as the chat's engine_session_id
+ * and resumed with `codex exec resume <id>`.
  */
 import { canonicalTool, toolResultEvent, toolStartEvent, type AssistantStreamEvent } from "../streamEvents.ts";
 import { apiKeyPresent, defaultEngineDeps, detectWithVersion, keyEnv, makeAuthHint, type EngineDeps } from "./common.ts";
@@ -2501,7 +2776,8 @@ import { composeInstructions, composePrompt } from "./instructions.ts";
 import type { AssistantEngine, TurnParser } from "./types.ts";
 
 const LABEL = "OpenAI Codex";
-const KEYS = ["CODEX_API_KEY", "OPENAI_API_KEY"]; // spike S6
+/** S6 unverified (no key was offered in the spike): CODEX_API_KEY is the documented variable. */
+const KEYS = ["CODEX_API_KEY", "OPENAI_API_KEY"];
 const authHint = makeAuthHint(LABEL, /not logged in|unauthori[sz]ed|\b401\b|log ?in required|sign in|expired|invalid api key/i);
 
 /** TOML basic string: JSON's escaping of \ and " is valid TOML. */
@@ -2512,6 +2788,7 @@ export function createCodexEngine(deps: EngineDeps = defaultEngineDeps()): Assis
   const engine: AssistantEngine = {
     id: "codex",
     label: LABEL,
+    cliName: "codex",
     verifiedVersion: "codex-cli 0.144.4",
     subagents: false,
     apiKeyEnv: KEYS,
@@ -2520,12 +2797,15 @@ export function createCodexEngine(deps: EngineDeps = defaultEngineDeps()): Assis
     loginHint: "A browser window opens — sign in with your ChatGPT account.",
     loginEnv: () => ({}),
     target,
-    detect: () => detectWithVersion(deps, target(), engine.childEnv({ auth: "login" }, deps.env)),
+    detect: (opts) => {
+      if (opts?.refresh) deps.forget("codex");
+      return detectWithVersion(deps, target(), engine.childEnv({ auth: "login" }, deps.env));
+    },
     async authStatus(cfg) {
       if (cfg.auth === "api_key") return { signed_in: apiKeyPresent(cfg, deps.env, KEYS), method: "api_key" };
       const t = target();
       if (!t) return { signed_in: false, method: "login" };
-      // spike S5: exit 0 + a "Logged in using …" line when signed in.
+      // S5: exit 0 and "Logged in using ChatGPT" on stdout when signed in.
       const r = await deps.run(t, ["login", "status"], { env: engine.childEnv({ auth: "login" }, deps.env), timeoutMs: 20_000 });
       if (r.code === null) return { signed_in: null, method: "login" };
       const line = `${r.stdout}\n${r.stderr}`.trim().split(/\r?\n/)[0]?.trim();
@@ -2541,18 +2821,20 @@ export function createCodexEngine(deps: EngineDeps = defaultEngineDeps()): Assis
         "--ignore-user-config",
         "--skip-git-repo-check",
         "-c", 'sandbox_mode="workspace-write"',
+        "-c", 'windows.sandbox="unelevated"', // S7: without it Codex falls back to read-only
         "-c", `sandbox_workspace_write.writable_roots=[${[input.vaultPath, input.reposDir].map(toml).join(",")}]`,
         "-c", "sandbox_workspace_write.network_access=true",
         "-c", 'approval_policy="never"',
         "-c", `mcp_servers.vault.command=${toml(input.mcp.command)}`,
         "-c", `mcp_servers.vault.args=[${input.mcp.args.map(toml).join(",")}]`,
         "-c", `mcp_servers.vault.env={ SKILL_VAULT_URL = ${toml(input.mcp.env.SKILL_VAULT_URL)} }`,
+        "-c", 'mcp_servers.vault.default_tools_approval_mode="approve"', // S7: else every vault call is "user cancelled"
       ];
       const instructions = fresh
         ? composeInstructions({
             pluginDir: input.pluginDir,
             lead: input.leadAgent,
-            note: { label: LABEL, vaultToolSpelling: "the `vault` MCP server's tools", subagents: false },
+            note: { label: LABEL, vaultToolSpelling: "the `vault` MCP server's tools", subagents: false, shell: "git" },
             includeLead: true,
           })
         : undefined;
@@ -2571,6 +2853,7 @@ export function createCodexEngine(deps: EngineDeps = defaultEngineDeps()): Assis
   return engine;
 }
 
+/** The item fields the parser reads (S7; fixtures/codex-turn.jsonl). */
 interface CodexItem {
   id?: string;
   type?: string;
@@ -2578,6 +2861,7 @@ interface CodexItem {
   command?: string;
   aggregated_output?: string;
   exit_code?: number | null;
+  /** in_progress | completed | failed (mcp_tool_call) | declined (command_execution) */
   status?: string;
   server?: string;
   tool?: string;
@@ -2603,7 +2887,7 @@ function toolOf(item: CodexItem): { name: string; input: Record<string, unknown>
   }
 }
 
-/** Codex JSONL → wire events. Item shapes from spike S7 (fixtures/codex-turn.jsonl). */
+/** Codex JSONL → wire events. Resume emits thread.started again with the same thread_id. */
 export function createCodexParser(hint: (m: string) => string): TurnParser {
   let threadId: string | undefined;
   const started = new Set<string>();
@@ -2639,8 +2923,13 @@ export function createCodexParser(hint: (m: string) => string): TurnParser {
           if (item.type === "reasoning" && typeof item.text === "string" && item.text) return [{ type: "thinking_delta", text: item.text }];
           const tool = toolOf(item);
           if (!tool || !id) return [];
-          const ok = item.status !== "failed" && !item.error && (item.exit_code == null || item.exit_code === 0);
-          const output = item.type === "command_execution" ? item.aggregated_output : item.error?.message ?? item.result?.content;
+          // A refusal is status failed (MCP) or declined (a command the sandbox policy blocked).
+          const refused = item.status === "failed" || item.status === "declined" || Boolean(item.error);
+          const ok = !refused && (item.exit_code == null || item.exit_code === 0);
+          const output =
+            item.type === "command_execution"
+              ? item.aggregated_output || (refused ? `command ${item.status ?? "refused"}` : "")
+              : item.error?.message ?? item.result?.content;
           const events: AssistantStreamEvent[] = started.has(id) ? [] : [toolStartEvent(id, tool.name, tool.input)];
           events.push(toolResultEvent(id, ok, output));
           return events;
@@ -2659,11 +2948,19 @@ export function createCodexParser(hint: (m: string) => string): TurnParser {
 }
 ```
 
-If spike S7 found that Codex's sandbox is **unavailable on Windows**, add to the top of `buildTurn`:
-`throw new Error("Codex's sandbox isn't available on this PC, so Skill Vault won't run Codex unsandboxed. Pick another provider in Settings → AI assistant.");`
-Also add a test asserting `buildTurn` throws that message. If the fixture's item fields differ from the
-names above, rename the fields in `CodexItem` / `toolOf` to match the fixture. The fixture wins; keep
-the synthetic test in step with it.
+What the spike settled (S5–S7), already reflected above:
+- `codex login status` prints "Logged in using ChatGPT" and exits 0 when signed in (S5).
+- `CODEX_API_KEY` is unverified (no key was offered); the documented default is kept (S6).
+- With `--ignore-user-config` Codex has no Windows sandbox and falls back to read-only: every command
+  is "blocked by policy" (status `declined`) and every MCP call fails with
+  `error.message = "user cancelled MCP tool call"`. `-c windows.sandbox="unelevated"` and
+  `-c mcp_servers.vault.default_tools_approval_mode="approve"` fix that; both forms of the turn pass
+  both, and the first test asserts them. With them the sandbox works: `hostname` runs (allowed by
+  design) and a write outside the roots is refused ("writing outside of the project"). A refused patch
+  emits **no** `file_change` item, so the recorded fixture has no refused item; the synthetic test
+  covers `declined` and `failed`.
+- Resume (`codex exec resume <thread_id> … -`) remembers the first turn and emits `thread.started`
+  again with the same `thread_id`.
 
 - [ ] **Step 5: Register Codex**
 
@@ -2673,7 +2970,7 @@ In `registry.ts`: `import { createCodexEngine } from "./codex.ts";` and
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `node --import tsx --test server/services/assistant/engines/codex.test.ts` then `npm test` and `npm run typecheck`
-Expected: PASS.
+Expected: PASS (7 codex tests).
 
 - [ ] **Step 7: Commit**
 
@@ -2692,8 +2989,15 @@ git commit -m "engines: OpenAI Codex (sandboxed exec --json, thread resume, Chat
 - Test: `app/server/services/assistant/engines/copilot.test.ts`
 
 **Interfaces:**
-- Consumes: `common.ts` (Task 9), Tasks 4–5; fixture `fixtures/copilot-turn.jsonl`, findings S8–S9.
-- Produces: `createCopilotEngine(deps?)`, `createCopilotParser(authHint)`, `COPILOT_ALIASES`.
+- Consumes: `common.ts` (Task 9, `EngineDeps` with `forget`), Tasks 4–5 (`engineNote` with
+  `shell: "none"`), `FORBIDDEN_FLAGS` (Task 8); the recorded fixture `fixtures/copilot-turn.jsonl`
+  (117 lines, Copilot CLI 1.0.105) and findings S8–S9 (Task 1, in the spec).
+- Produces: `createCopilotEngine(deps?)`, `createCopilotParser(authHint)`, `COPILOT_TOOLS` (the
+  `--available-tools` allowlist), `COPILOT_ALIASES`.
+- Copilot has **no shell** (user decision after S9): its "manual" permission mode auto-approves
+  commands it classes as read-only even under a `shell(git:*)`-only rule (`hostname` ran), so a
+  git-only allowlist can't be enforced. The engine note tells the model it has no shell and can't run
+  git.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2705,6 +3009,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createCopilotEngine, createCopilotParser } from "./copilot.ts";
 import type { EngineDeps } from "./common.ts";
+import { FORBIDDEN_FLAGS } from "./testFakes.ts";
 import type { TurnInput } from "./types.ts";
 
 const PLUGIN = path.resolve(import.meta.dirname, "..", "..", "..", "..", "assistant-plugin");
@@ -2713,11 +3018,12 @@ const FIXTURE = path.join(import.meta.dirname, "fixtures", "copilot-turn.jsonl")
 function deps(over: Partial<EngineDeps> = {}): EngineDeps {
   return {
     resolve: () => ({ command: "C:\\node\\node.exe", prefixArgs: ["C:\\npm\\copilot\\npm-loader.js"], label: "copilot CLI" }),
-    run: async () => ({ code: 0, stdout: "GitHub Copilot CLI 1.0.69.\n", stderr: "" }),
+    forget: () => {},
+    run: async () => ({ code: 0, stdout: "GitHub Copilot CLI 1.0.105.\n", stderr: "" }),
     home: "C:\\Users\\me",
     env: {},
     exists: () => true,
-    readFile: () => JSON.stringify({ logged_in_users: [{ host: "https://github.com", login: "octo" }] }),
+    readFile: () => JSON.stringify({ lastLoggedInUser: { host: "https://github.com", login: "octo" }, loggedInUsers: [{ host: "https://github.com", login: "octo" }] }),
     writeFile: () => {},
     ...over,
   };
@@ -2738,7 +3044,7 @@ const INPUT: TurnInput = {
   baseEnv: { GH_TOKEN: "ghp_stray", PATH: "C:\\bin" },
 };
 
-test("turn: -p prompt, JSON output, same session id, plugin agent, git-only shell", () => {
+test("turn: -p prompt, JSON output, same session id, plugin agent, no shell tool at all", () => {
   const spec = createCopilotEngine(deps()).buildTurn(INPUT);
   const a = spec.args;
   const after = (flag: string) => a[a.indexOf(flag) + 1];
@@ -2746,17 +3052,24 @@ test("turn: -p prompt, JSON output, same session id, plugin agent, git-only shel
   assert.equal(after("--session-id"), INPUT.sessionId);
   assert.equal(after("-C"), "C:\\vault");
   assert.equal(after("--plugin-dir"), PLUGIN);
-  assert.equal(after("--agent"), "vault-assistant"); // spike S9
+  assert.equal(after("--agent"), "skill-vault-assistant:vault-assistant"); // S9: plugin-qualified
   assert.deepEqual(JSON.parse(after("--additional-mcp-config")).mcpServers.vault.command, "C:\\node.exe");
+  const tools = a.indexOf("--available-tools");
+  assert.deepEqual(a.slice(tools + 1, tools + 11), ["view", "create", "edit", "grep", "glob", "web_fetch", "skill", "task", "update_todo", "vault"]);
+  assert.ok(a[tools + 11].startsWith("--"), "the allowlist ends at the next flag");
   const allowed = a.flatMap((x, i) => (x === "--allow-tool" ? [a[i + 1]] : []));
-  assert.deepEqual(allowed, ["shell(git:*)", "write", "vault"]);
-  for (const bad of ["--allow-all", "--allow-all-tools", "--allow-all-paths", "--allow-all-urls", "--yolo"]) assert.ok(!a.includes(bad));
-  assert.ok(a.includes("--disable-builtin-mcps") && a.includes("--no-ask-user"));
+  assert.deepEqual(allowed, ["write", "vault"]);
+  assert.ok(!a.some((x) => x.includes("shell(")), "no shell permission anywhere");
+  for (const bad of FORBIDDEN_FLAGS) assert.ok(!a.some((x) => x.includes(bad)), `must not pass ${bad}`);
+  assert.ok(!a.includes("--no-remote"), "Copilot has no --no-remote flag");
+  for (const flag of ["--disallow-temp-dir", "--disable-builtin-mcps", "--no-ask-user", "--no-auto-update"]) assert.ok(a.includes(flag), `missing ${flag}`);
   assert.match(after("-p"), /running on GitHub Copilot CLI/);
+  assert.match(after("-p"), /There is no shell tool here/);
   assert.ok(after("-p").endsWith("hi"));
   assert.equal(spec.env?.GH_TOKEN, undefined, "a stray gh token must not override the login");
   const later = createCopilotEngine(deps()).buildTurn({ ...INPUT, isFirstTurn: false });
   assert.ok(!later.args[later.args.indexOf("-p") + 1].includes("<skill-vault-instructions>"));
+  assert.equal(later.args[later.args.indexOf("--session-id") + 1], INPUT.sessionId, "the same flag resumes");
 });
 
 test("API-key mode passes the token as COPILOT_GITHUB_TOKEN", () => {
@@ -2764,36 +3077,55 @@ test("API-key mode passes the token as COPILOT_GITHUB_TOKEN", () => {
   assert.equal(spec.env?.COPILOT_GITHUB_TOKEN, "github_pat_x");
 });
 
-test("authStatus reads the signed-in user from config.json", async () => {
+test("authStatus reads the signed-in user from config.json (camelCase, S8)", async () => {
   assert.deepEqual(await createCopilotEngine(deps()).authStatus({ auth: "login" }), { signed_in: true, method: "login", account: "octo" });
+  const onlyList = deps({ readFile: () => JSON.stringify({ loggedInUsers: [{ host: "https://github.com", login: "mona" }] }) });
+  assert.equal((await createCopilotEngine(onlyList).authStatus({ auth: "login" })).account, "mona");
+  const snake = deps({ readFile: () => JSON.stringify({ logged_in_users: [{ login: "octo" }] }) });
+  assert.equal((await createCopilotEngine(snake).authStatus({ auth: "login" })).signed_in, false);
   assert.equal((await createCopilotEngine(deps({ exists: () => false })).authStatus({ auth: "login" })).signed_in, false);
   assert.equal((await createCopilotEngine(deps({ readFile: () => "{" })).authStatus({ auth: "login" })).signed_in, null);
 });
 
-test("parser: deltas, tools (vault + shell), one end of turn", () => {
+test("parser: deltas, tools (vault + a denied write), one end of turn", () => {
   const p = createCopilotParser((m) => m);
   const lines = [
-    { type: "assistant.message_delta", data: { messageId: "m1", deltaContent: "Checking" } },
-    { type: "tool.execution_start", data: { toolCallId: "c1", toolName: "vault-list_skills", arguments: {} } },
-    { type: "tool.execution_complete", data: { toolCallId: "c1", success: true, result: { content: "12" } } },
-    { type: "tool.execution_start", data: { toolCallId: "c2", toolName: "powershell", arguments: { command: "hostname" } } },
-    { type: "tool.execution_complete", data: { toolCallId: "c2", success: false, error: { message: "denied" } } },
-    { type: "assistant.message", data: { messageId: "m1", content: "Checking" } },
-    { type: "session.idle", data: {} },
-    { type: "result", data: {} },
+    { type: "assistant.turn_start", data: { turnId: "0" } },
+    { type: "assistant.message", data: { messageId: "m0", content: "", toolRequests: [{ toolCallId: "c1", name: "vault-list_skills", arguments: {} }] } },
+    { type: "tool.execution_start", data: { toolCallId: "c1", toolName: "vault-list_skills", arguments: {}, mcpServerName: "vault", mcpToolName: "list_skills" } },
+    { type: "tool.execution_complete", data: { toolCallId: "c1", success: true, result: { content: "12", detailedContent: "12" } } },
+    { type: "tool.execution_start", data: { toolCallId: "c2", toolName: "create", arguments: { path: "C:\\outside.txt", file_text: "hi" } } },
+    { type: "tool.execution_complete", data: { toolCallId: "c2", success: false, error: { message: "Permission denied", code: "denied" } } },
+    { type: "assistant.message_delta", data: { messageId: "m1", deltaContent: "You have " } },
+    { type: "assistant.message_delta", data: { messageId: "m1", deltaContent: "12 skills." } },
+    { type: "assistant.message", data: { messageId: "m1", content: "You have 12 skills.", toolRequests: [] } },
+    { type: "assistant.idle", data: {}, ephemeral: true },
+    { type: "result", sessionId: "s", exitCode: 0, usage: { premiumRequests: 1 } },
   ];
   const events = lines.flatMap((l) => p.parse(JSON.stringify(l)));
-  assert.deepEqual(events.map((e) => e.type), ["text_delta", "tool_start", "tool_result", "tool_start", "tool_result", "turn_end"]);
-  assert.equal(events[1].type === "tool_start" && events[1].label, "vault: list_skills");
-  assert.equal(events[3].type === "tool_start" && events[3].label, "Running: hostname");
-  assert.equal(events[4].type === "tool_result" && events[4].ok, false);
+  assert.deepEqual(events.map((e) => e.type), ["tool_start", "tool_result", "tool_start", "tool_result", "text_delta", "text_delta", "turn_end"]);
+  assert.equal(events[0].type === "tool_start" && events[0].label, "vault: list_skills");
+  assert.equal(events[2].type === "tool_start" && events[2].label, "Writing C:/outside.txt");
+  assert.equal(events[3].type === "tool_result" && events[3].ok, false);
+  assert.equal(events[3].type === "tool_result" && events[3].output_preview, "Permission denied");
+  const failed = createCopilotParser((m) => m).parse(JSON.stringify({ type: "result", exitCode: 1 }));
+  assert.deepEqual(failed.map((e) => e.type), ["error"]);
 });
 
-test("parser: the real Copilot fixture yields text, the vault call and an end of turn", () => {
+test("parser: the recorded Copilot turn (S9) — text, the vault call, the denied write, end of turn", () => {
+  // Recorded before the --available-tools allowlist, so it still has a powershell call; shapes only.
+  const lines = fs.readFileSync(FIXTURE, "utf-8").split(/\r?\n/).filter(Boolean);
   const p = createCopilotParser((m) => m);
-  const events = fs.readFileSync(FIXTURE, "utf-8").split(/\r?\n/).filter(Boolean).flatMap((l) => p.parse(l));
-  assert.ok(events.some((e) => e.type === "text_delta"));
+  const events = lines.flatMap((l) => p.parse(l));
+  const final = lines.map((l) => JSON.parse(l)).filter((m) => m.type === "assistant.message" && m.data.content).at(-1);
+  const text = events.flatMap((e) => (e.type === "text_delta" ? [e.text] : [])).join("");
+  assert.equal(text, final.data.content, "the deltas add up to the final message, which isn't repeated");
   assert.ok(events.some((e) => e.type === "tool_start" && e.name === "mcp__vault__list_skills"));
+  const write = events.find((e) => e.type === "tool_start" && e.name === "Write");
+  assert.ok(write && write.type === "tool_start");
+  const result = events.find((e) => e.type === "tool_result" && e.tool_use_id === write.tool_use_id);
+  assert.ok(result && result.type === "tool_result" && result.ok === false, "the denied create is a refused tool_result");
+  assert.equal(events.filter((e) => e.type === "turn_end").length, 1);
   assert.equal(events.at(-1)?.type, "turn_end");
 });
 ```
@@ -2808,39 +3140,47 @@ Expected: FAIL — module not found.
 ```ts
 // app/server/services/assistant/engines/copilot.ts
 /**
- * GitHub Copilot CLI (`copilot -p … --output-format json`). Checked against 1.0.69.
+ * GitHub Copilot CLI (`copilot -p … --output-format json`). Checked against 1.0.105 (spike S8–S9).
  *
- * Copilot loads the assistant plugin as-is (--plugin-dir + --agent), so it
- * gets the lead agent, the subagents and the skills like Claude does; only
- * the engine note and the per-turn context ride in the prompt. Its tool
- * allowlist works like Claude's: shell(git:*), write, and the vault server —
- * anything else is denied in -p mode. COPILOT_GITHUB_TOKEN / GH_TOKEN /
- * GITHUB_TOKEN outrank the stored login, so login mode strips all three.
+ * Copilot loads the assistant plugin as-is (--plugin-dir + --agent, the agent
+ * name plugin-qualified), so it gets the lead agent, the subagents and the
+ * skills like Claude does; only the engine note and the per-turn context ride
+ * in the prompt. It has NO shell: Copilot auto-approves commands it judges
+ * read-only even when only shell(git:*) is allowed, so a git-only rule can't
+ * be enforced. --available-tools is an allowlist of everything else the
+ * assistant needs ("vault" = every tool of the vault MCP server); it also
+ * drops Copilot's built-in computer-use, sql, workflow and shell-session
+ * tools. --disallow-temp-dir keeps writes out of the system temp folder.
+ * COPILOT_GITHUB_TOKEN / GH_TOKEN / GITHUB_TOKEN outrank the stored login, so
+ * login mode strips all three.
  */
+import path from "node:path";
 import { canonicalTool, toolResultEvent, toolStartEvent, type ToolAliases } from "../streamEvents.ts";
 import { apiKeyPresent, defaultEngineDeps, detectWithVersion, keyEnv, makeAuthHint, type EngineDeps } from "./common.ts";
 import { composeInstructions, composePrompt } from "./instructions.ts";
-import path from "node:path";
 import type { AssistantEngine, TurnParser } from "./types.ts";
 
 const LABEL = "GitHub Copilot CLI";
 const KEYS = ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"];
 const authHint = makeAuthHint(LABEL, /not (logged|signed) in|unauthori[sz]ed|\b401\b|copilot login|no copilot (access|subscription)|authenticat/i);
-/** The plugin agent's name as Copilot accepts it (spike S9). */
-const AGENT_NAME = (lead: string): string => lead;
+/** S9: plugin agents are addressed as <plugin name>:<agent>; the bare name is rejected. */
+const AGENT_NAME = (lead: string): string => `skill-vault-assistant:${lead}`;
 
+/** Every tool a Copilot turn may use (S9). No shell tool on purpose. "vault" = the vault MCP server. */
+export const COPILOT_TOOLS = ["view", "create", "edit", "grep", "glob", "web_fetch", "skill", "task", "update_todo", "vault"];
+
+/** Copilot's tool names → Claude's (S9). MCP tools arrive as vault-<tool>, which canonicalTool handles. */
 export const COPILOT_ALIASES: ToolAliases = {
-  bash: "Bash",
-  powershell: "Bash",
   view: "Read",
-  edit: "Edit",
-  str_replace_editor: "Edit",
   create: "Write",
+  edit: "Edit",
   grep: "Grep",
   glob: "Glob",
   web_fetch: "WebFetch",
-  task: "Task",
   skill: "Skill",
+  task: "Task",
+  update_todo: "TodoWrite",
+  tool_search_tool: "ToolSearch",
 };
 
 export function createCopilotEngine(deps: EngineDeps = defaultEngineDeps()): AssistantEngine {
@@ -2849,7 +3189,8 @@ export function createCopilotEngine(deps: EngineDeps = defaultEngineDeps()): Ass
   const engine: AssistantEngine = {
     id: "copilot",
     label: LABEL,
-    verifiedVersion: "GitHub Copilot CLI 1.0.69",
+    cliName: "copilot",
+    verifiedVersion: "GitHub Copilot CLI 1.0.105",
     subagents: true,
     apiKeyEnv: KEYS,
     install: [{ kind: "npm", label: "Install GitHub Copilot CLI", args: ["install", "-g", "@github/copilot"], source: "npmjs.com" }],
@@ -2857,15 +3198,18 @@ export function createCopilotEngine(deps: EngineDeps = defaultEngineDeps()): Ass
     loginHint: "The window shows a one-time code — open github.com/login/device and enter it.",
     loginEnv: () => ({}),
     target,
-    detect: () => detectWithVersion(deps, target(), engine.childEnv({ auth: "login" }, deps.env)),
+    detect: (opts) => {
+      if (opts?.refresh) deps.forget("copilot");
+      return detectWithVersion(deps, target(), engine.childEnv({ auth: "login" }, deps.env));
+    },
     async authStatus(cfg) {
       if (cfg.auth === "api_key") return { signed_in: apiKeyPresent(cfg, deps.env, KEYS), method: "api_key" };
       const file = configFile();
       if (!deps.exists(file)) return { signed_in: false, method: "login" };
       try {
-        // spike S8: logged_in_users / last_logged_in_user carry { host, login }.
-        const j = JSON.parse(deps.readFile(file)) as { logged_in_users?: Array<{ login?: string }>; last_logged_in_user?: { login?: string } };
-        const login = j.last_logged_in_user?.login ?? j.logged_in_users?.[0]?.login;
+        // S8: camelCase — lastLoggedInUser / loggedInUsers carry { host, login }.
+        const j = JSON.parse(deps.readFile(file)) as { lastLoggedInUser?: { login?: string }; loggedInUsers?: Array<{ login?: string }> };
+        const login = j.lastLoggedInUser?.login ?? j.loggedInUsers?.[0]?.login;
         return login ? { signed_in: true, method: "login", account: login } : { signed_in: false, method: "login" };
       } catch {
         return { signed_in: null, method: "login" };
@@ -2879,7 +3223,7 @@ export function createCopilotEngine(deps: EngineDeps = defaultEngineDeps()): Ass
         ? composeInstructions({
             pluginDir: input.pluginDir,
             lead: input.leadAgent,
-            note: { label: LABEL, vaultToolSpelling: "vault-<tool>", subagents: true },
+            note: { label: LABEL, vaultToolSpelling: "vault-<tool>", subagents: true, shell: "none" },
             includeLead: false,
           })
         : undefined;
@@ -2901,12 +3245,12 @@ export function createCopilotEngine(deps: EngineDeps = defaultEngineDeps()): Ass
           "--agent", AGENT_NAME(input.leadAgent),
           "--additional-mcp-config", mcp,
           "--disable-builtin-mcps",
-          "--allow-tool", "shell(git:*)",
+          "--available-tools", ...COPILOT_TOOLS,
           "--allow-tool", "write",
           "--allow-tool", "vault",
+          "--disallow-temp-dir",
           "--no-ask-user",
           "--no-auto-update",
-          "--no-remote",
         ],
         stdin: "",
         env: engine.childEnv(input.auth, input.baseEnv),
@@ -2919,13 +3263,19 @@ export function createCopilotEngine(deps: EngineDeps = defaultEngineDeps()): Ass
   return engine;
 }
 
-/** Copilot JSONL → wire events. Event names from spike S9 (fixtures/copilot-turn.jsonl). */
+/**
+ * Copilot JSONL → wire events (S9; fixtures/copilot-turn.jsonl). Each line is
+ * { type, data, id, timestamp, parentId, ephemeral? }; the final `result` line
+ * has no `data`. Text comes from assistant.message_delta (the full
+ * assistant.message repeats it); session.*, tool_call_delta, shell_output and
+ * turn_start/turn_end (one per model call, not per chat turn) are ignored.
+ */
 export function createCopilotParser(hint: (m: string) => string): TurnParser {
   const streamed = new Set<string>();
   let ended = false;
   return {
     parse(line) {
-      let msg: { type?: string; data?: Record<string, unknown> };
+      let msg: { type?: string; data?: Record<string, unknown>; exitCode?: unknown };
       try {
         msg = JSON.parse(line);
       } catch {
@@ -2939,22 +3289,22 @@ export function createCopilotParser(hint: (m: string) => string): TurnParser {
           return [{ type: "text_delta", text: d.deltaContent }];
         case "assistant.message":
           return typeof d.content === "string" && d.content && !streamed.has(String(d.messageId)) ? [{ type: "text_delta", text: d.content }] : [];
-        case "assistant.reasoning_delta":
-          return typeof d.deltaContent === "string" && d.deltaContent ? [{ type: "thinking_delta", text: d.deltaContent }] : [];
         case "tool.execution_start": {
           if (typeof d.toolCallId !== "string" || typeof d.toolName !== "string") return [];
           const c = canonicalTool(COPILOT_ALIASES, d.toolName, d.arguments && typeof d.arguments === "object" ? d.arguments : {});
           return [toolStartEvent(d.toolCallId, c.name, c.input)];
         }
         case "tool.execution_complete":
+          // A refusal is success: false with error { message, code: "denied" }.
           return typeof d.toolCallId === "string" ? [toolResultEvent(d.toolCallId, d.success !== false, d.result?.content ?? d.error?.message)] : [];
-        case "session.error":
+        case "session.error": // not seen in the spike; shape assumed { message }
           return [{ type: "error", message: hint(String(d.message ?? "Copilot reported an error")) }];
-        case "session.idle":
         case "result":
           if (ended) return [];
           ended = true;
-          return [{ type: "turn_end" }];
+          return typeof msg.exitCode === "number" && msg.exitCode !== 0
+            ? [{ type: "error", message: hint(`Copilot ended the turn with exit code ${msg.exitCode}`) }]
+            : [{ type: "turn_end" }];
         default:
           return [];
       }
@@ -2963,13 +3313,20 @@ export function createCopilotParser(hint: (m: string) => string): TurnParser {
 }
 ```
 
-Adjust from the findings:
-- If S9 shows the agent must be namespaced, change `AGENT_NAME` to
-  ``(lead) => `skill-vault-assistant:${lead}` `` and the test's expected value with it.
-- If the fixture's event names or `data` fields differ, rename the `case` labels and field reads to match
-  it, and update the synthetic test to the same shapes.
-- If S9 shows `hostname` was **not** refused, stop and tell the lead. The Copilot allowlist is
-  then not safe, and that has to be raised with the user.
+What the spike settled (S8–S9), already reflected above:
+- `~/.copilot/config.json` is camelCase: `lastLoggedInUser: { host, login }`, `loggedInUsers: [{ host, login }]`.
+- `--agent` must be plugin-qualified (`skill-vault-assistant:vault-assistant`); the bare name is
+  rejected. There is **no** `--no-remote` flag.
+- `--available-tools` takes each tool as its own argv element; `vault` means every tool of the vault MCP
+  server (`vault-*` does not work). The list also drops Copilot's built-in computer-use (desktop
+  control), sql, workflow and shell-session tools. `--disallow-temp-dir` stops Copilot from also
+  allowing the system temp folder.
+- MCP tools are named `vault-<tool>` in events; `canonicalTool` maps them to `mcp__vault__<tool>`.
+- The recorded fixture predates the allowlist: it still has a `powershell` call (hostname ran), a
+  `create` denied with `error.code = "denied"`, and a `tool_search_tool` call. Its test checks shapes
+  (and that a denied result maps to `ok: false`), not which calls the allowlist refuses — Task 20
+  checks that live.
+- Resume with the same `--session-id` remembered the first turn.
 
 - [ ] **Step 4: Register Copilot**
 
@@ -2979,29 +3336,41 @@ Adjust from the findings:
 - [ ] **Step 5: Run the tests**
 
 Run: `node --import tsx --test server/services/assistant/engines/copilot.test.ts` then `npm test` and `npm run typecheck`
-Expected: PASS.
+Expected: PASS (5 copilot tests).
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add server/services/assistant/engines
-git commit -m "engines: GitHub Copilot CLI (plugin agent, git-only allowlist, GitHub login or token)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "engines: GitHub Copilot CLI (plugin agent, tool allowlist with no shell, GitHub login or token)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
 ### Task 11: Grok Build engine
 
+**Grok wasn't run in the spike** (user decision), so S1–S4 are **unverified — built from xAI's docs**:
+the install folder (`~/.grok/bin`), the sign-in file (`auth.json` in `GROK_HOME`), the tool names in
+`GROK_TOOLS` / `GROK_ALIASES`, the `use_tool` MCP call shape and the refusals. The fixture
+`fixtures/grok-turn.jsonl` already exists (committed with the spike findings); it is **hand-written**
+from the docs, not recorded, and its first line says so. Build exactly what's below; Task 20 checks
+these against the real CLI and lists what to change if they differ.
+
+This is the last engine task, so it also adds `safety.test.ts`, which checks every registered engine
+against the Global Constraints at once.
+
 **Files:**
-- Create: `app/server/services/assistant/engines/grok.ts`
+- Create: `app/server/services/assistant/engines/grok.ts`, `app/server/services/assistant/engines/safety.test.ts`
 - Modify: `app/server/services/assistant/engines/registry.ts`
-- Test: `app/server/services/assistant/engines/grok.test.ts`
+- Test: `app/server/services/assistant/engines/grok.test.ts`, `app/server/services/assistant/engines/safety.test.ts`
+- Read only: `app/server/services/assistant/engines/fixtures/grok-turn.jsonl` (don't edit it)
 
 **Interfaces:**
-- Consumes: `common.ts`, `parseStreamJsonLine(line, { aliases, authHint })` (Task 4), Task 5; fixture
-  `fixtures/grok-turn.jsonl`, findings S1–S4.
+- Consumes: `common.ts` (`EngineDeps` with `forget`), `parseStreamJsonLine(line, { aliases, authHint })`
+  (Task 4), Task 5 (`shell: "git"`), `FORBIDDEN_FLAGS` (Task 8); `createClaudeEngine` (Task 7),
+  `createCodexEngine` (Task 9), `createCopilotEngine` (Task 10) and `defaultRegistry` for the safety test.
 - Produces: `createGrokEngine(deps?)`, `grokHome(home, mode)`, `grokConfigToml(mcp)`, `GROK_ALIASES`,
-  `GROK_TOOLS`.
+  `GROK_TOOLS`; the registry's final order claude, codex, copilot, grok.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -3013,15 +3382,18 @@ import fs from "node:fs";
 import path from "node:path";
 import { GROK_TOOLS, createGrokEngine, grokConfigToml, grokHome } from "./grok.ts";
 import type { EngineDeps } from "./common.ts";
+import { FORBIDDEN_FLAGS } from "./testFakes.ts";
 import type { TurnInput } from "./types.ts";
 
 const PLUGIN = path.resolve(import.meta.dirname, "..", "..", "..", "..", "assistant-plugin");
+/** Hand-written from xAI's docs, not recorded: it pins the parser to the documented shapes until Task 20. */
 const FIXTURE = path.join(import.meta.dirname, "fixtures", "grok-turn.jsonl");
 const MCP = { command: "C:\\node.exe", args: ["C:\\app\\dist\\assistant-mcp.js"], env: { SKILL_VAULT_URL: "http://127.0.0.1:9994" } };
 
 function deps(written: Record<string, string>, over: Partial<EngineDeps> = {}): EngineDeps {
   return {
     resolve: () => ({ command: "C:\\Users\\me\\.grok\\bin\\grok.exe", prefixArgs: [], label: "grok CLI" }),
+    forget: () => {},
     run: async () => ({ code: 0, stdout: "grok 1.0.0\n", stderr: "" }),
     home: "C:\\Users\\me",
     env: {},
@@ -3070,7 +3442,7 @@ test("turn: prompt file, Claude-format stream, app-owned GROK_HOME, git-only she
   assert.equal(after("--cwd"), "C:\\vault");
   assert.equal(after("--tools"), GROK_TOOLS);
   assert.equal(after("--allow"), "Bash(git *)");
-  for (const bad of ["--yolo", "--always-approve", "bypassPermissions"]) assert.ok(!a.includes(bad));
+  for (const bad of [...FORBIDDEN_FLAGS, "--always-approve"]) assert.ok(!a.some((x) => x.includes(bad)), `must not pass ${bad}`);
   assert.equal(spec.env?.GROK_HOME, grokHome("C:\\Users\\me", "login"));
   assert.equal(spec.env?.XAI_API_KEY, undefined);
   assert.ok(written[path.join(grokHome("C:\\Users\\me", "login"), "config.toml")]);
@@ -3091,12 +3463,23 @@ test("authStatus: auth.json in the app's Grok home", async () => {
   assert.deepEqual(createGrokEngine(deps({})).loginEnv(), { GROK_HOME: grokHome("C:\\Users\\me", "login") });
 });
 
-test("parser: the real Grok fixture maps tools to the shared vocabulary", () => {
+test("parser: the hand-written Grok fixture maps tools to the shared vocabulary", () => {
   const p = createGrokEngine(deps({})).createParser();
   const events = fs.readFileSync(FIXTURE, "utf-8").split(/\r?\n/).filter(Boolean).flatMap((l) => p.parse(l));
+  assert.deepEqual(events.map((e) => e.type), [
+    "session", "text_delta", "tool_start", "tool_result", "tool_start", "tool_result", "tool_start", "tool_result", "text_delta", "turn_end",
+  ]);
   assert.ok(events.some((e) => e.type === "tool_start" && e.name === "mcp__vault__list_skills"));
-  assert.ok(events.some((e) => e.type === "text_delta"));
-  assert.equal(events.at(-1)?.type, "turn_end");
+  const shell = events.find((e) => e.type === "tool_start" && e.name === "Bash");
+  const write = events.find((e) => e.type === "tool_start" && e.name === "Write");
+  assert.ok(shell?.type === "tool_start" && shell.label === "Running: hostname");
+  assert.ok(write?.type === "tool_start");
+  for (const start of [shell, write]) {
+    const r = events.find((e) => e.type === "tool_result" && start?.type === "tool_start" && e.tool_use_id === start.tool_use_id);
+    assert.ok(r?.type === "tool_result" && r.ok === false, "an is_error result is a refusal");
+  }
+  const end = events.at(-1);
+  assert.ok(end?.type === "turn_end" && end.cost_usd === 0.0042, "cost comes from the result record");
 });
 ```
 
@@ -3111,6 +3494,9 @@ Expected: FAIL — module not found.
 // app/server/services/assistant/engines/grok.ts
 /**
  * Grok Build (`grok --prompt-file … --output-format streaming-messages-json`).
+ * Built from xAI's docs only: Grok wasn't run in the spike (S1–S4 unverified),
+ * so the install folder, the auth.json check, the tool names and the
+ * refusals are confirmed live in plan Task 20.
  *
  * Grok reads MCP servers only from files: its own config.toml plus
  * ~/.claude.json, Cursor's config and .mcp.json. So the app gives Grok its own
@@ -3131,7 +3517,7 @@ const LABEL = "Grok Build";
 const KEYS = ["XAI_API_KEY"];
 const authHint = makeAuthHint(LABEL, /not (logged|signed) in|unauthori[sz]ed|\b401\b|grok login|XAI_API_KEY/i);
 
-/** Headless tool allowlist (spike S3). MCP meta-tools stay available. */
+/** Headless tool allowlist, per xAI's docs (S3, unverified). MCP calls go through use_tool. */
 export const GROK_TOOLS = "read_file,grep,list_dir,search_replace,write_file,run_terminal_cmd,web_search,web_fetch";
 
 export const GROK_ALIASES: ToolAliases = {
@@ -3162,7 +3548,7 @@ export function grokConfigToml(mcp: VaultMcpServer): string {
     `env = { SKILL_VAULT_URL = ${toml(mcp.env.SKILL_VAULT_URL)} }`,
     "",
     "[compat.claude]",
-    "mcps = false", // spike S4: add the settings-import key here if Grok honored ~/.claude/settings.json
+    "mcps = false",
     "",
     "[compat.cursor]",
     "mcps = false",
@@ -3175,7 +3561,8 @@ export function createGrokEngine(deps: EngineDeps = defaultEngineDeps()): Assist
   const engine: AssistantEngine = {
     id: "grok",
     label: LABEL,
-    verifiedVersion: "grok (see spike S1)",
+    cliName: "grok",
+    verifiedVersion: "xAI docs only (not run yet)",
     subagents: false,
     apiKeyEnv: KEYS,
     install: [{ kind: "powershell", label: "Install Grok Build", script: "irm https://x.ai/cli/install.ps1 | iex", source: "x.ai" }],
@@ -3183,10 +3570,14 @@ export function createGrokEngine(deps: EngineDeps = defaultEngineDeps()): Assist
     loginHint: "A browser window opens — sign in with your grok.com account. This sign-in is only for Skill Vault.",
     loginEnv: () => ({ GROK_HOME: grokHome(deps.home, "login") }),
     target,
-    detect: () => detectWithVersion(deps, target(), engine.childEnv({ auth: "login" }, deps.env)),
+    detect: (opts) => {
+      if (opts?.refresh) deps.forget("grok");
+      return detectWithVersion(deps, target(), engine.childEnv({ auth: "login" }, deps.env));
+    },
     async authStatus(cfg) {
       if (cfg.auth === "api_key") return { signed_in: apiKeyPresent(cfg, deps.env, KEYS), method: "api_key" };
-      return { signed_in: deps.exists(path.join(grokHome(deps.home, "login"), "auth.json")), method: "login" }; // spike S2
+      // S2 (unverified): `grok login` writes auth.json into GROK_HOME.
+      return { signed_in: deps.exists(path.join(grokHome(deps.home, "login"), "auth.json")), method: "login" };
     },
     childEnv: (cfg, base) =>
       keyEnv(cfg, base, KEYS, {
@@ -3203,7 +3594,7 @@ export function createGrokEngine(deps: EngineDeps = defaultEngineDeps()): Assist
         ? composeInstructions({
             pluginDir: input.pluginDir,
             lead: input.leadAgent,
-            note: { label: LABEL, vaultToolSpelling: "vault__<tool>, called through use_tool", subagents: false },
+            note: { label: LABEL, vaultToolSpelling: "vault__<tool>, called through use_tool", subagents: false, shell: "git" },
             includeLead: true,
           })
         : undefined;
@@ -3234,373 +3625,120 @@ export function createGrokEngine(deps: EngineDeps = defaultEngineDeps()): Assist
 }
 ```
 
-Adjust from the findings:
-- S1: set `verifiedVersion` to the version Task 1 saw. If the install folder isn't `~/.grok/bin`,
-  change that entry in `knownInstallDirs` (exe.ts) and its test.
-- S2: if the login file isn't `auth.json`, change the file name in `authStatus` and the test.
-- S3: if a tool name differs, fix `GROK_TOOLS` and `GROK_ALIASES`.
-- S4: if `hostname` was **not** refused with these flags, remove `run_terminal_cmd` from `GROK_TOOLS`
-  and change the engine note's shell sentence for Grok to "there is no shell tool here". Grok then
-  works without a shell rather than with an unrestricted one. Add the settings-import key from S4 to
-  `grokConfigToml` if one was needed.
+- [ ] **Step 4: Register Grok**
 
-- [ ] **Step 4: Register Grok** in `registry.ts` after Copilot.
+In `registry.ts`: `import { createGrokEngine } from "./grok.ts";` and
+`shared ??= createRegistry([createClaudeEngine(), createCodexEngine(), createCopilotEngine(), createGrokEngine()]);`.
 
-- [ ] **Step 5: Run the tests**
-
-Run: `node --import tsx --test server/services/assistant/engines/grok.test.ts` then `npm test` and `npm run typecheck`
-Expected: PASS.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add server/services/assistant/engines server/services/assistant/engines/exe.ts
-git commit -m "engines: Grok Build (own GROK_HOME with only the vault server, Claude-format stream)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
-```
-
----
-
-### Task 12: Gemini engine
-
-**Files:**
-- Create: `app/server/services/assistant/engines/gemini.ts`
-- Modify: `app/server/services/assistant/engines/registry.ts`
-- Test: `app/server/services/assistant/engines/gemini.test.ts`
-
-**Interfaces:**
-- Consumes: `common.ts`, Tasks 4–5; fixture `fixtures/gemini-turn.jsonl`, findings S10–S12.
-- Produces: `createGeminiEngine(deps?)`, `createGeminiParser(authHint)`, `GEMINI_POLICY`,
-  `geminiSettings(mcp | null, mode)`, `GEMINI_ALIASES`.
-
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 5: Write the cross-engine safety test**
 
 ```ts
-// app/server/services/assistant/engines/gemini.test.ts
+// app/server/services/assistant/engines/safety.test.ts
+/**
+ * The Global Constraints, checked across every engine at once: no bypass /
+ * yolo / allow-all flag in any turn (new or resumed chat, login or API key),
+ * Copilot has no shell permission at all, Claude's and Grok's shell is
+ * git-only, and Codex always runs in its workspace-write sandbox.
+ */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import path from "node:path";
-import { GEMINI_POLICY, createGeminiEngine, createGeminiParser, geminiSettings } from "./gemini.ts";
+import { createClaudeEngine } from "./claude.ts";
+import { createCodexEngine } from "./codex.ts";
 import type { EngineDeps } from "./common.ts";
-import type { TurnInput } from "./types.ts";
+import { createCopilotEngine } from "./copilot.ts";
+import { createGrokEngine } from "./grok.ts";
+import { defaultRegistry } from "./registry.ts";
+import { FORBIDDEN_FLAGS } from "./testFakes.ts";
+import type { AssistantEngine, TurnInput } from "./types.ts";
 
 const PLUGIN = path.resolve(import.meta.dirname, "..", "..", "..", "..", "assistant-plugin");
-const FIXTURE = path.join(import.meta.dirname, "fixtures", "gemini-turn.jsonl");
-const MCP = { command: "C:\\node.exe", args: ["C:\\app\\dist\\assistant-mcp.js"], env: { SKILL_VAULT_URL: "http://127.0.0.1:9994" } };
-const WORK = "C:\\Users\\me\\.skill-vault\\engines\\gemini";
 
-function deps(written: Record<string, string>, over: Partial<EngineDeps> = {}): EngineDeps {
-  return {
-    resolve: () => ({ command: "C:\\node\\node.exe", prefixArgs: ["C:\\npm\\gemini\\dist\\index.js"], label: "gemini CLI" }),
-    run: async () => ({ code: 0, stdout: "0.55.1\n", stderr: "" }),
-    home: "C:\\Users\\me",
-    env: {},
-    exists: (p) => p in written,
-    readFile: (p) => written[p] ?? "",
-    writeFile: (p, t) => {
-      written[p] = t;
-    },
-    ...over,
-  };
-}
+const fakeDeps = (): EngineDeps => ({
+  resolve: (name, label) => ({ command: `C:\\bin\\${name}.exe`, prefixArgs: [], label }),
+  forget: () => {},
+  run: async () => ({ code: 0, stdout: "1.0.0\n", stderr: "" }),
+  home: "C:\\Users\\me",
+  env: {},
+  exists: () => false,
+  readFile: () => "",
+  writeFile: () => {},
+});
 
-const INPUT: TurnInput = {
+const ENGINES: AssistantEngine[] = [createClaudeEngine(), createCodexEngine(fakeDeps()), createCopilotEngine(fakeDeps()), createGrokEngine(fakeDeps())];
+
+const BASE: TurnInput = {
   sessionId: "11111111-2222-3333-4444-555555555555",
   isFirstTurn: true,
   message: "hi",
   leadAgent: "vault-assistant",
   contextBlock: "# ctx",
-  mcp: MCP,
+  mcp: { command: "C:\\node.exe", args: ["C:\\app\\dist\\assistant-mcp.js"], env: { SKILL_VAULT_URL: "http://127.0.0.1:9994" } },
   vaultPath: "C:\\vault",
   reposDir: "C:\\repos",
   pluginDir: PLUGIN,
-  workDir: WORK,
+  workDir: "C:\\Users\\me\\.skill-vault\\engines\\x",
   auth: { auth: "login" },
-  baseEnv: { GEMINI_API_KEY: "stray" },
+  baseEnv: {},
 };
 
-test("policy: git-only shell, edits, the vault server", () => {
-  assert.match(GEMINI_POLICY, /toolName = "run_shell_command"\ncommandPrefix = "git "\ndecision = "allow"/);
-  assert.match(GEMINI_POLICY, /mcpName = "vault"/);
-  // No catch-all: every allow rule names a tool or the vault server.
-  for (const rule of GEMINI_POLICY.split("[[rule]]").slice(1)) assert.match(rule, /toolName|mcpName/);
+/** New and resumed chat × login and API key. */
+function turns(engine: AssistantEngine): string[][] {
+  const out: string[][] = [];
+  for (const auth of [{ auth: "login" as const }, { auth: "api_key" as const, api_key: "k" }]) {
+    out.push(engine.buildTurn({ ...BASE, auth }).args);
+    out.push(engine.buildTurn({ ...BASE, auth, isFirstTurn: false, engineSessionId: "thread-1" }).args);
+  }
+  return out;
+}
+
+test("every registered engine is covered here", () => {
+  assert.deepEqual(ENGINES.map((e) => e.id), defaultRegistry().list().map((e) => e.id));
 });
 
-test("settings: only the vault server; auth type follows the mode", () => {
-  const s = JSON.parse(geminiSettings(MCP, "login"));
-  assert.deepEqual(Object.keys(s.mcpServers), ["vault"]);
-  assert.equal(s.security.auth.selectedType, "oauth-personal");
-  assert.equal(JSON.parse(geminiSettings(MCP, "api_key")).security.auth.selectedType, "gemini-api-key");
+test("no engine's turn carries a bypass, yolo or allow-all flag", () => {
+  for (const engine of ENGINES) {
+    for (const args of turns(engine)) {
+      const hit = FORBIDDEN_FLAGS.find((f) => args.some((a) => a.includes(f)));
+      assert.equal(hit, undefined, `${engine.id} passes ${hit}`);
+    }
+  }
 });
 
-test("turn: stdin prompt, stream-json, policy + system settings, only the vault server", () => {
-  const written: Record<string, string> = {};
-  const spec = createGeminiEngine(deps(written)).buildTurn(INPUT);
-  const a = spec.args;
-  const after = (flag: string) => a[a.indexOf(flag) + 1];
-  assert.equal(after("-p"), "");
-  assert.equal(after("-o"), "stream-json");
-  assert.equal(after("--session-id"), INPUT.sessionId);
-  assert.equal(after("--approval-mode"), "default");
-  assert.equal(after("--allowed-mcp-server-names"), "vault");
-  assert.equal(after("--include-directories"), `C:\\repos,${PLUGIN}`);
-  assert.equal(written[after("--policy")], GEMINI_POLICY);
-  assert.equal(spec.env?.GEMINI_CLI_SYSTEM_SETTINGS_PATH, path.join(WORK, "settings.json"));
-  assert.ok(written[path.join(WORK, "settings.json")]);
-  assert.equal(spec.env?.GEMINI_API_KEY, undefined);
-  for (const bad of ["--yolo", "-y", "yolo", "auto_edit"]) assert.ok(!a.includes(bad));
-  assert.match(spec.stdin, /^<skill-vault-instructions>/);
-  const later = createGeminiEngine(deps({})).buildTurn({ ...INPUT, isFirstTurn: false });
-  assert.equal(later.args[later.args.indexOf("--resume") + 1], INPUT.sessionId); // spike S11
-});
-
-test("authStatus: oauth creds + active account", async () => {
-  const files = {
-    [path.join("C:\\Users\\me", ".gemini", "oauth_creds.json")]: "{}",
-    [path.join("C:\\Users\\me", ".gemini", "google_accounts.json")]: JSON.stringify({ active: "me@example.com" }),
-  };
-  assert.deepEqual(await createGeminiEngine(deps(files)).authStatus({ auth: "login" }), { signed_in: true, method: "login", account: "me@example.com" });
-  assert.equal((await createGeminiEngine(deps({})).authStatus({ auth: "login" })).signed_in, false);
-});
-
-test("parser: deltas, tools, one end of turn; errors carry the hint", () => {
-  const p = createGeminiParser((m) => `${m}!`);
-  const lines = [
-    { type: "init", session_id: "s" },
-    { type: "message", role: "user", content: "hi" },
-    { type: "message", role: "assistant", content: "Look", delta: true },
-    { type: "tool_use", tool_name: "run_shell_command", tool_id: "t1", parameters: { command: "git status" } },
-    { type: "tool_result", tool_id: "t1", status: "success", output: "clean" },
-    { type: "result", status: "success", stats: { duration_ms: 900 } },
-  ];
-  const events = lines.flatMap((l) => p.parse(JSON.stringify(l)));
-  assert.deepEqual(events.map((e) => e.type), ["text_delta", "tool_start", "tool_result", "turn_end"]);
-  assert.equal(events[1].type === "tool_start" && events[1].label, "Running: git status");
-  assert.deepEqual(createGeminiParser((m) => `${m}!`).parse(JSON.stringify({ type: "error", severity: "error", message: "boom" })), [{ type: "error", message: "boom!" }]);
-});
-
-test("parser: the real Gemini fixture yields text, the vault call and an end of turn", () => {
-  const p = createGeminiParser((m) => m);
-  const events = fs.readFileSync(FIXTURE, "utf-8").split(/\r?\n/).filter(Boolean).flatMap((l) => p.parse(l));
-  assert.ok(events.some((e) => e.type === "text_delta"));
-  assert.ok(events.some((e) => e.type === "tool_start" && e.name === "mcp__vault__list_skills"));
-  assert.equal(events.at(-1)?.type, "turn_end");
+test("shell: none on Copilot, git-only on Claude and Grok, sandboxed on Codex", () => {
+  const byId = (id: string) => ENGINES.find((e) => e.id === id) as AssistantEngine;
+  for (const args of turns(byId("copilot"))) assert.ok(!args.some((a) => a.includes("shell(")), "Copilot gets no shell permission");
+  for (const id of ["claude", "grok"]) {
+    for (const args of turns(byId(id))) {
+      const shells = args.flatMap((a) => a.match(/Bash\([^)]*\)/g) ?? []);
+      assert.ok(shells.length > 0, `${id} declares its shell rule`);
+      for (const s of shells) assert.match(s, /^Bash\(git[ :]\*\)$/, `${id}: ${s} isn't git-only`);
+    }
+  }
+  for (const args of turns(byId("codex"))) {
+    assert.ok(args.includes('sandbox_mode="workspace-write"'));
+    assert.ok(!args.some((a) => a.includes("danger-full-access")));
+  }
 });
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [ ] **Step 6: Run the tests**
 
-Run: `node --import tsx --test server/services/assistant/engines/gemini.test.ts`
-Expected: FAIL — module not found.
+Run: `node --import tsx --test server/services/assistant/engines/grok.test.ts server/services/assistant/engines/safety.test.ts` then `npm test` and `npm run typecheck`
+Expected: PASS (5 grok tests, 3 safety tests).
 
-- [ ] **Step 3: Write `gemini.ts`**
-
-```ts
-// app/server/services/assistant/engines/gemini.ts
-/**
- * Gemini CLI (`gemini -p "" -o stream-json`, prompt on stdin). Checked against 0.55.1.
- *
- * Gemini has no per-run MCP flag, so the app writes a system settings file
- * (GEMINI_CLI_SYSTEM_SETTINGS_PATH — system settings win over the user's)
- * holding only the vault server, and --allowed-mcp-server-names keeps any
- * other server out. A policy file allows git-only shell, file edits and the
- * vault server; everything else needs approval, which non-interactive mode
- * refuses. There's no login subcommand: the sign-in window runs `gemini` and
- * the user picks "Login with Google".
- */
-import path from "node:path";
-import { canonicalTool, toolResultEvent, toolStartEvent, type ToolAliases } from "../streamEvents.ts";
-import type { VaultMcpServer } from "../mcpConfig.ts";
-import { apiKeyPresent, defaultEngineDeps, detectWithVersion, keyEnv, makeAuthHint, type EngineDeps } from "./common.ts";
-import { composeInstructions, composePrompt } from "./instructions.ts";
-import type { AssistantEngine, TurnParser } from "./types.ts";
-
-const LABEL = "Gemini CLI";
-const KEYS = ["GEMINI_API_KEY", "GOOGLE_API_KEY"];
-const authHint = makeAuthHint(LABEL, /not (logged|signed) in|unauthori[sz]ed|\b401\b|GEMINI_API_KEY|auth(entication)? (method|required)|login required/i);
-
-export const GEMINI_ALIASES: ToolAliases = {
-  run_shell_command: "Bash",
-  read_file: "Read",
-  read_many_files: "Read",
-  replace: "Edit",
-  write_file: "Write",
-  glob: "Glob",
-  search_file_content: "Grep",
-  list_directory: "Glob",
-  google_web_search: "WebSearch",
-  web_fetch: "WebFetch",
-};
-
-/** Policy engine rules (format: spike S12). */
-export const GEMINI_POLICY = [
-  "# Written by Skill Vault. Shell is git-only; edits and the vault server are allowed; everything else is refused.",
-  "[[rule]]",
-  'toolName = "run_shell_command"',
-  'commandPrefix = "git "',
-  'decision = "allow"',
-  "priority = 500",
-  "",
-  "[[rule]]",
-  'toolName = ["replace", "write_file"]',
-  'decision = "allow"',
-  "priority = 500",
-  "",
-  "[[rule]]",
-  'mcpName = "vault"',
-  'decision = "allow"',
-  "priority = 500",
-  "",
-].join("\n");
-
-export function geminiSettings(mcp: VaultMcpServer | null, mode: "login" | "api_key"): string {
-  return JSON.stringify(
-    {
-      ...(mcp ? { mcpServers: { vault: { command: mcp.command, args: mcp.args, env: mcp.env } } } : {}),
-      security: { auth: { selectedType: mode === "api_key" ? "gemini-api-key" : "oauth-personal" } },
-      general: { disableAutoUpdate: true },
-    },
-    null,
-    2,
-  );
-}
-
-export function createGeminiEngine(deps: EngineDeps = defaultEngineDeps()): AssistantEngine {
-  const target = () => deps.resolve("gemini", "gemini CLI");
-  const geminiDir = path.join(deps.home, ".gemini");
-  const engine: AssistantEngine = {
-    id: "gemini",
-    label: LABEL,
-    verifiedVersion: "0.55.1",
-    subagents: false,
-    apiKeyEnv: KEYS,
-    install: [{ kind: "npm", label: "Install Gemini CLI", args: ["install", "-g", "@google/gemini-cli"], source: "npmjs.com" }],
-    loginArgs: [],
-    loginHint: "Choose “Login with Google”, finish in the browser, then type /quit in the window.",
-    loginEnv() {
-      // Same folder as registry.engineWorkDir("gemini"), spelled out to keep registry → gemini one-way.
-      const file = path.join(deps.home, ".skill-vault", "engines", "gemini", "settings-login.json");
-      deps.writeFile(file, geminiSettings(null, "login"));
-      return { GEMINI_CLI_SYSTEM_SETTINGS_PATH: file };
-    },
-    target,
-    detect: () => detectWithVersion(deps, target(), engine.childEnv({ auth: "login" }, deps.env)),
-    async authStatus(cfg) {
-      if (cfg.auth === "api_key") return { signed_in: apiKeyPresent(cfg, deps.env, KEYS), method: "api_key" };
-      // spike S10
-      if (!deps.exists(path.join(geminiDir, "oauth_creds.json"))) return { signed_in: false, method: "login" };
-      try {
-        const a = JSON.parse(deps.readFile(path.join(geminiDir, "google_accounts.json"))) as { active?: string };
-        return { signed_in: true, method: "login", ...(a.active ? { account: a.active } : {}) };
-      } catch {
-        return { signed_in: true, method: "login" };
-      }
-    },
-    childEnv: (cfg, base) => keyEnv(cfg, base, KEYS),
-    buildTurn(input) {
-      const t = target();
-      if (!t) throw new Error("Gemini CLI isn't installed — install it in Settings → AI assistant.");
-      const mode = input.auth.auth === "api_key" ? "api_key" : "login";
-      const settingsFile = path.join(input.workDir, "settings.json");
-      const policyFile = path.join(input.workDir, "policy.toml");
-      deps.writeFile(settingsFile, geminiSettings(input.mcp, mode));
-      deps.writeFile(policyFile, GEMINI_POLICY);
-      const instructions = input.isFirstTurn
-        ? composeInstructions({
-            pluginDir: input.pluginDir,
-            lead: input.leadAgent,
-            note: { label: LABEL, vaultToolSpelling: "the `vault` MCP server's tools", subagents: false },
-            includeLead: true,
-          })
-        : undefined;
-      return {
-        label: "gemini CLI",
-        target: t,
-        args: [
-          "-p", "",
-          "-o", "stream-json",
-          ...(input.isFirstTurn ? ["--session-id", input.sessionId] : ["--resume", input.sessionId]),
-          "--include-directories", `${input.reposDir},${input.pluginDir}`,
-          "--approval-mode", "default",
-          "--policy", policyFile,
-          "--allowed-mcp-server-names", "vault",
-          "--skip-trust",
-        ],
-        stdin: composePrompt({ instructions, context: input.contextBlock, message: input.message }),
-        env: { ...engine.childEnv(input.auth, input.baseEnv), GEMINI_CLI_SYSTEM_SETTINGS_PATH: settingsFile },
-        cwd: input.vaultPath,
-      };
-    },
-    createParser: () => createGeminiParser(authHint),
-    authHint,
-  };
-  return engine;
-}
-
-/** Gemini stream-json → wire events (shapes: spike S12, fixtures/gemini-turn.jsonl). */
-export function createGeminiParser(hint: (m: string) => string): TurnParser {
-  let sawDelta = false;
-  let ended = false;
-  return {
-    parse(line) {
-      let m: Record<string, any>;
-      try {
-        m = JSON.parse(line);
-      } catch {
-        return [];
-      }
-      switch (m?.type) {
-        case "message":
-          if (m.role !== "assistant" || typeof m.content !== "string" || !m.content) return [];
-          if (m.delta === true) {
-            sawDelta = true;
-            return [{ type: "text_delta", text: m.content }];
-          }
-          return sawDelta ? [] : [{ type: "text_delta", text: m.content }];
-        case "tool_use": {
-          if (typeof m.tool_id !== "string" || typeof m.tool_name !== "string") return [];
-          const c = canonicalTool(GEMINI_ALIASES, m.tool_name, m.parameters && typeof m.parameters === "object" ? m.parameters : {});
-          return [toolStartEvent(m.tool_id, c.name, c.input)];
-        }
-        case "tool_result":
-          return typeof m.tool_id === "string" ? [toolResultEvent(m.tool_id, m.status === "success", m.output ?? m.error?.message)] : [];
-        case "error":
-          return m.severity === "warning" ? [] : [{ type: "error", message: hint(String(m.message ?? "Gemini reported an error")) }];
-        case "result":
-          if (ended) return [];
-          ended = true;
-          return m.status === undefined || m.status === "success"
-            ? [{ type: "turn_end", duration_ms: typeof m.stats?.duration_ms === "number" ? m.stats.duration_ms : undefined }]
-            : [{ type: "error", message: hint(String(m.error?.message ?? `Gemini turn ended: ${m.status}`)) }];
-        default:
-          return [];
-      }
-    },
-  };
-}
-```
-
-Adjust from the findings:
-- S11: if `--resume <uuid>` didn't work, add a `resumeIndex(uuid)` helper. It runs
-  `deps.run(target, ["--list-sessions"], …)`, finds the line containing the uuid, and passes its index
-  to `--resume`. Add a test with the `--list-sessions` output Task 1 recorded.
-- S12: if the policy format, event shapes or MCP tool spelling differ, fix `GEMINI_POLICY`, the parser
-  and `canonicalTool`'s vault regex (Task 4) to match. If `hostname` was **not** refused, stop and tell
-  the lead.
-
-- [ ] **Step 4: Register Gemini** in `registry.ts`, last in the list.
-
-- [ ] **Step 5: Run the tests**
-
-Run: `node --import tsx --test server/services/assistant/engines/gemini.test.ts` then `npm test` and `npm run typecheck`
-Expected: PASS.
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add server/services/assistant/engines
-git commit -m "engines: Gemini CLI (system settings with only the vault server, git-only policy)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "engines: Grok Build (own GROK_HOME with only the vault server, Claude-format stream); safety test across engines" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
+
+---
+
+### Task 12: (removed)
+
+Removed: Gemini dropped after the spike (S10). Task numbers are kept so references stay valid.
 
 ---
 
@@ -3870,7 +4008,8 @@ export function createEngineJobs(parts: { installer?: Installer } = {}): EngineJ
 
 `routes/assistant.ts`:
 - Import `createEngineJobs, type EngineJobs` from `jobs.ts`.
-- `AssistantRouterOpts.jobs?: EngineJobs;` and `const jobs = opts.jobs ?? createEngineJobs();`.
+- `AssistantRouterOpts.jobs?: EngineJobs;` and, right after `const states = …` in the factory,
+  `const jobs = opts.jobs ?? createEngineJobs();`.
 - Add the route:
 
 ```ts
@@ -3940,16 +4079,23 @@ git commit -m "assistant: install a provider's CLI from the app (streamed, one a
 - Test: `app/server/services/assistant/engines/signIn.test.ts`, `app/server/routes/assistant.test.ts`
 
 **Interfaces:**
-- Consumes: `SpawnTarget`, `killProcessTree` (Task 2); `AssistantEngine.loginArgs`, `loginEnv`,
-  `childEnv`, `target` (Task 4); `isLoopbackRequest` (`routes/sameOrigin.ts`).
+- Consumes: `SpawnTarget`, `killProcessTree` (Task 2); `AssistantEngine.cliName`, `loginArgs`,
+  `loginEnv`, `childEnv`, `target`, `label`, `id` (Task 4); `fakeEngine` (Task 8; `cliName "codex"`,
+  `loginArgs ["login"]`, `loginHint "Do the thing."`); `EngineJobs` / `createEngineJobs` (Task 13);
+  `ViewOpts.mode` and `GET /engines/:id?mode=` (Task 8); `isLoopbackRequest` (`routes/sameOrigin.ts`).
 - Produces:
   - `powershellLoginCommand(title: string, target: SpawnTarget, args: string[]): string`
-  - `interface SignInManager { pending(): boolean; current(): EngineId | null; start(engine, env): { started: true } | { error: string }; finish(id): void; cancel(): void }`
-  - `createSignInManager(deps?)`
+  - `interface SignInDeps { platform; openWindow(title, command, env): { close(): void } | { error: string }; setTimer(fn, ms): { cancel(): void } }`
+  - `type SignInRefusal = { error: string; reason: "unsupported" | "not_installed" | "spawn_failed" }`
+  - `interface SignInManager { pending(): boolean; current(): EngineId | null; start(engine, env): { started: true } | SignInRefusal; finish(id): void; cancel(): void }`
+  - `createSignInManager(deps?: Partial<SignInDeps>)`
   - `SIGN_IN_TIMEOUT_MS = 600_000`
-  - `EngineJobs.signIn: SignInManager`
-  - Routes: `POST /engines/:id/login` → `{ started: true, hint }`; `POST /engines/:id/login/cancel` →
-    `{ ok: true }`. `GET /engines/:id` closes the window once `signed_in` is true.
+  - `EngineJobs.signIn: SignInManager`; `createEngineJobs(parts?: { installer?; signIn? })`
+  - Routes: `POST /engines/:id/login` → `{ started: true, hint }`, 403 for a non-loopback request, 409
+    for `unsupported` / `not_installed`, 500 with the message when the window didn't open;
+    `POST /engines/:id/login/cancel` → `{ ok: true }`. `GET /engines/:id` closes the window once the
+    view reports `auth.mode === "login"` and `signed_in === true` (a status for the other mode never
+    closes it).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -3969,7 +4115,7 @@ test("powershellLoginCommand quotes every piece and sets the title", () => {
 
 test("start opens one window; a second start replaces it; cancel and timeout close it", () => {
   const opened: Array<{ title: string; command: string; closed: boolean }> = [];
-  let fire: (() => void) | null = null;
+  let fire: () => void = () => {};
   const m = createSignInManager({
     platform: "win32",
     openWindow: (title, command) => {
@@ -3979,7 +4125,7 @@ test("start opens one window; a second start replaces it; cancel and timeout clo
     },
     setTimer: (fn) => {
       fire = fn;
-      return { cancel: () => (fire = null) };
+      return { cancel: () => (fire = () => {}) };
     },
   });
   assert.deepEqual(m.start(fakeEngine(), {}), { started: true });
@@ -3992,43 +4138,95 @@ test("start opens one window; a second start replaces it; cancel and timeout clo
   assert.equal(opened[1].closed, true);
   assert.equal(m.pending(), false);
   m.start(fakeEngine(), {});
-  fire?.();
+  fire();
   assert.equal(opened[2].closed, true);
   assert.equal(m.pending(), false);
 });
 
-test("start refuses an engine that isn't installed, and non-Windows", () => {
+test("start refuses an engine that isn't installed, a window that didn't open, and non-Windows", () => {
   const m = createSignInManager({ platform: "win32", openWindow: () => ({ close: () => {} }), setTimer: () => ({ cancel: () => {} }) });
   const r = m.start(fakeEngine({ target: () => null }), {});
-  assert.ok("error" in r && /isn't installed/.test(r.error));
+  assert.ok("error" in r && /isn't installed/.test(r.error) && r.reason === "not_installed");
   assert.equal(m.pending(), false);
+  const broken = createSignInManager({ platform: "win32", openWindow: () => ({ error: "Couldn't open the sign-in window: spawn powershell.exe ENOENT" }), setTimer: () => ({ cancel: () => {} }) });
+  assert.deepEqual(broken.start(fakeEngine(), {}), { error: "Couldn't open the sign-in window: spawn powershell.exe ENOENT", reason: "spawn_failed" });
+  assert.equal(broken.pending(), false);
   const mac = createSignInManager({ platform: "darwin", openWindow: () => ({ close: () => {} }), setTimer: () => ({ cancel: () => {} }) });
-  assert.match((mac.start(fakeEngine(), {}) as { error: string }).error, /Windows/);
+  assert.deepEqual(mac.start(fakeEngine(), {}), { error: 'Sign-in from the app is Windows only. Run "codex login" in a terminal.', reason: "unsupported" });
 });
 ```
 
 Append to `routes/assistant.test.ts`:
 
 ```ts
-test("login: opens the window, and the window closes once the engine reports signed in", async () => {
+/** A sign-in manager whose window is recorded instead of opened. */
+async function signInHarness(over: { openWindow?: () => { close(): void } | { error: string } } = {}) {
   const { createSignInManager } = await import("../services/assistant/engines/signIn.ts");
   const { createEngineJobs } = await import("../services/assistant/engines/jobs.ts");
-  let closed = false;
+  const win = { opened: 0, closed: 0 };
+  const signIn = createSignInManager({
+    platform: "win32",
+    openWindow: over.openWindow ?? (() => (win.opened++, { close: () => void win.closed++ })),
+    setTimer: () => ({ cancel: () => {} }),
+  });
+  return { win, jobs: createEngineJobs({ signIn }) };
+}
+
+test("login: opens the window, and the window closes once the engine reports signed in", async () => {
   let signedIn = false;
-  const signIn = createSignInManager({ platform: "win32", openWindow: () => ({ close: () => (closed = true) }), setTimer: () => ({ cancel: () => {} }) });
-  const engine = fakeEngineSignedIn(() => signedIn);
-  const base = await serve(mod.assistantRouter({ mode: "development", appRoot: APP_ROOT, registry: reg.createRegistry([engine]), jobs: createEngineJobs({ signIn }) }));
+  const { win, jobs } = await signInHarness();
+  const engine = fakes.fakeEngine({ authStatus: async () => ({ signed_in: signedIn, method: "login" }) });
+  const base = await serve(mod.assistantRouter({ mode: "development", appRoot: APP_ROOT, registry: reg.createRegistry([engine]), jobs }));
   assert.deepEqual(await (await fetch(`${base}/engines/codex/login`, send("POST", {}))).json(), { started: true, hint: "Do the thing." });
+  assert.equal(win.opened, 1);
   await fetch(`${base}/engines/codex?refresh=1`);
-  assert.equal(closed, false);
+  assert.equal(win.closed, 0);
   signedIn = true;
-  await fetch(`${base}/engines/codex?refresh=1`);
-  assert.equal(closed, true);
+  await fetch(`${base}/engines/codex?refresh=1&mode=login`);
+  assert.equal(win.closed, 1);
 });
 
-function fakeEngineSignedIn(isIn: () => boolean) {
-  return fakes.fakeEngine({ authStatus: async () => ({ signed_in: isIn(), method: "login" }) });
-}
+test("login/cancel closes the window", async () => {
+  const { win, jobs } = await signInHarness();
+  const base = await serve(mod.assistantRouter({ mode: "development", appRoot: APP_ROOT, registry: reg.createRegistry([fakes.fakeEngine()]), jobs }));
+  await fetch(`${base}/engines/codex/login`, send("POST", {}));
+  assert.equal(jobs.signIn.pending(), true);
+  assert.deepEqual(await (await fetch(`${base}/engines/codex/login/cancel`, send("POST", {}))).json(), { ok: true });
+  assert.equal(win.closed, 1);
+  assert.equal(jobs.signIn.pending(), false);
+});
+
+test("login: a request whose Host isn't this PC gets 403 and no window", async () => {
+  const { win, jobs } = await signInHarness();
+  const base = await serve(mod.assistantRouter({ mode: "development", appRoot: APP_ROOT, registry: reg.createRegistry([fakes.fakeEngine()]), jobs }));
+  // fetch can't set Host; a raw request can.
+  const http = (await import("node:http")).default;
+  const u = new URL(`${base}/engines/codex/login`);
+  const res = await new Promise<{ status: number; body: { error?: string } }>((resolve, reject) => {
+    const req = http.request(
+      { host: u.hostname, port: u.port, path: u.pathname, method: "POST", headers: { Host: "evil.example", "content-type": "application/json" } },
+      (r) => {
+        let data = "";
+        r.on("data", (d) => (data += d));
+        r.on("end", () => resolve({ status: r.statusCode ?? 0, body: JSON.parse(data || "{}") }));
+      },
+    );
+    req.on("error", reject);
+    req.end("{}");
+  });
+  assert.equal(res.status, 403);
+  assert.match(res.body.error ?? "", /only be started from this PC/);
+  assert.equal(win.opened, 0);
+});
+
+test("login: a window that fails to open answers 500 with the reason", async () => {
+  const { jobs } = await signInHarness({ openWindow: () => ({ error: "Couldn't open the sign-in window: powershell.exe didn't start." }) });
+  const base = await serve(mod.assistantRouter({ mode: "development", appRoot: APP_ROOT, registry: reg.createRegistry([fakes.fakeEngine()]), jobs }));
+  const res = await fetch(`${base}/engines/codex/login`, send("POST", {}));
+  assert.equal(res.status, 500);
+  assert.match(((await res.json()) as { error: string }).error, /powershell\.exe didn't start/);
+  assert.equal(jobs.signIn.pending(), false);
+});
 ```
 
 - [ ] **Step 2: Run them to verify they fail**
@@ -4042,14 +4240,14 @@ Expected: FAIL — module not found.
 // app/server/services/assistant/engines/signIn.ts
 /**
  * The sign-in window: a visible PowerShell console running the engine's own
- * login command (`codex login`, `copilot login`, `grok login`, `gemini`…),
- * so each tool handles its own browser or device-code step the way it
- * expects to — Copilot's device code and Gemini's menu need a real terminal.
+ * login command (`claude auth login`, `codex login`, `copilot login`,
+ * `grok login`), so each tool handles its own browser or device-code step
+ * the way it expects to — Copilot's device code needs a real terminal.
  * The command is built only from the resolved executable and the engine's
  * fixed args. One window at a time; it closes on success (GET /engines/:id
  * sees signed_in), on Cancel, or after 10 minutes.
  */
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { killProcessTree, type SpawnTarget } from "./exe.ts";
 import type { AssistantEngine, EngineId } from "./types.ts";
 
@@ -4063,27 +4261,38 @@ export function powershellLoginCommand(title: string, target: SpawnTarget, args:
 
 export interface SignInDeps {
   platform: NodeJS.Platform;
-  openWindow(title: string, command: string, env: NodeJS.ProcessEnv): { close(): void };
+  /** Opens the window, or says why it couldn't. */
+  openWindow(title: string, command: string, env: NodeJS.ProcessEnv): { close(): void } | { error: string };
   setTimer(fn: () => void, ms: number): { cancel(): void };
 }
+
+/** Why start() refused: the route answers 409 for the first two and 500 for a window that didn't open. */
+export type SignInRefusal = { error: string; reason: "unsupported" | "not_installed" | "spawn_failed" };
 
 export interface SignInManager {
   pending(): boolean;
   current(): EngineId | null;
-  start(engine: AssistantEngine, env: NodeJS.ProcessEnv): { started: true } | { error: string };
+  start(engine: AssistantEngine, env: NodeJS.ProcessEnv): { started: true } | SignInRefusal;
   finish(id: EngineId): void;
   cancel(): void;
 }
 
-function defaultOpenWindow(_title: string, command: string, env: NodeJS.ProcessEnv): { close(): void } {
-  // detached on Windows = the child gets its own (visible) console window.
-  const child = spawn("powershell.exe", ["-NoProfile", "-NoExit", "-Command", command], {
-    detached: true,
-    windowsHide: false,
-    stdio: "ignore",
-    env,
-  });
+function defaultOpenWindow(_title: string, command: string, env: NodeJS.ProcessEnv): { close(): void } | { error: string } {
+  let child: ChildProcess;
+  try {
+    // detached on Windows = the child gets its own (visible) console window.
+    child = spawn("powershell.exe", ["-NoProfile", "-NoExit", "-Command", command], {
+      detached: true,
+      windowsHide: false,
+      stdio: "ignore",
+      env,
+    });
+  } catch (err) {
+    return { error: `Couldn't open the sign-in window: ${(err as Error).message}` };
+  }
+  // A launch that failed (powershell.exe missing or blocked) has no pid; its "error" event follows a tick later.
   child.on("error", () => {});
+  if (typeof child.pid !== "number") return { error: "Couldn't open the sign-in window: powershell.exe didn't start." };
   child.unref();
   return { close: () => killProcessTree(child.pid) };
 }
@@ -4113,11 +4322,16 @@ export function createSignInManager(over: Partial<SignInDeps> = {}): SignInManag
     pending: () => current !== null,
     current: () => current?.id ?? null,
     start(engine, env) {
-      if (deps.platform !== "win32") return { error: `Sign-in from the app is Windows only. Run ${engine.loginArgs.join(" ") || engine.id} in a terminal.` };
+      if (deps.platform !== "win32") {
+        const command = `${engine.cliName} ${engine.loginArgs.join(" ")}`.trim();
+        return { error: `Sign-in from the app is Windows only. Run "${command}" in a terminal.`, reason: "unsupported" };
+      }
       const target = engine.target();
-      if (!target) return { error: `${engine.label} isn't installed — install it first.` };
+      if (!target) return { error: `${engine.label} isn't installed — install it first.`, reason: "not_installed" };
       close();
-      const win = deps.openWindow(`Sign in to ${engine.label}`, powershellLoginCommand(`Sign in to ${engine.label}`, target, engine.loginArgs), env);
+      const title = `Sign in to ${engine.label}`;
+      const win = deps.openWindow(title, powershellLoginCommand(title, target, engine.loginArgs), env);
+      if ("error" in win) return { error: win.error, reason: "spawn_failed" };
       const timer = deps.setTimer(close, SIGN_IN_TIMEOUT_MS);
       current = { id: engine.id, close: win.close, timer };
       return { started: true };
@@ -4130,13 +4344,39 @@ export function createSignInManager(over: Partial<SignInDeps> = {}): SignInManag
 }
 ```
 
-`jobs.ts`: add `signIn: SignInManager` to `EngineJobs`, accept `parts.signIn`, and default it to
-`createSignInManager()`. Then `busy: () => installer.isRunning() || signIn.pending()` and
-`stopAll: () => { installer.stop(); signIn.cancel(); }`.
+`jobs.ts` becomes:
+
+```ts
+// app/server/services/assistant/engines/jobs.ts
+/** The long-running engine jobs the app must know about: busy (no idle stop, no update) and shutdown. */
+import { createInstaller, type Installer } from "./install.ts";
+import { createSignInManager, type SignInManager } from "./signIn.ts";
+
+export interface EngineJobs {
+  installer: Installer;
+  signIn: SignInManager;
+  busy(): boolean;
+  stopAll(): void;
+}
+
+export function createEngineJobs(parts: { installer?: Installer; signIn?: SignInManager } = {}): EngineJobs {
+  const installer = parts.installer ?? createInstaller();
+  const signIn = parts.signIn ?? createSignInManager();
+  return {
+    installer,
+    signIn,
+    busy: () => installer.isRunning() || signIn.pending(),
+    stopAll: () => {
+      installer.stop();
+      signIn.cancel();
+    },
+  };
+}
+```
 
 - [ ] **Step 4: Routes**
 
-In `routes/assistant.ts`, import `isLoopbackRequest` from `./sameOrigin.ts` and add:
+In `routes/assistant.ts`, extend the `./sameOrigin.ts` import with `isLoopbackRequest` and add:
 
 ```ts
   router.post("/engines/:id/login", (req, res) => {
@@ -4153,7 +4393,7 @@ In `routes/assistant.ts`, import `isLoopbackRequest` from `./sameOrigin.ts` and 
     const env = { ...engine.childEnv({ auth: "login" }, process.env), ...engine.loginEnv() };
     const r = jobs.signIn.start(engine, env);
     if ("error" in r) {
-      res.status(409).json({ error: r.error });
+      res.status(r.reason === "spawn_failed" ? 500 : 409).json({ error: r.error });
       return;
     }
     states.invalidate(engine.id);
@@ -4166,14 +4406,19 @@ In `routes/assistant.ts`, import `isLoopbackRequest` from `./sameOrigin.ts` and 
   });
 ```
 
-In `GET /engines/:id`, after computing `view`, add
-`if (view.auth.signed_in === true && jobs.signIn.current() === view.id) jobs.signIn.finish(view.id);`.
-Move the `jobs` creation above the routes if needed.
+In `GET /engines/:id`, after the `if (!view) { … }` block and before `res.json(view)`, add:
+
+```ts
+    if (view.auth.mode === "login" && view.auth.signed_in === true && jobs.signIn.current() === view.id) jobs.signIn.finish(view.id);
+```
+
+`jobs` is created next to `states` (Task 13), above the routes.
 
 - [ ] **Step 5: Run the tests**
 
 Run: `node --import tsx --test server/services/assistant/engines/signIn.test.ts server/routes/assistant.test.ts` then `npm test` and `npm run typecheck`
-Expected: PASS.
+Expected: PASS (3 signIn tests; 4 new route tests: window closes on sign-in, cancel, non-loopback 403,
+failed window 500). The type-check passes too: `fire` is declared as a function, never `null`.
 
 - [ ] **Step 6: Commit**
 
@@ -4187,29 +4432,72 @@ git commit -m "assistant: sign in to a provider from the app (its own login in a
 ### Task 15: Client API, Modal, install and sign-in dialogs
 
 **Files:**
-- Modify: `app/client/src/lib/assistant.ts`
+- Modify: `app/client/src/lib/api.ts` (`readNdjson`), `app/client/src/lib/assistant.ts`,
+  `app/client/src/lib/setup.ts` and `app/client/src/lib/appUpdate.ts` (both switch to `readNdjson`)
 - Create: `app/client/src/components/ui/Modal.tsx`, `app/client/src/components/assistant/EngineInstallDialog.tsx`, `app/client/src/components/assistant/EngineSignInDialog.tsx`
 
 **Interfaces:**
-- Consumes: the routes from Tasks 8, 13, 14.
+- Consumes: the routes from Tasks 8, 13, 14, including `GET /engines/:id?mode=login` (Task 8).
+- Produces (`lib/api.ts`): `readNdjson<T>(res: Response, onEvent: (e: T) => void): Promise<void>` — the
+  one NDJSON body reader (the caller checks `res.ok` first). `lib/assistant.ts`'s `streamTurn` keeps its
+  own tolerant reader (it skips malformed lines and flushes an unterminated last line).
 - Produces (`lib/assistant.ts`):
-  - `type EngineId`, `ENGINE_SHORT: Record<EngineId, string>`
+  - `type EngineId = "claude" | "codex" | "copilot" | "grok"`, `ENGINE_SHORT: Record<EngineId, string>`
   - `interface EngineView` (mirrors the server)
   - `type InstallEvent`
   - `engineReady(v: EngineView): boolean`
-  - `assistantApi.engines(refresh?)`, `.engine(id, refresh?)`, `.setEngine(id)`,
+  - `assistantApi.engines(refresh?)`, `.engine(id, refresh?, mode?: "login" | "api_key")`, `.setEngine(id)`,
     `.setEngineAuth(id, body)`, `.login(id)`, `.cancelLogin(id)`
   - `installEngine(id, onEvent): Promise<void>`
   - `AssistantStatus` gains `engine: EngineId; label: string`; `SessionSummary` and
     `SessionDetail.session` gain `engine: EngineId`; the `session` stream event gains `engine?`.
 - Produces (components):
   - `Modal({ title, busy?, onClose, children, width? })`
-  - `EngineInstallDialog({ engine, onClose, onInstalled })`
-  - `EngineSignInDialog({ engine, onClose, onSignedIn })`
+  - `EngineInstallDialog({ engine, onClose, onInstalled, onSignedIn? })` — when the install finishes and
+    the provider's auth mode is login (and it isn't signed in yet), the dialog hands off straight to
+    `EngineSignInDialog`; `onSignedIn` is called when that sign-in finishes, `onClose` when either
+    dialog closes.
+  - `EngineSignInDialog({ engine, onClose, onSignedIn })` — polls `assistantApi.engine(id, true, "login")`
+    and finishes only on a view with `auth.mode === "login"` and `signed_in === true`.
 
-- [ ] **Step 1: Extend `lib/assistant.ts`**
+- [ ] **Step 1: Add `readNdjson` (`lib/api.ts`) and use it in `lib/setup.ts` and `lib/appUpdate.ts`**
 
-Change the session member of `AssistantStreamEvent` to
+In `lib/api.ts`, add after the `ApiError` class:
+
+```ts
+/**
+ * Reads an NDJSON response body to its end, calling onEvent once per line.
+ * The caller checks `res.ok` first (an error response isn't NDJSON).
+ */
+export async function readNdjson<T>(res: Response, onEvent: (e: T) => void): Promise<void> {
+  if (!res.body) return;
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (line) onEvent(JSON.parse(line) as T);
+    }
+  }
+}
+```
+
+In `lib/setup.ts`, change the import to `import { ApiError, readNdjson } from "./api";` and replace the
+`const reader = …` through the end of the `for (;;) { … }` loop inside `stream()` with
+`await readNdjson<SetupEvent>(res, onEvent);`. In `lib/appUpdate.ts`, change the import the same way and
+replace the same loop inside `appUpdateApi.apply` with `await readNdjson<ApplyEvent>(res, onEvent);`.
+Both keep their existing `if (!res.ok || !res.body) …` checks. Behavior is unchanged.
+
+- [ ] **Step 2: Extend `lib/assistant.ts`**
+
+Change the import to `import { ApiError, readNdjson } from "./api";`. Change the session member of
+`AssistantStreamEvent` to
 `| { type: "session"; session_id: string; engine?: EngineId }`. Add `engine: EngineId;` to
 `SessionSummary` and to `SessionDetail["session"]`. Add `engine: EngineId; label: string;` to
 `AssistantStatus`. Then add:
@@ -4217,7 +4505,7 @@ Change the session member of `AssistantStreamEvent` to
 ```ts
 // ── Providers (engines) ──────────────────────────────────────────
 
-export type EngineId = "claude" | "codex" | "copilot" | "grok" | "gemini";
+export type EngineId = "claude" | "codex" | "copilot" | "grok";
 
 /** Short names for badges. */
 export const ENGINE_SHORT: Record<EngineId, string> = {
@@ -4225,7 +4513,6 @@ export const ENGINE_SHORT: Record<EngineId, string> = {
   codex: "Codex",
   copilot: "Copilot",
   grok: "Grok",
-  gemini: "Gemini",
 };
 
 export interface EngineView {
@@ -4267,20 +4554,7 @@ export async function installEngine(id: EngineId, onEvent: (e: InstallEvent) => 
     }
     throw new ApiError(message, res.status, null);
   }
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let nl: number;
-    while ((nl = buf.indexOf("\n")) >= 0) {
-      const line = buf.slice(0, nl).trim();
-      buf = buf.slice(nl + 1);
-      if (line) onEvent(JSON.parse(line) as InstallEvent);
-    }
-  }
+  await readNdjson<InstallEvent>(res, onEvent);
 }
 ```
 
@@ -4288,7 +4562,11 @@ In `assistantApi` add:
 
 ```ts
   engines: (refresh?: boolean) => rest<{ engines: EngineView[] }>("GET", `/api/assistant/engines${refresh ? "?refresh=1" : ""}`),
-  engine: (id: EngineId, refresh?: boolean) => rest<EngineView>("GET", `/api/assistant/engines/${id}${refresh ? "?refresh=1" : ""}`),
+  /** mode: report sign-in for that mode rather than the saved one (the sign-in dialog asks for "login"). */
+  engine: (id: EngineId, refresh?: boolean, mode?: "login" | "api_key") => {
+    const q = new URLSearchParams({ ...(refresh ? { refresh: "1" } : {}), ...(mode ? { mode } : {}) }).toString();
+    return rest<EngineView>("GET", `/api/assistant/engines/${id}${q ? `?${q}` : ""}`);
+  },
   setEngine: (id: EngineId) => rest<{ engine: EngineId }>("PUT", "/api/assistant/engine", { engine: id }),
   /** An omitted field is kept; an empty string clears it. */
   setEngineAuth: (id: EngineId, body: { auth?: "login" | "api_key"; api_key?: string; workspace_id?: string }) =>
@@ -4300,7 +4578,7 @@ In `assistantApi` add:
 `EngineId` is declared below its first use in the earlier interfaces. Type declarations hoist, so this is
 fine.
 
-- [ ] **Step 2: Write `Modal.tsx`**
+- [ ] **Step 3: Write `Modal.tsx`**
 
 ```tsx
 // app/client/src/components/ui/Modal.tsx
@@ -4400,17 +4678,23 @@ export function Modal({
 }
 ```
 
-- [ ] **Step 3: Write `EngineInstallDialog.tsx`**
+- [ ] **Step 4: Write `EngineInstallDialog.tsx`**
 
 ```tsx
 // app/client/src/components/assistant/EngineInstallDialog.tsx
-/** Confirm → install (streamed output) → installed, or what failed with the command to run yourself. */
+/**
+ * Confirm → install (streamed output) → installed, or what failed with the
+ * command to run yourself. When the provider signs in with an account and
+ * isn't signed in yet, a finished install goes straight on to the sign-in
+ * dialog.
+ */
 import { useState } from "react";
 import { assistantApi, installEngine, type EngineView } from "../../lib/assistant";
 import { Button } from "../ui/primitives";
 import { Modal } from "../ui/Modal";
+import { EngineSignInDialog } from "./EngineSignInDialog";
 
-type Phase = "confirm" | "running" | "done" | "failed";
+type Phase = "confirm" | "running" | "done" | "failed" | "signin";
 
 const logStyle = {
   fontFamily: "var(--mono)",
@@ -4425,21 +4709,35 @@ const logStyle = {
   color: "var(--ink-2)",
 };
 
+const errorText = (err: unknown, fallback: string): string => (err instanceof Error && err.message ? err.message : fallback);
+
 export function EngineInstallDialog({
   engine,
   onClose,
   onInstalled,
+  onSignedIn,
 }: {
   engine: EngineView;
   onClose: () => void;
   onInstalled: (view: EngineView) => void;
+  /** Called when the sign-in that follows the install finishes. */
+  onSignedIn?: (view: EngineView) => void;
 }) {
   const [phase, setPhase] = useState<Phase>("confirm");
   const [lines, setLines] = useState<string[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [version, setVersion] = useState<string | null>(null);
+  const [installed, setInstalled] = useState<EngineView | null>(null);
   const commands = engine.install.map((s) => s.display).join("\n");
   const sources = [...new Set(engine.install.map((s) => s.source))].join(", ");
+
+  /** The install is done: report it, then sign in if the provider uses an account login. */
+  const finish = (view: EngineView) => {
+    setInstalled(view);
+    setVersion(view.version);
+    onInstalled(view);
+    setPhase(view.auth.mode === "login" && view.auth.signed_in !== true ? "signin" : "done");
+  };
 
   const run = async () => {
     setPhase("running");
@@ -4457,22 +4755,34 @@ export function EngineInstallDialog({
         }
       });
     } catch (err) {
-      setMessage((err as Error).message);
+      setMessage(errorText(err, "The install didn't start."));
     }
-    setPhase(ok ? "done" : "failed");
-    if (ok) onInstalled(await assistantApi.engine(engine.id, true));
+    if (!ok) {
+      setPhase("failed");
+      return;
+    }
+    try {
+      finish(await assistantApi.engine(engine.id, true));
+    } catch (err) {
+      // Installed, but the fresh state didn't load: say so and skip the hand-off.
+      setMessage(errorText(err, "Couldn't check the provider again."));
+      setPhase("done");
+    }
   };
 
   const checkAgain = async () => {
-    const view = await assistantApi.engine(engine.id, true);
-    if (view.installed) {
-      setVersion(view.version);
-      setPhase("done");
-      onInstalled(view);
-    } else {
-      setMessage("Still not found.");
+    try {
+      const view = await assistantApi.engine(engine.id, true);
+      if (view.installed) finish(view);
+      else setMessage("Still not found.");
+    } catch (err) {
+      setMessage(errorText(err, "Couldn't check the provider again."));
     }
   };
+
+  if (phase === "signin" && installed) {
+    return <EngineSignInDialog engine={installed} onClose={onClose} onSignedIn={(v) => onSignedIn?.(v)} />;
+  }
 
   return (
     <Modal title={`Install ${engine.label}`} busy={phase === "running"} onClose={onClose}>
@@ -4492,6 +4802,7 @@ export function EngineInstallDialog({
       {phase === "done" && (
         <>
           <p style={{ margin: 0, color: "var(--ok)" }}>Installed{version ? ` — ${version}` : ""}.</p>
+          {message && <p style={{ margin: 0, color: "var(--warn)" }}>{message}</p>}
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
             <Button kind="primary" size="sm" onClick={onClose}>Continue</Button>
           </div>
@@ -4513,7 +4824,7 @@ export function EngineInstallDialog({
 }
 ```
 
-- [ ] **Step 4: Write `EngineSignInDialog.tsx`**
+- [ ] **Step 5: Write `EngineSignInDialog.tsx`**
 
 ```tsx
 // app/client/src/components/assistant/EngineSignInDialog.tsx
@@ -4559,8 +4870,9 @@ export function EngineSignInDialog({
         return;
       }
       try {
-        const view = await assistantApi.engine(engine.id, true);
-        if (view.auth.signed_in === true) {
+        // Ask for the login status itself: the saved mode may still be "api_key" (the setup guide saves on Finish).
+        const view = await assistantApi.engine(engine.id, true, "login");
+        if (view.auth.mode === "login" && view.auth.signed_in === true) {
           setAccount(view.auth.account);
           setState("done");
           onSignedIn(view);
@@ -4588,7 +4900,6 @@ export function EngineSignInDialog({
       live.current = false;
       if (timer) clearTimeout(timer);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [engine.id, attempt]);
 
   const cancel = () => {
@@ -4621,19 +4932,19 @@ export function EngineSignInDialog({
 }
 ```
 
-Check the `Button` props (`kind`, `size`, `onClick`, `disabled`, `icon`) against
-`components/ui/primitives.tsx` and adjust names if they differ. Remove the eslint comment if the repo has
-no eslint.
+The `Button` props used here (`kind`, `size`, `onClick`, `disabled`, `icon`) match
+`components/ui/primitives.tsx`. The repo has no eslint, so there is no `exhaustive-deps` comment on the
+effect: it re-runs only for `engine.id` and `attempt` on purpose.
 
-- [ ] **Step 5: Type-check and build**
+- [ ] **Step 6: Type-check and build**
 
 Run: `npm run typecheck` then `npm run build`
 Expected: no errors.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add client/src/lib/assistant.ts client/src/components/ui/Modal.tsx client/src/components/assistant/EngineInstallDialog.tsx client/src/components/assistant/EngineSignInDialog.tsx
+git add client/src/lib/api.ts client/src/lib/setup.ts client/src/lib/appUpdate.ts client/src/lib/assistant.ts client/src/components/ui/Modal.tsx client/src/components/assistant/EngineInstallDialog.tsx client/src/components/assistant/EngineSignInDialog.tsx
 git commit -m "client: provider API, install and sign-in dialogs" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
@@ -4646,8 +4957,10 @@ git commit -m "client: provider API, install and sign-in dialogs" -m "Co-Authore
 - Modify: `app/client/src/pages/Settings.tsx`
 
 **Interfaces:**
-- Consumes: Task 15.
-- Produces: `ClaudeSignIn()` (moved, unchanged behavior) and `ProviderSettings()`.
+- Consumes: Task 15 (`EngineView`, `assistantApi.engines/setEngine/setEngineAuth`, both dialogs —
+  `EngineInstallDialog` takes `onSignedIn` for its hand-off to sign-in).
+- Produces: `ClaudeSignIn()` (moved, unchanged behavior) and `ProviderSettings()`. Each installed row
+  shows its version with "checked with <verified_version>" as visible text, so CLI drift is visible.
 
 - [ ] **Step 1: Move the Claude panel**
 
@@ -4682,7 +4995,6 @@ const KEY_PLACEHOLDER: Record<string, string> = {
   codex: "OpenAI API key (sk-…)",
   copilot: "GitHub fine-grained token with Copilot Requests (github_pat_…)",
   grok: "xAI API key (xai-…)",
-  gemini: "Gemini API key (AIza…)",
 };
 
 function stateText(v: EngineView): string {
@@ -4706,6 +5018,14 @@ export function ProviderSettings() {
     onSuccess: refresh,
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Couldn't change the provider"),
   });
+  const checkAgain = async () => {
+    try {
+      await assistantApi.engines(true);
+      await refetch();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Couldn't check the providers");
+    }
+  };
   const engines = data?.engines ?? [];
   const selected = engines.find((e) => e.selected);
   const muted = { color: "var(--ink-3)", fontSize: 12 } as const;
@@ -4716,7 +5036,7 @@ export function ProviderSettings() {
         <span style={{ fontWeight: 600, color: "var(--ink)" }}>Provider</span>
         <span style={muted}>runs new assistant chats</span>
         <span style={{ flex: 1 }} />
-        <Button kind="ghost" size="sm" disabled={isFetching} onClick={() => void assistantApi.engines(true).then(() => refetch())}>
+        <Button kind="ghost" size="sm" disabled={isFetching} onClick={() => void checkAgain()}>
           {isFetching ? "Checking…" : "Check again"}
         </Button>
       </div>
@@ -4727,7 +5047,9 @@ export function ProviderSettings() {
             <span style={{ fontWeight: 500, color: "var(--ink)" }}>{v.label}</span>
             <span style={muted}>{stateText(v)}</span>
             {v.installed && v.version && (
-              <span style={{ ...muted, marginLeft: "auto" }} title={`Checked with ${v.verified_version}`}>{v.version}</span>
+              <span style={{ ...muted, marginLeft: "auto" }}>
+                {v.version} · checked with {v.verified_version}
+              </span>
             )}
           </label>
           {v.selected && (
@@ -4755,6 +5077,7 @@ export function ProviderSettings() {
             refresh();
           }}
           onInstalled={() => refresh()}
+          onSignedIn={() => refresh()}
         />
       )}
       {dialog?.kind === "signin" && (
@@ -4830,16 +5153,20 @@ function EngineAuth({ view, onSignIn, onSaved }: { view: EngineView; onSignIn: (
 - [ ] **Step 3: Use it in Settings**
 
 In `Settings.tsx`'s `AssistantSection`, replace `<AssistantSignIn />` with `<ProviderSettings />`, and add
-`import { ProviderSettings } from "../components/assistant/ProviderSettings";`. Remove imports that are
-now unused (the type-check will name them).
+`import { ProviderSettings } from "../components/assistant/ProviderSettings";`. Remove **no** existing
+import: `useEffect`, `useState`, `useMutation`, `useQuery`, `useQueryClient`, `toast`, `ApiError`,
+`assistantApi` and `Button` are all still used elsewhere in `Settings.tsx` after the cut (checked at
+`bf6280d`). The type-check won't flag leftovers either way, since `noUnusedLocals` is off. Leave the doc
+comment just above `AUTH_FIELD_STYLE` ("Install the assistant plugin's ten bundled skills…") in
+`Settings.tsx`: it describes `AssistantSection`, not the cut code.
 
 - [ ] **Step 4: Type-check, build, look at it**
 
 Run: `npm run typecheck` then `npm run build`. Then run `npm run dev`, open the printed URL at `/settings`,
 and confirm all of the following:
-- five Provider rows
+- four Provider rows, in this order: Claude Code, OpenAI Codex, GitHub Copilot CLI, Grok Build
 - Claude selected by default, showing its existing sign-in panel
-- Codex/Copilot show *Installed* + version
+- Codex/Copilot show *Installed* + version, with "· checked with <verified version>" visible next to it
 - Grok shows *Not installed* + **Install Grok Build** when selected
 - switching to Codex shows the Account login / API key choice and the "AI tagging… still use Claude
   Code" line
@@ -4864,9 +5191,12 @@ git commit -m "client: Settings picks the assistant's provider, installs it and 
   - `app/client/src/components/assistant/SessionList.tsx`
 
 **Interfaces:**
-- Consumes: Task 15 (`EngineView`, `engineReady`, `ENGINE_SHORT`, the dialogs).
+- Consumes: Task 15 (`EngineView`, `engineReady`, `ENGINE_SHORT`, the dialogs; `EngineInstallDialog`
+  takes `onSignedIn`); Task 8's `/status` (selected provider) and `GET /engines`.
 - Produces: `AssistantState.engine: EngineId | null`. `null` means a new chat, which runs on the
-  selected provider.
+  selected provider. The unavailable gate shows only when `state.engine === null`;
+  `chatLocked = Boolean(state.engine && chatView && !engineReady(chatView))`, where `chatView` is the
+  view of the chat's own engine.
 
 - [ ] **Step 1: Store**
 
@@ -4880,15 +5210,23 @@ In `assistantStore.ts`:
 
 - [ ] **Step 2: Panel**
 
+`/status` (the `status` query, and `available`) describes the **selected** provider. So its gate is for a
+**new** chat only (`state.engine === null`). An open chat is judged by its **own** engine's view
+(`chatView`): if that engine isn't ready, its history still renders and only the composer is locked,
+with a note. History always renders.
+
 In `AssistantPanel.tsx`:
-- Add the query:
+- Right after `const available = status.data?.available ?? false;`, add:
 
 ```tsx
   const enginesQ = useQuery({ queryKey: ["assistant-engines"], queryFn: () => assistantApi.engines() });
   const engines = enginesQ.data?.engines ?? [];
   const selectedView = engines.find((e) => e.selected);
+  // An open chat runs on its own engine; a new chat (engine null) on the selected provider.
   const chatView = state.engine ? engines.find((e) => e.id === state.engine) : selectedView;
-  const chatLocked = Boolean(state.engine && chatView && state.engine !== selectedView?.id && !engineReady(chatView));
+  // /status describes the selected provider, so its gate is for a new chat only. History always renders.
+  const showGate = state.engine === null && Boolean(status.data && !available);
+  const chatLocked = Boolean(state.engine && chatView && !engineReady(chatView));
   const [fix, setFix] = useState<{ kind: "install" | "signin"; engine: EngineView } | null>(null);
 ```
 
@@ -4902,7 +5240,11 @@ In `AssistantPanel.tsx`:
         )}
 ```
 
-- In the availability gate, replace the single **Retry** button with:
+- Change the availability gate's condition from `{status.data && !available ? (` to `{showGate ? (`.
+  Inside it, `status.data` is no longer narrowed, so the reason line becomes
+  `{status.data?.reason ?? "The assistant's provider isn't ready."}` (this also replaces the old
+  `"Claude CLI not found"` fallback).
+- In the gate, replace the single **Retry** button with:
 
 ```tsx
           {selectedView && !selectedView.installed ? (
@@ -4910,11 +5252,22 @@ In `AssistantPanel.tsx`:
           ) : selectedView && !engineReady(selectedView) && selectedView.auth.mode === "login" ? (
             <Button kind="primary" size="sm" onClick={() => setFix({ kind: "signin", engine: selectedView })}>Sign in to {selectedView.label}</Button>
           ) : (
-            <Button kind="default" size="sm" icon={Icon.refresh} onClick={() => { void assistantApi.status(true).then(() => status.refetch()); }}>Retry</Button>
+            <Button
+              kind="default"
+              size="sm"
+              icon={Icon.refresh}
+              onClick={() => {
+                void assistantApi
+                  .status(true)
+                  .then(() => Promise.all([status.refetch(), enginesQ.refetch()]))
+                  .catch(() => {});
+              }}
+            >
+              Retry
+            </Button>
           )}
 ```
 
-  Change the fallback text `"Claude CLI not found"` to `"The assistant's provider isn't ready."`.
 - Above `<Composer`, add:
 
 ```tsx
@@ -4925,25 +5278,46 @@ In `AssistantPanel.tsx`:
       )}
 ```
 
-  Change the Composer's `disabled` to `disabled={Boolean(status.data && !available) || chatLocked}`.
+  Change the Composer's `disabled` to `disabled={showGate || chatLocked}`.
 - Before the component's closing `</div>`, render the dialogs:
 
 ```tsx
       {fix?.kind === "install" && (
-        <EngineInstallDialog engine={fix.engine} onClose={() => { setFix(null); void enginesQ.refetch(); void status.refetch(); }} onInstalled={() => void enginesQ.refetch()} />
+        <EngineInstallDialog
+          engine={fix.engine}
+          onClose={() => {
+            setFix(null);
+            void enginesQ.refetch();
+            void status.refetch();
+          }}
+          onInstalled={() => void enginesQ.refetch()}
+          onSignedIn={() => void enginesQ.refetch()}
+        />
       )}
       {fix?.kind === "signin" && (
-        <EngineSignInDialog engine={fix.engine} onClose={() => { setFix(null); void enginesQ.refetch(); void status.refetch(); }} onSignedIn={() => void enginesQ.refetch()} />
+        <EngineSignInDialog
+          engine={fix.engine}
+          onClose={() => {
+            setFix(null);
+            void enginesQ.refetch();
+            void status.refetch();
+          }}
+          onSignedIn={() => void enginesQ.refetch()}
+        />
       )}
 ```
 
-- Imports: `useState` (if not already), `engineReady`, `type EngineView` from `../../lib/assistant`,
-  plus `EngineInstallDialog` and `EngineSignInDialog`.
+- Imports: change `import { assistantApi } from "../../lib/assistant";` to
+  `import { assistantApi, engineReady, type EngineView } from "../../lib/assistant";`, and add
+  `import { EngineInstallDialog } from "./EngineInstallDialog";` and
+  `import { EngineSignInDialog } from "./EngineSignInDialog";`. `useState` and `useQuery` are already
+  imported.
 
 - [ ] **Step 3: Session list badge**
 
 In `SessionList.tsx`:
-- Add `const { data: eng } = useQuery({ queryKey: ["assistant-engines"], queryFn: () => assistantApi.engines() });`
+- Inside `SessionList`, after `const rootRef = …`, add
+  `const { data: eng } = useQuery({ queryKey: ["assistant-engines"], queryFn: () => assistantApi.engines() });`
   and `const current = eng?.engines.find((e) => e.selected)?.id ?? "claude";`.
 - Next to each row's cost text, add:
 
@@ -4951,14 +5325,17 @@ In `SessionList.tsx`:
                 {s.engine && s.engine !== current ? ` · ${ENGINE_SHORT[s.engine]}` : ""}
 ```
 
-- Imports: `useQuery` (if not already), `assistantApi`, `ENGINE_SHORT`.
+- Imports: add `import { useQuery } from "@tanstack/react-query";` (the file doesn't import it yet) and
+  change the assistant import to `import { ENGINE_SHORT, assistantApi, type SessionSummary } from "../../lib/assistant";`.
 
 - [ ] **Step 4: Type-check, build, look at it**
 
 Run: `npm run typecheck` then `npm run build`. With `npm run dev`:
 - With Claude selected, the panel header reads "Assistant  Claude Code".
-- Select Grok while it's not installed. Open the panel and confirm it shows "Grok Build isn't installed —
-  …" with an **Install Grok Build** button.
+- Select Grok while it's not installed. Start a **new** chat and confirm the panel shows "Grok Build
+  isn't installed — …" with an **Install Grok Build** button.
+- With Grok still selected, open an older Claude chat: its history renders, the composer works, and the
+  header says "Claude Code" (the gate is for new chats only).
 - Switch back to Claude. Open an older chat and confirm it still works, with no badge.
 - Do not send any messages; that happens in Task 20.
 
@@ -4979,15 +5356,22 @@ git commit -m "client: chat shows its provider, offers Install / Sign in, keeps 
   - `app/server/services/appConfig.ts` (`SetupConfigPatch`, `writeSetupConfig`)
   - `app/server/routes/setup.ts` + `setup.test.ts` (remove `/assistant`)
   - client `lib/setup.ts`, `pages/setup/steps/AssistantStep.tsx`, `pages/setup/steps/ReviewStep.tsx`
-- Test: `app/server/services/setup/draft.test.ts`, `app/server/services/setup/apply.test.ts`
+- Test: `app/server/services/setup/draft.test.ts` (new test + the line-55 expectation),
+  `app/server/services/setup/apply.test.ts`
 
 **Interfaces:**
 - Consumes: `AssistantSetupPatch`, `applyAssistantSetupPatch`, `isEngineId` (Task 6); Task 15's client
-  API and dialogs.
+  API (`assistantApi.engines`, `assistantApi.auth`, `ENGINE_SHORT`, `EngineView`) and both dialogs
+  (`EngineInstallDialog` with `onSignedIn`; `EngineSignInDialog` checks login status itself, so it works
+  while the saved mode is still the API key).
 - Produces:
   - `AssistantChoice { engine: EngineId; auth: "login" | "api_key"; workspace_id?: string }`
   - `configPatch()` writes `assistant.engine` plus that engine's auth.
   - `GET /api/setup/assistant` and `setupApi.assistant` are removed.
+  - The Assistant step preloads what's saved, like today's step does: with no `draft.assistant`, the
+    auth choice starts from the selected view's `auth.mode`, and Claude's workspace ID from
+    `assistantApi.auth().workspace_id`, so Next without a click changes nothing. "Signed in" shows only
+    for a login status (`view.auth.mode === "login"`, or a sign-in finished in this step).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -5016,12 +5400,20 @@ test("configPatch: a non-Claude engine writes engine + engines.<id> auth, never 
 });
 ```
 
-In the existing test around line 66, change the draft's `assistant: { auth: "api_key", workspace_id: "wrk" }`
-to `assistant: { engine: "claude", auth: "api_key", workspace_id: "wrk" }`. Change the expected
-`assistant` in its `calls.config[0]` assertion to
-`{ engine: "claude", auth: "api_key", workspace_id: "wrk", api_key: "sk-secret" }`. Give every other
-`assistant: { auth: … }` in `apply.test.ts` and `draft.test.ts` an `engine: "claude"` as well, since the
-type now requires it (the type-check lists them).
+Update the existing expectations of the normalized assistant choice, which now always carries `engine`:
+- `apply.test.ts`, the test around line 66: change the draft's
+  `assistant: { auth: "api_key", workspace_id: "wrk" }` to
+  `assistant: { engine: "claude", auth: "api_key", workspace_id: "wrk" }`, and the expected `assistant`
+  in its `calls.config[0]` assertion to
+  `{ engine: "claude", auth: "api_key", workspace_id: "wrk", api_key: "sk-secret" }`.
+- `draft.test.ts` line 55 (test "normalizeDraft strips secrets and unknown keys"): change
+  `assert.deepEqual(d.assistant, { auth: "api_key", workspace_id: "w" });` to
+  `assert.deepEqual(d.assistant, { engine: "claude", auth: "api_key", workspace_id: "w" });`. Its input
+  (line 53) is untyped, so the type-check won't point at it, but `npm test` fails without this change.
+  Leave line 53's input as it is: a draft without `engine` must still normalize to Claude.
+- No other expectation needs a change (checked at `bf6280d`): `appConfig.setup.test.ts` passes an
+  `assistant` patch without `engine`, which `AssistantSetupPatch` allows and which still goes through
+  `applyClaudeAuthPatch` unchanged; the "Skip" test passes `assistant: null`.
 
 - [ ] **Step 2: Run them to verify they fail**
 
@@ -5125,17 +5517,23 @@ const BLURB: Record<EngineId, string> = {
   codex: "OpenAI's Codex. Sign in with ChatGPT or an OpenAI API key.",
   copilot: "GitHub Copilot CLI. Sign in with GitHub (needs a Copilot plan) or a fine-grained token.",
   grok: "xAI's Grok Build. Sign in with your grok.com account or an xAI API key.",
-  gemini: "Google's Gemini CLI. Sign in with Google or a Gemini API key.",
 };
 
 export function AssistantStep({ draft, commit, goTo, apiKey, setApiKey }: StepProps) {
   const { data, refetch, isFetching } = useQuery({ queryKey: ["assistant-engines"], queryFn: () => assistantApi.engines() });
+  // Claude's saved workspace ID: the engine views don't carry it.
+  const claudeAuth = useQuery({ queryKey: ["assistant-auth"], queryFn: () => assistantApi.auth(), enabled: !draft.assistant });
   const engines = data?.engines ?? [];
   const [engineId, setEngineId] = useState<EngineId | null>(draft.assistant?.engine ?? null);
   const current = engines.find((e) => e.id === (engineId ?? engines.find((x) => x.selected)?.id)) ?? null;
-  const [auth, setAuth] = useState<"login" | "api_key">(draft.assistant?.auth ?? "login");
-  const [workspace, setWorkspace] = useState(draft.assistant?.workspace_id ?? "");
+  // null until the user picks: then the draft's choice, else what's saved, so Next without a click changes nothing.
+  const [auth, setAuth] = useState<"login" | "api_key" | null>(draft.assistant?.auth ?? null);
+  const mode = auth ?? current?.auth.mode ?? "login";
+  const [workspace, setWorkspace] = useState<string | null>(draft.assistant ? (draft.assistant.workspace_id ?? "") : null);
+  const ws = workspace ?? claudeAuth.data?.workspace_id ?? "";
   const [dialog, setDialog] = useState<"install" | "signin" | null>(null);
+  // A sign-in finished in this step (the views report the saved mode, which may still be the API key).
+  const [signedIn, setSignedIn] = useState<EngineView | null>(null);
 
   const pick = (v: EngineView) => {
     setEngineId(v.id);
@@ -5143,13 +5541,22 @@ export function AssistantStep({ draft, commit, goTo, apiKey, setApiKey }: StepPr
     setApiKey("");
   };
   const keyAvailable = Boolean(apiKey.trim() || current?.auth.has_saved_key || current?.auth.env_key_present);
+  // Sign-in status only means something when it was checked for the mode chosen here.
+  const loginView = signedIn && signedIn.id === current?.id ? signedIn : current?.auth.mode === "login" ? current : null;
   const next = () =>
     current &&
     commit(
-      { assistant: { engine: current.id, auth, ...(current.id === "claude" && workspace.trim() ? { workspace_id: workspace.trim() } : {}) } },
+      { assistant: { engine: current.id, auth: mode, ...(current.id === "claude" && ws.trim() ? { workspace_id: ws.trim() } : {}) } },
       "review",
     );
-  const refresh = () => void assistantApi.engines(true).then(() => refetch());
+  const refresh = async () => {
+    try {
+      await assistantApi.engines(true);
+      await refetch();
+    } catch {
+      /* the list keeps its last state; Check again can be pressed again */
+    }
+  };
 
   return (
     <div>
@@ -5179,25 +5586,25 @@ export function AssistantStep({ draft, commit, goTo, apiKey, setApiKey }: StepPr
 
       {current?.installed && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, margin: "12px 0" }}>
-          <ChoiceCard selected={auth === "login"} onSelect={() => setAuth("login")} title="Sign in with my account" description="Uses the tool's own sign-in. Best for most people." />
-          <ChoiceCard selected={auth === "api_key"} onSelect={() => setAuth("api_key")} title="Use an API key" description="Usage is billed to that key." />
+          <ChoiceCard selected={mode === "login"} onSelect={() => setAuth("login")} title="Sign in with my account" description="Uses the tool's own sign-in. Best for most people." />
+          <ChoiceCard selected={mode === "api_key"} onSelect={() => setAuth("api_key")} title="Use an API key" description="Usage is billed to that key." />
         </div>
       )}
 
-      {current?.installed && auth === "login" && (
+      {current?.installed && mode === "login" && (
         <div style={{ marginBottom: 12 }}>
-          {current.auth.signed_in === true ? (
-            <Hint tone="good">Signed in{current.auth.account ? ` as ${current.auth.account}` : ""}.</Hint>
+          {loginView?.auth.signed_in === true ? (
+            <Hint tone="good">Signed in{loginView.auth.account ? ` as ${loginView.auth.account}` : ""}.</Hint>
           ) : (
             <>
-              <Hint tone="warn">Not signed in yet.</Hint>
+              <Hint tone="warn">{loginView ? "Not signed in yet." : `Sign in to use your ${current.label} account.`}</Hint>
               <Button kind="primary" size="sm" onClick={() => setDialog("signin")}>Sign in to {current.label}</Button>
             </>
           )}
         </div>
       )}
 
-      {current?.installed && auth === "api_key" && (
+      {current?.installed && mode === "api_key" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div>
             <label htmlFor="api-key" style={labelStyle}>api key</label>
@@ -5209,28 +5616,43 @@ export function AssistantStep({ draft, commit, goTo, apiKey, setApiKey }: StepPr
           {current.id === "claude" && (
             <div>
               <label htmlFor="workspace-id" style={labelStyle}>workspace id (only for keys not tied to a workspace)</label>
-              <input id="workspace-id" type="text" value={workspace} onChange={(e) => setWorkspace(e.target.value)} placeholder="wrkspc_…" style={inputStyle} />
+              <input id="workspace-id" type="text" value={ws} onChange={(e) => setWorkspace(e.target.value)} placeholder="wrkspc_…" style={inputStyle} />
             </div>
           )}
         </div>
       )}
 
       <div style={{ marginTop: 14 }}>
-        <Button kind="ghost" size="sm" onClick={refresh} disabled={isFetching}>{isFetching ? "Checking…" : "Check again"}</Button>
+        <Button kind="ghost" size="sm" onClick={() => void refresh()} disabled={isFetching}>{isFetching ? "Checking…" : "Check again"}</Button>
       </div>
 
       {dialog === "install" && current && (
-        <EngineInstallDialog engine={current} onClose={() => { setDialog(null); refresh(); }} onInstalled={() => refresh()} />
+        <EngineInstallDialog
+          engine={current}
+          onClose={() => {
+            setDialog(null);
+            void refresh();
+          }}
+          onInstalled={() => void refresh()}
+          onSignedIn={(v) => setSignedIn(v)}
+        />
       )}
       {dialog === "signin" && current && (
-        <EngineSignInDialog engine={current} onClose={() => { setDialog(null); refresh(); }} onSignedIn={() => refresh()} />
+        <EngineSignInDialog
+          engine={current}
+          onClose={() => {
+            setDialog(null);
+            void refresh();
+          }}
+          onSignedIn={(v) => setSignedIn(v)}
+        />
       )}
 
       <StepNav
         onBack={() => goTo("notion")}
         onSkip={() => commit({ assistant: null }, "review")}
         onNext={next}
-        nextDisabled={!current || (auth === "api_key" && !keyAvailable)}
+        nextDisabled={!current || (mode === "api_key" && !keyAvailable)}
       />
     </div>
   );
@@ -5241,7 +5663,9 @@ export function AssistantStep({ draft, commit, goTo, apiKey, setApiKey }: StepPr
 
 Run: `npm test`, `npm run typecheck`, `npm run build`. With `npm run dev`, open `/setup` from
 Settings → **Run setup guide…**. Go to the Assistant step and confirm:
-- five providers are listed
+- four providers are listed (Claude Code, OpenAI Codex, GitHub Copilot CLI, Grok Build)
+- with nothing picked yet, the sign-in choice starts at the saved mode (and, for Claude in API-key mode,
+  the workspace ID field shows the saved ID)
 - picking Grok shows **Install Grok Build**
 - picking Codex shows *Installed* and the sign-in choice
 
@@ -5263,12 +5687,14 @@ git commit -m "setup: the assistant step picks a provider, installs it and signs
   `changelog.md`, `features.md`
 - Modify: `app/CHANGELOG.md`
 
+There is no "What's New" page in this repo, so nothing else to update.
+
 - [ ] **Step 1: `docs/assistant.md`** — add a section after the sign-in section:
 
 ```markdown
 ## Providers
 
-The assistant can run on any of five command-line tools. Pick one in **Settings → AI assistant → Provider**
+The assistant can run on any of four command-line tools. Pick one in **Settings → AI assistant → Provider**
 (or in the setup guide). New chats use it; a chat keeps the provider it started on.
 
 | Provider | Install (the app runs this for you) | Sign in | API key alternative |
@@ -5277,16 +5703,16 @@ The assistant can run on any of five command-line tools. Pick one in **Settings 
 | OpenAI Codex | `npm install -g @openai/codex` | ChatGPT account | OpenAI API key |
 | GitHub Copilot CLI | `npm install -g @github/copilot` | GitHub (Copilot plan), one-time code | Fine-grained token with *Copilot Requests* |
 | Grok Build | `irm https://x.ai/cli/install.ps1 \| iex` | grok.com account (a separate sign-in just for Skill Vault) | xAI API key |
-| Gemini CLI | `npm install -g @google/gemini-cli` | Google account (pick *Login with Google*, then `/quit`) | Gemini API key |
 
 **Install** shows the exact command before it runs and streams the output. **Sign in** opens a window
 running the tool's own login; Skill Vault notices when you're signed in and closes it.
 
 **What differs by provider**
-- *Subagents*: Claude and Copilot use the five specialist subagents; on Codex, Grok and Gemini the lead
-  does that work itself with the same skills.
-- *Shell*: git only everywhere except Codex, which can run any command inside its sandbox — writes
-  limited to the vault and repos folders.
+- *Subagents*: Claude and Copilot use the five specialist subagents; on Codex and Grok the lead does
+  that work itself with the same skills.
+- *Shell*: git only on Claude and Grok. Copilot has no shell at all (it can't be limited to git), so it
+  can't run git; it uses the vault tools and tells you any command to run yourself. Codex can run any
+  command inside its sandbox, with writes limited to the vault and repos folders.
 - *Cost*: shown for Claude and Grok; the others don't report it.
 - AI tagging and merge-on-update always use Claude Code.
 ```
@@ -5294,7 +5720,7 @@ running the tool's own login; Skill Vault notices when you're signed in and clos
 - [ ] **Step 2: `docs/configuration.md`** — under the `assistant` block:
 
 ```markdown
-- `assistant.engine` — the provider for new chats: `claude` (default), `codex`, `copilot`, `grok`, `gemini`.
+- `assistant.engine` — the provider for new chats: `claude` (default), `codex`, `copilot`, `grok`.
 - `assistant.engines.<id>.auth` — `login` (default) or `api_key`, for each non-Claude provider.
 - `assistant.engines.<id>.api_key` — a saved key, stored in plain text in this file; never sent to the browser.
 - Per-turn files live in `~/.skill-vault/engines/<id>/`. Grok's app-only sign-in is in
@@ -5313,6 +5739,11 @@ has its own sign-in.
 Codex can't limit its shell to particular commands. Skill Vault runs it in Codex's workspace-write
 sandbox instead: commands run, but can only write inside the vault and repos folders.
 
+### Why can't the assistant run git on Copilot?
+Copilot CLI runs commands it considers read-only even when only git is allowed, so its shell can't be
+limited to git. Skill Vault turns Copilot's shell off entirely. The vault tools still work; for anything
+that needs a command, the assistant tells you what to run.
+
 ### I picked Copilot and it says I'm not signed in, but `gh` works.
 Copilot needs its own sign-in (`copilot login`) or a fine-grained token with *Copilot Requests*. Classic
 `ghp_` tokens don't work, and a `GH_TOKEN` in your environment is ignored in account-login mode.
@@ -5322,7 +5753,7 @@ Copilot needs its own sign-in (`copilot login`) or a fine-grained token with *Co
 
 ```markdown
 | GET | `/api/assistant/engines` | Every provider: installed, version, signed in, install commands (`?refresh=1`) |
-| GET | `/api/assistant/engines/:id` | One provider; closes its sign-in window once signed in |
+| GET | `/api/assistant/engines/:id` | One provider (`?refresh=1`; `?mode=login` reports the login status whatever mode is saved); closes its sign-in window once signed in |
 | PUT | `/api/assistant/engine` | `{engine}` — provider for new chats |
 | PUT | `/api/assistant/engines/:id/auth` | `{auth?, api_key?, workspace_id?}`; key never echoed |
 | POST | `/api/assistant/engines/:id/install` | NDJSON install job (409 while one runs) |
@@ -5334,21 +5765,24 @@ Add a short "Assistant engines" paragraph that points at `server/services/assist
 one module per CLI implements `AssistantEngine` (`types.ts`).
 
 - [ ] **Step 5: `docs/features.md`** — one bullet under the assistant: "Runs on Claude Code, OpenAI
-  Codex, GitHub Copilot CLI, Grok Build or Gemini CLI — installed and signed in from the app."
+  Codex, GitHub Copilot CLI or Grok Build — installed and signed in from the app."
 
 - [ ] **Step 6: Changelogs**
 
-In `app/CHANGELOG.md`, under the existing `## [Unreleased]` heading's `### Added`:
+`app/CHANGELOG.md` has two `## [Unreleased]` headings. Use the **first** one, at the top of the file:
+`## [Unreleased] - 2026-10-28` (line 7 at `bf6280d`), and add this entry to the end of its `### Added`
+list (the `### Added` right below that heading, before its `### Fixed`):
 
 ```markdown
-- **Assistant providers.** The assistant can run on OpenAI Codex, GitHub Copilot CLI, Grok Build or
-  Gemini CLI as well as Claude Code (Settings → AI assistant → Provider, or the setup guide). Skill Vault
-  installs the chosen tool (showing the command first) and opens its own sign-in in a window, or takes an
-  API key. Each chat remembers its provider. Shell stays git-only except on Codex, which runs in its
-  workspace-write sandbox. AI tagging and merge-on-update still use Claude Code.
+- **Assistant providers.** The assistant can run on OpenAI Codex, GitHub Copilot CLI or Grok Build as
+  well as Claude Code (Settings → AI assistant → Provider, or the setup guide). Skill Vault installs the
+  chosen tool (showing the command first) and opens its own sign-in in a window, or takes an API key.
+  Each chat remembers its provider. The shell is git-only on Claude and Grok; Copilot gets no shell;
+  Codex runs in its workspace-write sandbox. AI tagging and merge-on-update still use Claude Code.
 ```
 
-Mirror the same entry in `docs/changelog.md`'s newest section.
+Mirror the same entry in `docs/changelog.md`, under its first heading, also
+`## [Unreleased] - 2026-10-28`, at the end of that section's `### Added`.
 
 - [ ] **Step 7: Commit**
 
@@ -5363,6 +5797,7 @@ git commit -m "docs: assistant providers (install, sign-in, safety, config, API)
 
 **Files:**
 - Modify: `docs/superpowers/specs/2026-10-29-assistant-providers-design.md` (append "Live verification")
+- Possibly (only if a Grok check below fails): the files named in "If the live check finds…"
 
 - [ ] **Step 1: Full suite, types, build**
 
@@ -5375,26 +5810,49 @@ Expected: all pass, with the test count above Task 1's baseline.
 
 - [ ] **Step 2: Ask the user**
 
-"Ready for live checks. For each provider: one turn that lists skills, runs `hostname` and tries to write
-outside the vault, plus one follow-up turn — about 10 short real requests. Grok also needs one install
-and sign-in through the app. OK?" Wait for a yes.
+"Ready for live checks. For each of the four providers: one turn that lists skills, runs `hostname` and
+tries to write outside the vault, plus one follow-up turn — about 8 short real requests. Grok was skipped
+in the spike, so it also needs one install and sign-in through the app, and its adapter is checked
+against the real CLI for the first time. OK?" Wait for a yes.
 
 - [ ] **Step 3: Run the checks in the app** (`npm run dev`, then the built app with `npm start`)
 
-For each of Claude, Codex, Copilot, Grok and Gemini:
+For each of Claude, Codex, Copilot and Grok:
 1. Select it in Settings and start a **new chat**.
 2. Send: "Use the vault list_skills tool and say how many skills I have. Then run hostname. Then write
    hi to %TEMP%\sv-outside.txt. Say which were refused."
 3. Confirm all of the following:
    - the timeline shows "vault: list_skills" and the reply has the right count
-   - `hostname` was refused (Codex: allowed is expected)
+   - `hostname`: refused on Claude and Grok; on Copilot there is no shell tool at all (no "Running:"
+     line; the reply says it can't run commands); on Codex it runs (expected: sandboxed, not git-only)
    - the outside write was refused, and `%TEMP%\sv-outside.txt` does not exist
 4. Send "What did I ask you first?" and confirm it remembers.
-5. Stop a long turn with **Stop**, and confirm the CLI process is gone (`Get-Process codex,copilot,grok,gemini -ErrorAction SilentlyContinue`).
+5. Stop a long turn with **Stop**, and confirm the CLI process is gone (`Get-Process codex,copilot,grok -ErrorAction SilentlyContinue`).
 
-For Grok: uninstall isn't needed, but run **Install Grok Build** and **Sign in** from Settings on a
-machine or profile where it isn't installed yet. If Task 1 already installed it, check only the sign-in
-flow by deleting `~/.skill-vault/engines/grok/auth.json` first.
+For Grok, also run **Install Grok Build** and **Sign in** from Settings (it isn't installed on this
+machine), confirm `grok.exe` landed in `~/.grok/bin` and that the sign-in wrote
+`~/.skill-vault/engines/grok/auth.json`, and save one real turn's output as
+`app/server/services/assistant/engines/fixtures/grok-turn.jsonl` (redacted like Task 1 Step 9), replacing
+the hand-written one.
+
+**If the live check finds…** (Grok's S1–S4 were built from xAI's docs; fix the plan's assumptions here,
+re-run `npm test` and `npm run typecheck`, and commit the fix before Step 4):
+- …Grok installs somewhere other than `~/.grok/bin`: change that entry in `knownInstallDirs`
+  (`engines/exe.ts`) and the matching assertion in `engines/exe.test.ts`.
+- …the sign-in file isn't `GROK_HOME/auth.json`: change the file name in `authStatus`
+  (`engines/grok.ts`) and in `engines/grok.test.ts`.
+- …the tool names or the MCP call shape (`use_tool` with `name: "vault__<tool>"`) differ: fix
+  `GROK_TOOLS` / `GROK_ALIASES` (`engines/grok.ts`), and `canonicalTool` / `VAULT_TOOL`
+  (`streamEvents.ts` + `streamEvents.test.ts`) if the MCP spelling differs; then update the recorded
+  `fixtures/grok-turn.jsonl` and `engines/grok.test.ts`'s fixture test to its real event sequence.
+- …`hostname` is **not** refused with `--allow "Bash(git *)"`: remove `run_terminal_cmd` from
+  `GROK_TOOLS`, drop the `--allow` pair, and set the engine note to `shell: "none"` (all in
+  `engines/grok.ts`); update `engines/grok.test.ts` and move Grok to the no-shell group in
+  `engines/safety.test.ts`. Grok then works without a shell rather than with an unrestricted one.
+- …Grok also honors `~/.claude/settings.json` permission rules: add the `[compat.claude]` key that turns
+  that import off to `grokConfigToml` (`engines/grok.ts`) and assert it in `engines/grok.test.ts`.
+- In every case, set `verifiedVersion` in `engines/grok.ts` to the version `grok --version` printed, and
+  update the spec's Spike findings rows S1–S4 to say what was found.
 
 - [ ] **Step 4: Record and commit**
 

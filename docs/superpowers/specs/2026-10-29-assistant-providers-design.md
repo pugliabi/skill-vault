@@ -1,12 +1,13 @@
 # AI Assistant Providers — Design
 
-**Date:** 2026-10-29 · **Status:** approved design, awaiting spec review · **Not in the original
-5-project roadmap** — a new request, built on top of the merged first-run setup guide (d778d08).
+**Date:** 2026-10-29 · **Status:** approved design, amended after the verification spike (see "Spike
+findings" at the end) · **Not in the original 5-project roadmap** — a new request, built on top of the
+merged first-run setup guide (d778d08).
 
 ## Problem
 
-- The assistant only runs on Claude Code. Someone who pays for ChatGPT, Copilot, Grok or Gemini instead
-  can't use it at all.
+- The assistant only runs on Claude Code. Someone who pays for ChatGPT, Copilot or Grok instead can't use
+  it at all.
 - Everything is wired to `claude -p`: the flags in `turn.ts`, the stream-json parser in
   `streamEvents.ts`, the `.cmd`-shim resolver in `claude/cli.ts`, the sign-in panel in Settings, and the
   setup guide's Assistant step.
@@ -16,15 +17,16 @@
 ## Goals
 
 1. One app-wide **provider** setting picks the CLI that runs new assistant chats: **Claude Code**
-   (default), **OpenAI Codex**, **GitHub Copilot CLI**, **Grok Build** or **Gemini CLI**.
+   (default), **OpenAI Codex**, **GitHub Copilot CLI** or **Grok Build**.
 2. When the chosen CLI isn't installed, the app **installs it**: it shows the exact command first, then
    streams the output.
 3. The app **starts sign-in for you**. It opens the tool's own login in a window, waits until you're
    signed in, then says so. An **API key** is the alternative for each provider.
 4. The chat works the same on every provider: vault tools through the MCP bridge, the lead agent's
    instructions, the ten skills, the per-turn context, the activity timeline, Stop, and resume.
-5. Safety stays deny-by-default on every provider. The shell is git-only everywhere except Codex, which
-   runs sandboxed (see Safety). Other changes to the app go only through the audited bridge.
+5. Safety stays deny-by-default on every provider. The shell is git-only on Claude and Grok, Copilot has
+   no shell at all, and Codex runs sandboxed (see Safety). Other changes to the app go only through the
+   audited bridge.
 6. The setup guide's Assistant step becomes **pick provider → install → sign in**.
 
 ## Non-goals
@@ -33,20 +35,26 @@
 - Picking the provider per chat (the setting is app-wide).
 - A model picker for any provider.
 - ACP (Agent Client Protocol). We considered it and chose per-CLI headless adapters instead.
-- Subagents on Codex, Grok and Gemini. Their lead agent does the specialist work itself, using the
-  skills.
+- Subagents on Codex and Grok. Their lead agent does the specialist work itself, using the skills.
 - Install commands outside Windows. Other platforms show the command to run yourself.
+- A shell on Copilot (see the spike findings: a git-only rule can't be enforced there).
+- **Later: a Google provider (Antigravity CLI `agy`).** Gemini CLI was in the first design but was dropped
+  after the spike: Google refuses its Google-account sign-in for individuals
+  (`IneligibleTierError: This client is no longer supported for Gemini Code Assist for individuals … migrate
+  to the Antigravity suite`).
 
-## Decisions made while brainstorming
+## Decisions made while brainstorming (and after the spike)
 
 | Question | Decision |
 |---|---|
 | How is the provider chosen? | One app-wide setting. It applies to new chats; an existing chat keeps the provider it started on. |
 | Do tagging and merge follow it? | No, chat only. |
-| Which providers? | Codex, Copilot, Grok Build, Gemini (plus Claude). |
+| Which providers? | Codex, Copilot, Grok Build (plus Claude). Gemini CLI was dropped after the spike (sign-in refused for individuals); a Google provider via Antigravity is for later. |
 | How do you sign in? | The tool's own account login by default, an API key/token optionally. |
 | How does the app talk to each CLI? | Per-CLI headless adapters (one turn = one CLI process), the same model as Claude today. |
-| How safe is Codex? | Codex has no per-tool allowlist. It runs in the `workspace-write` sandbox: writes are limited to the vault and repos folders, and network is on so `git clone` works. |
+| How safe is Codex? | Codex has no per-tool allowlist. It runs in the `workspace-write` sandbox (with `windows.sandbox="unelevated"`): writes are limited to the vault and repos folders, and network is on so `git clone` works. |
+| Does Copilot get a git-only shell? | No shell at all. Copilot's default permission mode auto-approves commands it judges read-only even when only `shell(git:*)` is allowed (`hostname` ran in the spike), so git-only can't be enforced. The user chose no shell over an unenforceable one. |
+| Grok's details? | Built from xAI's docs. Grok wasn't run in the spike (user: "Skip Grok for now"); its items are checked live at the end of the plan. |
 
 **Naming.** In this codebase "providers" already means skill targets (`agent_locations`). So in code,
 an assistant backend is an **engine** (`assistant.engine`, `engines/`). The UI calls it **Provider**.
@@ -55,65 +63,89 @@ an assistant backend is an **engine** (`assistant.engine`, `engines/`). The UI c
 
 ### Engine modules
 
-`app/server/services/assistant/engines/` contains one module per CLI and a registry:
+`app/server/services/assistant/engines/` contains one module per CLI and a registry. The contract is the
+plan's Task 4 `engines/types.ts`, which is authoritative:
 
 ```ts
-export type EngineId = "claude" | "codex" | "copilot" | "grok" | "gemini";
+export type EngineId = "claude" | "codex" | "copilot" | "grok";
+export const ENGINE_IDS: EngineId[] = ["claude", "codex", "copilot", "grok"]; // Settings order
 
-export interface AssistantEngine {
-  id: EngineId;
-  label: string;                         // "OpenAI Codex"
-  verifiedVersion: string;               // CLI version the adapter + fixtures were checked against
-  install: InstallStep[];                // shown to the user before running
-  detect(): Promise<EngineDetect>;       // { installed, version?, exe?, reason? }
-  authStatus(cfg: EngineAuthConfig, exe: string): Promise<EngineAuthStatus>;
-  loginCommand(exe: string): { args: string[]; env: Record<string, string>; hint?: string };
-  childEnv(cfg: EngineAuthConfig, base: NodeJS.ProcessEnv): NodeJS.ProcessEnv;
-  buildTurn(input: TurnInput, exe: string): TurnSpec;
-  createParser(): TurnParser;
+export interface EngineAuthConfig { auth?: "login" | "api_key"; api_key?: string; workspace_id?: string } // workspace_id: Claude only
+export interface EngineDetect { installed: boolean; version?: string; reason?: string }
+export interface EngineAuthStatus {
+  signed_in: boolean | null;   // null = couldn't tell (a turn is still allowed; the CLI will say)
+  method: "login" | "api_key";
+  account?: string;
 }
 
-export interface InstallStep { label: string; command: string; args: string[]; source: string; shell: "npm" | "powershell" }
-export interface EngineAuthConfig { auth?: "login" | "api_key"; api_key?: string }   // Claude also has workspace_id
-export interface EngineAuthStatus { signed_in: boolean; method: "login" | "api_key"; account?: string; detail?: string }
+export type InstallStep =
+  | { kind: "npm"; label: string; args: string[]; source: string }
+  | { kind: "powershell"; label: string; script: string; source: string };
 
 export interface TurnInput {
   sessionId: string;            // the app's chat UUID
   engineSessionId?: string;     // an id the engine assigned (Codex threads)
   isFirstTurn: boolean;
   message: string;              // what the user typed
-  instructions: string;         // see "Instructions and skills"
+  leadAgent: string;            // the plugin's lead agent ("vault-assistant")
   contextBlock: string;         // buildTurnContext() output, as today
-  mcp: McpBridgeConfig["mcpServers"]["vault"];   // from mcpConfig.ts, unchanged
+  mcp: VaultMcpServer;          // McpBridgeConfig["mcpServers"]["vault"], from mcpConfig.ts
   vaultPath: string; reposDir: string; pluginDir: string;
   workDir: string;              // ~/.skill-vault/engines/<id>/
+  auth: EngineAuthConfig;       // this engine's saved auth
+  baseEnv: NodeJS.ProcessEnv;   // process.env in the app
 }
-export interface TurnSpec { exe: string; args: string[]; stdin: string; env: NodeJS.ProcessEnv; cwd: string; tempFiles?: string[] }
-export interface TurnParser { (line: string): AssistantStreamEvent[]; engineSessionId?(): string | undefined }
+export interface TurnSpec {
+  label: string;                // "codex CLI", for errors
+  target?: SpawnTarget;         // omitted for Claude: its runner resolves claude.exe itself
+  args: string[]; stdin: string; env?: NodeJS.ProcessEnv; cwd: string;
+  tempFiles?: string[];         // deleted after the turn, whatever happened
+}
+export interface TurnParser { parse(line: string): AssistantStreamEvent[]; engineSessionId?(): string | undefined }
+
+export interface AssistantEngine {
+  id: EngineId;
+  label: string;                // "OpenAI Codex"
+  cliName: string;              // "codex": the command as typed in a terminal
+  verifiedVersion: string;      // CLI version the adapter + fixtures were checked against
+  subagents: boolean;
+  apiKeyEnv: string[];          // env vars the CLI reads a key from; login mode strips them all
+  install: InstallStep[];       // shown to the user before running
+  loginArgs: string[]; loginHint: string; loginEnv(): Record<string, string>;
+  target(): SpawnTarget | null; // the CLI to spawn, or null when it isn't installed
+  detect(opts?: { refresh?: boolean }): Promise<EngineDetect>;
+  authStatus(cfg: EngineAuthConfig): Promise<EngineAuthStatus>;
+  childEnv(cfg: EngineAuthConfig, base: NodeJS.ProcessEnv): NodeJS.ProcessEnv;
+  buildTurn(input: TurnInput): TurnSpec;   // throws when the CLI can't run (not installed)
+  createParser(): TurnParser;
+  authHint(message: string): string;       // "— sign in again in Settings → AI assistant"
+}
 ```
 
 - `claude.ts` wraps today's code with no behavior change: `buildTurnArgs`, `parseStreamJsonLine`,
   `claudeChildEnv`, `claudeAvailable`, `claudeLoginStatus`.
 - `turn.ts`'s `runTurn` keeps its job (stream, compact, error handling). It now takes a `TurnSpec` and a
   `TurnParser` instead of claude args. Its result also returns `engineSessionId`.
-- The stream runner (`defaultStreamRunner`) takes the exe and env from the `TurnSpec`. The process-tree
-  kill, the idle and hard timeouts, and the abort signal are unchanged.
+- The stream runner (`createStreamRunner`) takes the spawn target and env from the `TurnSpec`. The
+  process-tree kill, the idle and hard timeouts, and the abort signal are unchanged.
 
 ### Finding the real executable
 
-`claude/cli.ts`'s `resolveClaudeExe` becomes a general helper in `engines/exe.ts`:
-`resolveExe(name, knownDirs)`. It checks, in order:
+Claude keeps its own `resolveClaudeExe` in `claude/cli.ts` (extended to also search the registry PATH
+and `~/.local/bin`, and exported for the Claude engine's `target()`). The other engines use
+`engines/exe.ts`: `resolveTarget(name, label, deps)`. It checks, in order:
 
-1. `name.exe` on the process PATH.
-2. A `name.cmd` shim on PATH, parsed with `parseClaudeCmdShim` (renamed `parseCmdShim`).
-3. The PATH **as stored in the registry right now** (`HKCU\Environment`, then `HKLM\…\Session
-   Manager\Environment`). Installers update the registry, not the running server.
-4. Known install folders: the npm global prefix, `%USERPROFILE%\.local\bin`, and Grok's install folder
-   (†, see the spike).
+1. The process PATH: `name.exe`, else a `name.cmd` shim parsed with `parseCmdShim` (a real `.exe`, or a
+   node script run with the app's own node — never the shim itself).
+2. Known install folders: the folder of the app's node, the npm global prefix, `%USERPROFILE%\.local\bin`,
+   and Grok's install folder `~/.grok/bin` (from xAI's docs, unverified).
+3. Only when both miss (Windows): the PATH **as stored in the registry right now** (`HKCU\Environment`,
+   then `HKLM\…\Session Manager\Environment`). Installers update the registry, not the running server.
+   Reading it costs two `reg query` spawns, so it comes last.
 
-Results are cached per name. `refresh` clears the cache, and so does a finished install. The rule against
-newline arguments through `cmd.exe` stays: an engine whose real `.exe` can't be found refuses a turn
-whose args contain a newline.
+Results are cached per name (`defaultEngineDeps().resolve`, misses too). An engine's
+`detect({ refresh: true })` clears its entry; a finished install and "Check again" both re-detect with
+refresh. The rule against newline arguments through `cmd.exe` stays: nothing here spawns a `.cmd`.
 
 ### Config
 
@@ -139,10 +171,10 @@ The `assistant` block of `~/.skill-vault/config.json` grows:
 - `AssistantSession` gains `engine: EngineId` and `engine_session_id?: string`. A stored chat without
   `engine` reads as `"claude"`.
 - New chats take `engine` from config. Continuing a chat uses the chat's own `engine`.
-- If that engine isn't installed or signed in, the chat's history still renders. The composer is replaced
-  by: "This chat used Codex — sign in to continue it, or start a new chat."
-- Claude, Copilot, Grok and Gemini accept the app's UUID as their session id. Codex assigns a thread id:
-  the parser reads it from the first event, `runTurn` returns it, and `endTurn` saves it as
+- If that engine isn't installed or signed in, the chat's history still renders. The composer is locked
+  with the note: "This chat used Codex — sign in to continue it, or start a new chat."
+- Claude, Copilot and Grok accept the app's UUID as their session id. Codex assigns a thread id: the
+  parser reads it from `thread.started`, `runTurn` returns it, and `endTurn` saves it as
   `engine_session_id`.
 - `SessionSummary` and the session detail include `engine`.
 
@@ -151,12 +183,13 @@ The `assistant` block of `~/.skill-vault/config.json` grows:
 | Route | Purpose |
 |---|---|
 | `GET /status` | As today, now for the selected engine: `{available, engine, label, version, reason}`. `available` = vault set + plugin present + engine installed + (signed in, or an API key saved). |
-| `GET /engines` | `[{id, label, selected, installed, version, reason, auth: {mode, signed_in, account, has_saved_key, env_key_present}}]`. `?refresh=1` re-detects. |
+| `GET /engines` | `[{id, label, selected, installed, version, verified_version, reason, subagents, auth: {mode, signed_in, account, has_saved_key, env_key_present}, install, login_hint}]`. `?refresh=1` re-detects. |
+| `GET /engines/:id` | One view. `?refresh=1` re-detects; `?mode=login` reports the login status whatever mode is saved (the setup guide signs in before Finish saves the mode). Closes a pending sign-in window once the view shows a login that's signed in. |
 | `PUT /engine` | `{engine}` — the provider for new chats. |
 | `POST /engines/:id/install` | Runs the install steps as an NDJSON job (the same format as `POST /api/app/update`). Only one install at a time (409 otherwise). |
-| `POST /engines/:id/login` | Opens the sign-in window and returns `{started: true}`. Loopback requests only. |
+| `POST /engines/:id/login` | Opens the sign-in window and returns `{started: true, hint}`. Loopback requests only (403 otherwise); 500 with the reason if the window can't be opened. |
 | `POST /engines/:id/login/cancel` | Closes the sign-in window. |
-| `PUT /engines/:id/auth` | `{auth?, api_key?}`, using the same omitted = keep, `""` = clear rules as Claude's `PUT /auth`. |
+| `PUT /engines/:id/auth` | `{auth?, api_key?, workspace_id?}`, using the same omitted = keep, `""` = clear rules as Claude's `PUT /auth`. For `claude` it runs exactly the `PUT /auth` code path. |
 | `GET/PUT /auth` | Unchanged. This is still Claude's (Settings and the setup guide use it for Claude). |
 
 Every POST and PUT above goes through the existing cross-site guard, like the other `/api/app` and
@@ -168,8 +201,9 @@ it answers **409 with a JSON error before streaming starts**. Otherwise it build
 
 ## Engines
 
-Items marked **†** are confirmed against the real CLI in plan task 1 (the spike) before the adapter is
-built. If a † item turns out different, the spike's notes update this spec before the adapter task starts.
+Items that were marked **†** in the first design have been settled by plan task 1 (the spike) and are
+recorded in "Spike findings" at the end. Grok's items are the exception: unverified, built from xAI's
+docs, checked live in the plan's last task.
 
 ### Claude Code (existing)
 
@@ -181,66 +215,90 @@ built. If a † item turns out different, the spike's notes update this spec bef
 ### OpenAI Codex — checked against codex-cli 0.144.4
 
 - **Install:** `npm install -g @openai/codex` (npmjs.com).
-- **Sign in:** `codex login` opens a browser for the ChatGPT account. Status: `codex login status`
-  (exit code and text †).
-- **API key:** the saved key goes in as `CODEX_API_KEY` (†) in the turn's environment, so the user's own
-  terminal login isn't overwritten. Login mode strips `OPENAI_API_KEY` and `CODEX_API_KEY`.
+- **Sign in:** `codex login` opens a browser for the ChatGPT account. Status: `codex login status` exits 0
+  and prints "Logged in using ChatGPT" when signed in (S5).
+- **API key:** the saved key goes in as `CODEX_API_KEY` in the turn's environment, so the user's own
+  terminal login isn't overwritten (S6: unverified, documented default). Login mode strips
+  `OPENAI_API_KEY` and `CODEX_API_KEY`.
 - **Turn:** the prompt goes on stdin (`-`). The first turn is `codex exec --json …`; later turns are
   `codex exec resume <engine_session_id> --json …`. `resume` takes fewer flags, so both forms put
   everything else in `-c`:
   - `--ignore-user-config --skip-git-repo-check` (the user's own MCP servers and config stay out; auth
     still comes from `CODEX_HOME`)
   - `-c sandbox_mode="workspace-write"`
+  - `-c windows.sandbox="unelevated"` (S7: without the user's config Codex has no Windows sandbox and
+    falls back to read-only)
   - `-c sandbox_workspace_write.writable_roots=[<vault>, <repos>]`
   - `-c sandbox_workspace_write.network_access=true`
   - `-c approval_policy="never"`
   - `-c mcp_servers.vault.command=… / .args=[…] / .env={SKILL_VAULT_URL="…"}`
+  - `-c mcp_servers.vault.default_tools_approval_mode="approve"` (S7: otherwise every vault call comes
+    back "user cancelled MCP tool call")
 
   The spawn's cwd is the vault.
-- **Events (†, shapes from fixtures):**
-  - `thread.started` gives `thread_id` (the engine session id).
-  - `item.completed` and `item.started`: `agent_message` → `text_delta` (whole message, no token
-    streaming); `command_execution` → `Bash`; `file_change` → `Edit`; `mcp_tool_call` →
-    `mcp__<server>__<tool>`; `web_search` → `WebSearch`.
-  - `turn.completed` → `turn_end` (no cost; the usage tokens aren't shown).
+- **Events (S7, `fixtures/codex-turn.jsonl`):**
+  - `thread.started{thread_id}` gives the engine session id. Resume emits it again with the same id.
+  - `item.started` / `item.completed{item}`: `agent_message{id,text}` → `text_delta` (whole message, no
+    token streaming); `command_execution{command, aggregated_output, exit_code, status}` → `Bash`;
+    `file_change` → `Edit`; `mcp_tool_call{server, tool, arguments, result:{content}|null,
+    error:{message}|null, status}` → `mcp__<server>__<tool>`; `web_search` → `WebSearch`.
+  - A refusal is `status: "declined"` (command) or `"failed"` with `error.message` (MCP call) → a
+    `tool_result` with `ok: false`. A write the sandbox rejects emits **no** item at all.
+  - `turn.completed{usage}` → `turn_end` (no cost; the usage tokens aren't shown).
   - `turn.failed` and `error` → `error`.
-- **Windows sandbox (†):** the spike checks that a write outside the roots is refused on Windows. If
-  Codex reports the sandbox as unavailable on this machine, **Codex turns refuse to start** with a clear
-  message. They never run unsandboxed.
+- **Windows sandbox (S7):** with the two `-c` settings above, the sandbox is enforced on Windows:
+  `hostname` runs (allowed by design) and a write outside the roots is refused ("writing outside of the
+  project").
 
-### GitHub Copilot CLI — checked against 1.0.69
+### GitHub Copilot CLI — checked against 1.0.105
 
 - **Install:** `npm install -g @github/copilot` (npmjs.com).
-- **Sign in:** `copilot login`, a device code shown in the window. Status (†): read
-  `<COPILOT_HOME or ~/.copilot>/config.json`, looking for the logged-in user. If that isn't reliable, the
-  fallback is a cheap no-model check found in the spike.
+- **Sign in:** `copilot login`, a device code shown in the window. Status: read
+  `<COPILOT_HOME or ~/.copilot>/config.json`; it is camelCase: `lastLoggedInUser: {host, login}` and
+  `loggedInUsers: [{host, login}]` (S8).
 - **API key:** a fine-grained PAT with "Copilot Requests", passed as `COPILOT_GITHUB_TOKEN`. Login mode
   strips `COPILOT_GITHUB_TOKEN`, `GH_TOKEN` and `GITHUB_TOKEN`. Copilot ranks those above the stored login,
   and a stray `GH_TOKEN` from the `gh` CLI would take over.
-- **Turn:** `copilot -p <context + message> --output-format json --session-id <uuid>`. The same flag
-  creates the session on the first turn and resumes it on later turns. Also passed:
+- **Turn:** `copilot -p <context + message> --output-format json --stream on --session-id <uuid>`. The
+  same flag creates the session on the first turn and resumes it on later turns (verified). Also passed:
   - `-C <vault> --add-dir <repos> --add-dir <plugin>`
-  - `--plugin-dir <plugin> --agent <lead>` (†: the agent's name may be namespaced). Verified already:
-    Copilot loads the bundle as-is; `copilot --plugin-dir assistant-plugin plugin list` shows
-    `skill-vault-assistant (v2.0.0)`.
+  - `--plugin-dir <plugin> --agent skill-vault-assistant:<lead>`. Plugin agents must be plugin-qualified;
+    the bare name is rejected (S9). Copilot loads the bundle as-is.
   - `--additional-mcp-config <json> --disable-builtin-mcps`
-  - `--allow-tool 'shell(git:*)' --allow-tool write --allow-tool vault`
-  - `--no-ask-user --no-auto-update --no-remote`
+  - `--available-tools view create edit grep glob web_fetch skill task update_todo vault` — an
+    allowlist, one argv element per tool. `vault` means every tool of the vault MCP server (`vault-*`
+    doesn't work). There is deliberately **no shell tool**. The list also removes Copilot's built-in
+    computer-use plugin (desktop control), sql, workflow and shell-session tools.
+  - `--allow-tool write --allow-tool vault --disallow-temp-dir` (Copilot otherwise also allows the system
+    temp folder)
+  - `--no-ask-user --no-auto-update` (there is no `--no-remote` flag)
 
-  The prompt is an argument, so the real `copilot.exe` behind the npm shim must be resolved (the ACP probe
-  showed it lives under `@github/copilot-win32-x64`).
-- **Events (†, from fixtures):** mapped to the same canonical tool names as the others.
+  The prompt is an argument, so the real `copilot.exe` (or its node script) behind the npm shim must be
+  resolved.
+- **Events (S9, `fixtures/copilot-turn.jsonl`):** one JSON object per line, `{type, data, id, timestamp,
+  parentId, ephemeral?}`.
+  - `assistant.message_delta{messageId, deltaContent}` → `text_delta`. Concatenated, the deltas equal the
+    final `assistant.message{messageId, content, toolRequests}`, which is therefore not repeated.
+  - `tool.execution_start{toolCallId, toolName, arguments, mcpServerName?, mcpToolName?}` → `tool_start`;
+    `tool.execution_complete{toolCallId, success, result:{content, detailedContent?}, error:{message, code}}`
+    → `tool_result` (`success: false`, e.g. `code: "denied"`, is a refusal).
+  - The final `result{sessionId, exitCode, usage}` (no `data` wrapper) → `turn_end`, or `error` when
+    `exitCode` isn't 0. `tool.shell_output`, `assistant.tool_call_delta`, `assistant.turn_start/turn_end`
+    (one per model call), `assistant.idle` and the many `session.*` events are ignored.
+  - Tool names: `view`→Read, `create`→Write, `edit`→Edit, `grep`→Grep, `glob`→Glob, `web_fetch`→WebFetch,
+    `skill`→Skill, `task`→Task, `update_todo`→TodoWrite, `tool_search_tool`→ToolSearch, MCP tools as
+    `vault-<tool>`→`mcp__vault__<tool>`.
 
-### Grok Build — install verified in docs, not on this machine
+### Grok Build — built from xAI's docs, not yet run
 
-- **Install:** PowerShell `irm https://x.ai/cli/install.ps1 | iex` (x.ai).
+- **Install:** PowerShell `irm https://x.ai/cli/install.ps1 | iex` (x.ai). Expected folder `~/.grok/bin`.
 - **App-owned home.** Grok reads MCP servers only from files: its own config, `~/.claude.json`, Cursor's
   config, and `.mcp.json`. So the app runs Grok with `GROK_HOME=~/.skill-vault/engines/grok`. That folder
   holds a `config.toml` with only the vault server, plus `[compat.claude] mcps = false` and
   `[compat.cursor] mcps = false`. The file is rewritten before every turn because the bridge port can
   change.
 - **Sign in:** `grok login`, run with the same `GROK_HOME`. The app's Grok therefore has **its own
-  sign-in**, separate from a terminal `grok`. Status: `<GROK_HOME>/auth.json` exists (†).
+  sign-in**, separate from a terminal `grok`. Status: `<GROK_HOME>/auth.json` exists (unverified).
 - **API key:** `XAI_API_KEY`. Grok uses it only when no session token is stored. So API-key mode runs
   with a second app home, `~/.skill-vault/engines/grok-apikey/`, where no login is ever written.
   Switching modes never deletes the login.
@@ -250,35 +308,13 @@ built. If a † item turns out different, the spike's notes update this spec bef
   the turn.
 - **Events:** the output is Claude's stream-json wire format, so the parser is `parseStreamJsonLine` plus
   a Grok tool-name map: `run_terminal_cmd` → `Bash`, `read_file` → `Read`, `search_replace` → `Edit`,
-  `grep` → `Grep`, `list_dir` → `Glob`, `web_search` / `web_fetch`, and `use_tool {name: "vault__x"}` →
-  `mcp__vault__x`. Cost comes from the `result` record, as with Claude.
-- **Safety (†):** the spike checks two things. First, that headless Grok with these flags refuses a
-  non-git command and a write outside the vault. Second, whether it also honors `~/.claude/settings.json`
-  permission rules. If it does, the app home's config turns that compat off, or the flags add explicit
-  `--deny` rules.
-
-### Gemini CLI — checked against 0.55.1
-
-- **Install:** `npm install -g @google/gemini-cli` (npmjs.com).
-- **Sign in:** Gemini has no login subcommand. The window runs `gemini` with the hint "Choose **Login
-  with Google**, finish in the browser, then type `/quit`." Status (†): `~/.gemini/oauth_creds.json`
-  exists; the account comes from `~/.gemini/google_accounts.json`.
-- **API key:** `GEMINI_API_KEY`. Login mode strips `GEMINI_API_KEY` and `GOOGLE_API_KEY`.
-- **App settings file.** The app writes a system settings file
-  (`~/.skill-vault/engines/gemini/settings.json`) and passes it as `GEMINI_CLI_SYSTEM_SETTINGS_PATH`
-  (system settings win over the user's). It holds only the vault MCP server and the auth type that
-  matches the mode (`oauth-personal` / `gemini-api-key`), and turns off auto-update.
-- **Turn:** `gemini -p "" -o stream-json (--session-id <uuid> | --resume <uuid>†)
-  --include-directories <repos>,<plugin> --approval-mode default --policy <app policy>
-  --allowed-mcp-server-names vault --skip-trust`, with the prompt on stdin. †: resume by UUID. The help
-  only shows "latest" or an index; if UUIDs don't work, the adapter maps the UUID to an index with
-  `--list-sessions`.
-- **Policy file (`engines/gemini/policy.toml`, format †):** allow `run_shell_command` only with the
-  prefix `git `; allow `replace` and `write_file`; allow the `vault` MCP server. Anything else needs
-  approval, which non-interactive mode refuses (†).
-- **Events (†, from fixtures):** `run_shell_command` → `Bash`, `read_file` → `Read`, `replace` → `Edit`,
-  `write_file` → `Write`, `glob` → `Glob`, `search_file_content` → `Grep`, `google_web_search` →
-  `WebSearch`, `web_fetch` → `WebFetch`, vault tools → `mcp__vault__x`.
+  `write_file` → `Write`, `grep` → `Grep`, `list_dir` → `Glob`, `web_search` / `web_fetch`, and
+  `use_tool {name: "vault__x"}` → `mcp__vault__x`. Cost comes from the `result` record, as with Claude.
+  `fixtures/grok-turn.jsonl` is **hand-written** from these docs, not recorded.
+- **Safety (unverified):** the plan's last task checks two things live. First, that headless Grok with
+  these flags refuses a non-git command and a write outside the vault (if not, Grok loses its shell
+  rather than keeping an unrestricted one). Second, whether it also honors `~/.claude/settings.json`
+  permission rules; if it does, the app home's config turns that compat off.
 
 ### Shared by the non-Claude engines
 
@@ -286,19 +322,21 @@ built. If a † item turns out different, the spike's notes update this spec bef
 
 1. The body of the lead agent (`assistant-plugin/agents/<LEAD_AGENT>.md`, frontmatter stripped).
 2. An **engine note**: "You are running on <label> inside Skill Vault." It explains how tool names map
-   (the vault tools as this engine names them; "Bash" means your shell tool, git only). It also says
-   subagents aren't available on this engine, so when the instructions say to delegate, do that work
-   yourself using the matching skill. Copilot is the exception (it loads the plugin's agents) †.
+   (the vault tools as this engine names them). Its shell line depends on the engine: "Bash" is your
+   shell tool, git only (Codex, Grok), or — on Copilot — there is no shell tool, so you can't run git;
+   use a vault tool, or give the user the exact command. It also says subagents aren't available on
+   this engine, so when the instructions say to delegate, do that work yourself using the matching
+   skill. Copilot is the exception: it loads the plugin's agents (verified).
 3. A **skills index**: one line per plugin skill with its name, its `description`, and the absolute
    path of its `SKILL.md`, plus the line "Read a skill's SKILL.md (and its references/) before doing
    that kind of work." The plugin folder is a readable directory on every engine.
 
 How each engine gets the block:
 
-- **Codex, Grok, Gemini:** the prompt is `<skill-vault-instructions>…</skill-vault-instructions>` (first
-  turn only; the session keeps it after that), then `<skill-vault-context>…</skill-vault-context>`
-  (every turn), then the message. This goes through stdin or the prompt file, so Windows' 32 K
-  command-line limit never applies.
+- **Codex, Grok:** the prompt is `<skill-vault-instructions>…</skill-vault-instructions>` (first turn
+  only; the session keeps it after that), then `<skill-vault-context>…</skill-vault-context>` (every
+  turn), then the message. This goes through stdin or the prompt file, so Windows' 32 K command-line
+  limit never applies.
 - **Copilot:** gets the lead agent's body and the skills from the plugin through `--agent`. Its
   prepended block is the engine note (first turn only) plus the context block (every turn).
 
@@ -315,22 +353,24 @@ cost otherwise.
 | Engine | Shell | File writes | App changes | User's own config kept out by |
 |---|---|---|---|---|
 | Claude | `Bash(git:*)` | Edit/Write (cwd + add-dirs) | `mcp__vault__*` | `--strict-mcp-config`, `--setting-sources ""` (today) |
-| Codex | any command, **sandboxed** | vault + repos only (sandbox), network on | vault MCP | `--ignore-user-config` |
-| Copilot | `shell(git:*)` | `write` (cwd + add-dirs) | `vault` | `--disable-builtin-mcps`; other MCP servers aren't on the allow list, so `-p` denies them |
-| Grok | `Bash(git *)` † | `--tools` allowlist † | vault MCP | app-owned `GROK_HOME`, compat off |
-| Gemini | `git ` prefix (policy) | `replace`/`write_file` (workspace dirs) | `vault` | system settings file, `--allowed-mcp-server-names vault` |
+| Codex | any command, **sandboxed** (`workspace-write`, `windows.sandbox="unelevated"`) | vault + repos only (sandbox), network on | vault MCP (tools auto-approved) | `--ignore-user-config` |
+| Copilot | **none** (`--available-tools` lists no shell tool) | `create`/`edit` + `--allow-tool write` (cwd + add-dirs; `--disallow-temp-dir`) | `vault` | `--disable-builtin-mcps`; `--available-tools` drops every tool not listed, including the computer-use plugin |
+| Grok | `Bash(git *)` (unverified) | `--tools` allowlist (unverified) | vault MCP | app-owned `GROK_HOME`, compat off |
 
 - Every engine registers **one** MCP server, `vault`, built by the existing `buildMcpConfig` and
-  allowed as a whole server. Tools added to `assistant-mcp/bridge.ts` later reach all five engines with
+  allowed as a whole server. Tools added to `assistant-mcp/bridge.ts` later reach all four engines with
   no per-engine change. That includes `read_skill_files`, `save_skill` and `package_for_desktop`, which
   the Claude Desktop work is adding in parallel. The engine note's tool-name mapping is generic
   (`mcp__vault__<tool>` → this engine's spelling), not a list of tools.
-- Nothing here ever passes `--yolo`, `--allow-all*`, `bypassPermissions` or
-  `--dangerously-bypass-approvals-and-sandbox`. A unit test asserts that for every engine's
-  `buildTurn`.
+- Nothing here ever passes `--yolo`, `--allow-all*`, `bypassPermissions`,
+  `--dangerously-skip-permissions` or `--dangerously-bypass-approvals-and-sandbox`. One unit test
+  (`engines/safety.test.ts`) asserts that for every registered engine's `buildTurn` (new and resumed
+  chat, login and API key), matching `--flag=value` forms too, plus: no Copilot argument contains
+  `shell(`, Claude's and Grok's shell rules are git-only, and Codex always passes
+  `sandbox_mode="workspace-write"`.
 - The live check in the plan runs a refused action on each engine (a non-git command, and a write
   outside the vault) and confirms it was refused. For Codex, the refused action is only the write
-  outside the vault.
+  outside the vault. For Copilot, the command can't even be attempted (no shell tool).
 
 ## Install flow
 
@@ -342,9 +382,11 @@ cost otherwise.
    - PowerShell steps run `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "<installer>"`.
      These are the vendors' documented one-liners, and the bypass is for that one process.
    - The commands come from the engine module and never from the request.
-3. On success the server clears the exe cache and re-detects. The dialog shows "Installed v…" and moves
+3. On success the server re-detects with refresh (which clears the remembered exe). The dialog shows
+   "Installed v…" and, when the provider signs in with an account and isn't signed in yet, moves
    straight on to **Sign in**.
-4. On failure the dialog shows the last 20 output lines, **Copy command** and **Check again**.
+4. On failure the dialog shows the last 20 output lines, **Copy command** and **Check again**. A failed
+   refresh or Check again shows its error in the dialog.
 5. While an install runs, `app.locals.isBusy` reports busy: the idle auto-stop waits, and an app update
    waits.
 
@@ -357,11 +399,13 @@ cost otherwise.
    - It uses the engine's login-mode env (stray tokens stripped; `GROK_HOME` for Grok).
    - The command is built only from the resolved exe path and the engine's fixed args.
    - Only loopback requests may start it, the same as the folder dialog.
+   - If PowerShell can't be started, the route answers 500 with the reason and nothing stays pending.
    - The tool handles its own browser or device-code step in that window.
-2. The dialog shows the engine's hint ("Finish signing in in the window that opened", or Gemini's menu
-   hint). It polls `GET /engines` every 2 s for up to 10 minutes.
-3. Once `signed_in` turns true, the dialog shows "Signed in as <account>" and the server closes the
-   window.
+   - Outside Windows the app says to run `<cliName> <login args>` in a terminal.
+2. The dialog shows the engine's hint ("Finish signing in in the window that opened"). It polls
+   `GET /engines/:id?refresh=1&mode=login` every 2 s for up to 10 minutes.
+3. Once that view shows a login (`auth.mode` login) with `signed_in` true, the dialog shows "Signed in as
+   <account>" and the server closes the window. A status for the other mode never closes it.
 4. **Cancel** calls `/login/cancel`, which kills the window's process tree. A timeout does the same and
    says "Didn't see a sign-in — try again".
 5. While a sign-in is pending, `isBusy` reports busy (like `notionSignInPending`).
@@ -379,22 +423,25 @@ mean it is signed out. A matching turn error gets "— sign in again in Settings
 **Settings → AI assistant** (`client/src/components/assistant/ProviderSettings.tsx`, new; `Settings.tsx`
 keeps only the section shell):
 
-- A **Provider** list with five rows. Each row shows its state (*Not installed* / *Installed v0.144* /
-  *Signed in as …* / *API key saved*) and a radio button.
+- A **Provider** list with four rows. Each row shows its state (*Not installed* / *Installed v0.144* /
+  *Signed in as …* / *API key saved*) and a radio button. An installed row shows its version and
+  "checked with <verifiedVersion>" as visible text.
 - The selected row expands to show **Install** or **Sign in**, the **Account login / API key** choice,
   and the key field. Claude's existing panel (login vs API key + workspace ID) moves into its row,
   unchanged.
 - When the selected provider isn't Claude: "AI tagging and merge-on-update still use Claude Code."
 - The existing "Install assistant skills" block stays below the list.
-- Dialogs: `EngineInstallDialog.tsx` and `EngineSignInDialog.tsx`, shared with the setup guide.
+- Dialogs: `EngineInstallDialog.tsx` and `EngineSignInDialog.tsx`, shared with the setup guide and the
+  chat panel.
 
 **Chat panel:**
 
 - The header shows the chat's provider label.
-- If the selected provider isn't ready, the empty state says why, with one button: **Install** or
-  **Sign in**.
+- For a **new** chat whose (selected) provider isn't ready, the empty state says why, with one button:
+  **Install** or **Sign in**.
+- An open chat is judged by its own engine: if that engine isn't ready, its history still renders
+  read-only and the composer is locked with the note from Sessions. History always renders.
 - The session list shows a small badge on chats whose engine differs from the current setting.
-- A chat whose engine isn't ready shows its history read-only, with the note from Sessions.
 
 **Setup guide** (`client/src/pages/setup/steps/AssistantStep.tsx`):
 
@@ -402,28 +449,32 @@ keeps only the section shell):
   `/api/assistant/engines` and reuses the two dialogs.
 - Install and sign-in happen **immediately** in the step. They change the tool, not the app's config, so
   the guide's "nothing is saved until Finish" rule still holds for config.
+- Like today's step, it preloads what's saved: with nothing in the draft yet, the auth choice starts from
+  the selected provider's saved mode, and Claude's workspace ID from `GET /api/assistant/auth`. Next
+  without a click changes nothing.
+- "Signed in" shows only for a login status (the saved mode is login, or a sign-in finished in the step).
 - The draft's `assistant` gains `engine`: `{ engine, auth, workspace_id? }`. As today, an API key stays
   in page memory only and is sent with Finish.
 - Finish writes `assistant.engine` and that engine's auth (Claude's fields for Claude,
   `engines.<id>` otherwise).
-- `/api/setup/assistant` is removed if nothing else calls it once the step moves to
-  `/api/assistant/engines` (the plan checks).
+- `/api/setup/assistant` is removed once the step moves to `/api/assistant/engines` (nothing else calls
+  it).
 
 ## Errors
 
 - **Engine not ready at stream time:** 409 JSON before any NDJSON ("Codex isn't installed —
   Settings → AI assistant", "Copilot isn't signed in — …").
 - **CLI exits without a final event:** an `error` event built from the last 3 stderr lines plus the
-  engine's sign-in hint, as today.
+  engine's sign-in hint, as today. Copilot's final `result` with a non-zero `exitCode` is an error too.
 - **Lines a parser can't read** are skipped, and unknown event types are ignored. A CLI update can drop a
   timeline line; it can't crash a turn. `verifiedVersion` is shown in Settings next to the installed
   version, so drift is visible.
-- **Temp files** (Grok prompt file, Gemini settings and policy, Grok `config.toml`) are written under
-  `~/.skill-vault/engines/<id>/`. Prompt files are deleted in a `finally`.
+- **Temp files** (the Grok prompt file and its `config.toml`) are written under the app's
+  `~/.skill-vault/engines/` folders. Prompt files are deleted in a `finally`.
 - **Unchanged and engine-agnostic:** the per-chat turn lock, the 2-turn global cap, Stop (process-tree
   kill) and the idle and hard timeouts.
-- **Install and sign-in:** one of each at a time (409 otherwise). A server shutdown kills a running
-  install and closes a sign-in window.
+- **Install and sign-in:** one of each at a time (409 otherwise). A sign-in window that can't be opened
+  is a 500 with the reason. A server shutdown kills a running install and closes a sign-in window.
 
 ## Testing
 
@@ -432,83 +483,104 @@ node:test, in the same layout as now. No test spawns a real CLI.
 - **Each engine:**
   - snapshot tests of first-turn and resumed-turn `buildTurn` output
   - `childEnv` tests (login strips the stray vars, API key sets them, Claude unchanged)
-  - parser tests against **real JSONL fixtures** captured in the spike
-    (`engines/fixtures/<id>-*.jsonl`): text, a vault tool call, a shell call, a refused call, an error,
-    the end of the turn
+  - parser tests against the spike's **recorded fixtures** (`engines/fixtures/codex-turn.jsonl`,
+    `copilot-turn.jsonl`): text, the vault tool call, a shell call (Codex), the refusal the fixture
+    holds (Copilot's denied `create` → `ok: false`; Codex's refusals don't appear in its fixture, so a
+    synthetic test covers `declined` and `failed`), the end of the turn. Grok's fixture is hand-written
+    from xAI's docs and replaced by a recorded one in the live check.
   - `authStatus` tests with fake files and a fake runner
-- **Safety:** for every engine, `buildTurn` never contains a bypass/yolo/allow-all flag, and the shell
-  allowance is git-only (except Codex, whose sandbox mode is asserted).
-- **`exe.ts`:** PATH, shim, registry PATH and known folders, each with fakes.
-- **`instructions.ts`:** lead body, engine note and skills index from a fixture plugin dir. The block
-  goes only on the first turn; the context block goes on every turn.
-- **Routes:** `GET /engines`; `PUT /engine`; the install job with a fake runner (streams, 409 on a
-  second install, commands never taken from the body); login with a fake launcher (loopback-only,
-  cancel); `PUT /engines/:id/auth` never echoes the key; `/stream` gives 409 for an engine that isn't
-  ready.
+- **Safety (`engines/safety.test.ts`):** for every registered engine, `buildTurn` (new/resumed chat ×
+  login/API key) never contains a Global Constraints flag; no Copilot argument contains `shell(`; Claude's
+  and Grok's shell allowance is git-only; Codex's sandbox mode is asserted. The forbidden list lives in
+  `engines/testFakes.ts` (`FORBIDDEN_FLAGS`).
+- **`exe.ts`:** PATH, shim, known folders, registry PATH (read only when the others miss), each with
+  fakes; the per-name memo and `forget` in `common.ts`.
+- **`instructions.ts`:** lead body, engine note (subagents; git-only shell vs none) and skills index from
+  a fixture plugin dir. The block goes only on the first turn; the context block goes on every turn.
+- **Routes:** `GET /engines`; `PUT /engine`; `PUT /engines/:id/auth` never echoes the key, and `""`
+  clears the saved Claude key through `/engines/claude/auth`; the install job with a fake runner
+  (streams, 409 on a second install, commands never taken from the body); login with a fake window
+  (opens, closes once signed in, cancel closes it, a non-loopback Host gets 403, a window that fails to
+  open gives 500); `/stream` gives 409 for an engine that isn't ready.
 - **Sessions:** old chats read as Claude; Codex's thread id is saved and used on resume.
-- **Setup:** the draft accepts and normalizes `engine`; Finish writes the right config fields.
+- **Setup:** the draft accepts and normalizes `engine` (missing = claude); Finish writes the right config
+  fields.
 - **Client:** Settings provider states; the chat empty state; the read-only chat note.
 
 **Live checks (manual, each with the user's OK first, because they spend real requests):**
 
-- Per engine: one short turn that calls `list_skills`; one refused non-git command; one refused write
-  outside the vault (Codex: the write only); a resumed second turn that remembers the first.
-- Grok: install and sign-in end to end, since it isn't installed on this machine.
+- Per engine: one short turn that calls `list_skills`; one refused non-git command (Copilot: no shell
+  tool at all; Codex: allowed by design); one refused write outside the vault; a resumed second turn that
+  remembers the first.
+- Grok: install and sign-in end to end, since it isn't installed on this machine and wasn't run in the
+  spike; record a real fixture; confirm or correct S1–S4.
 
-## Plan task 1 — verification spike
+## Plan task 1 — verification spike (done)
 
-Before any adapter code, for each of Codex, Copilot, Grok and Gemini:
-
-1. Capture fixtures: run one short real turn per CLI with the flags above and a prompt that calls one
-   vault tool and one refused shell command. Save the raw JSONL as the parser fixtures. **Ask the user
-   first.**
-2. Settle every † item:
-   - each sign-in status check
-   - Codex: `CODEX_API_KEY`, and whether the Windows sandbox is enforced
-   - Copilot: the agent name with the plugin
-   - Grok: install folder, `auth.json`, the safety flags, `~/.claude/settings.json` compat
-   - Gemini: resume by UUID, the policy format, non-interactive refusals
-3. Write the findings into this spec (a "Spike findings" section) and adjust the affected adapter
-   details before their tasks start.
+Before any adapter code, the spike ran one short real turn per CLI with the flags above and a prompt
+that calls one vault tool, runs `hostname` and writes outside the vault, saved the raw JSONL as parser
+fixtures, and settled the open items. Codex and Copilot were recorded. Grok was skipped (user decision).
+Gemini CLI was tried and dropped (its sign-in is refused for individuals). The results are below; the
+adapter details above already reflect them.
 
 ## Docs & rollout
 
 - **Default stays Claude:** existing users see no change until they pick another provider.
 - **Docs:**
   - `docs/assistant.md`: providers, install, sign-in, safety per provider, and what differs (no
-    subagents on Codex, Grok and Gemini; no cost on some)
+    subagents on Codex and Grok; no shell on Copilot; no cost on some)
   - `docs/configuration.md`: `assistant.engine`, `assistant.engines`
-  - `docs/faq.md`: "Why does Grok need its own sign-in?", "Why is Codex's shell not git-only?"
+  - `docs/faq.md`: "Why does Grok need its own sign-in?", "Why is Codex's shell not git-only?", "Why
+    can't the assistant run git on Copilot?"
   - `docs/tech_reference.md`: the API rows for the new routes
-  - `docs/changelog.md`, and `app/CHANGELOG.md` entries under `[Unreleased]` (this ships in the
-    combined 0.2.0 release with the setup guide and the Notion fixes)
-  - What's New
+  - `docs/changelog.md`, and `app/CHANGELOG.md` entries under the top `## [Unreleased] - 2026-10-28`
+    heading (this ships in the combined 0.2.0 release with the setup guide and the Notion fixes)
 - **Where to build:** in this worktree (`.claude/worktrees/assistant-providers`, branched from local
   main `a25a664`), never in the shared `C:\Github\skill-vault` checkout. Rebase onto main before the PR,
   since the Claude Desktop work touches `bridge.ts` in parallel.
 
 ## Files
 
-**New** (`app/server/services/assistant/engines/`): `types.ts`, `registry.ts`, `exe.ts`,
-`instructions.ts`, `claude.ts`, `codex.ts`, `copilot.ts`, `grok.ts`, `gemini.ts`, `install.ts`
-(the install job), `signIn.ts` (window launcher + pending state), `fixtures/`, plus tests for each.
-Client: `components/assistant/ProviderSettings.tsx`, `EngineInstallDialog.tsx`,
-`EngineSignInDialog.tsx`.
+**New** (`app/server/services/assistant/engines/`): `types.ts`, `registry.ts`, `exe.ts`, `config.ts`,
+`instructions.ts`, `common.ts`, `claude.ts`, `codex.ts`, `copilot.ts`, `grok.ts`, `state.ts`, `install.ts`
+(the install job), `signIn.ts` (window launcher + pending state), `jobs.ts`, `testFakes.ts`, `fixtures/`,
+plus tests for each and `safety.test.ts`. Also `server/routes/assistant.test.ts`.
+Client: `components/ui/Modal.tsx`, `components/assistant/ProviderSettings.tsx`, `ClaudeSignIn.tsx`,
+`EngineInstallDialog.tsx`, `EngineSignInDialog.tsx`.
 
 **Changed:**
 
 - `server/services/assistant/turn.ts`: engine-agnostic runner
-- `session.ts`: `engine`, `engine_session_id`
+- `server/services/assistant/session.ts`: `engine`, `engine_session_id`
+- `server/services/assistant/streamEvents.ts`: canonical tool names, event builders, parser options
+- `server/services/assistant/mcpConfig.ts`: `VaultMcpServer`
 - `server/routes/assistant.ts`: engine routes; `/stream` picks the engine
-- `server/services/claude/cli.ts`: the shim/exe resolver moves to `engines/exe.ts` and is re-exported
-- `server/services/claude/auth.ts`: `withAuthHint` moves behind the Claude engine
+- `server/services/claude/cli.ts`: stream runner spawn targets; Claude's exe search dirs
 - `server/services/appConfig.ts`: the assistant block's `engine` / `engines`
 - `server/index.ts`: `isBusy` includes a running install and a pending sign-in
 - `server/services/setup/draft.ts` and `server/services/setup/apply.ts` (the Finish job):
   `assistant.engine`
 - `server/routes/setup.ts`
-- `client/src/pages/setup/steps/AssistantStep.tsx`
+- `client/src/lib/api.ts` (one NDJSON reader), `lib/setup.ts`, `lib/appUpdate.ts`
+- `client/src/pages/setup/steps/AssistantStep.tsx`, `ReviewStep.tsx`
 - `client/src/pages/Settings.tsx`
-- `client/src/lib/assistant.ts`
+- `client/src/lib/assistant.ts`, `lib/assistantStore.ts`
 - `components/assistant/AssistantPanel.tsx`, `SessionList.tsx`
 - the docs listed above
+
+## Spike findings (2026-10-29)
+
+| # | Item | Finding |
+|---|---|---|
+| S1 | Grok install folder | Unverified: Grok skipped (user decision). Default from xAI's docs kept: `~/.grok/bin`. |
+| S2 | Grok sign-in file under GROK_HOME | Unverified: Grok skipped. Default kept: `auth.json` in `GROK_HOME`. |
+| S3 | Grok tool names + MCP call shape | Unverified: Grok skipped. Defaults kept: `read_file, grep, list_dir, search_replace, write_file, run_terminal_cmd, web_search, web_fetch`; MCP via `use_tool {name: "vault__<tool>"}`. `fixtures/grok-turn.jsonl` is hand-written from these. |
+| S4 | Grok refusals; ~/.claude/settings.json compat | Unverified: Grok skipped. Checked live in the plan's last task. |
+| S5 | `codex login status` signed-in exit/text | Exit 0, stdout "Logged in using ChatGPT". |
+| S6 | CODEX_API_KEY for `codex exec` | Unverified (no API key offered). `CODEX_API_KEY` default kept. |
+| S7 | Codex sandbox on Windows; item shapes; resume | codex-cli 0.144.4. With `--ignore-user-config` Codex has no Windows sandbox and falls back to read-only: every command "blocked by policy", MCP calls `error.message = "user cancelled MCP tool call"`. `-c windows.sandbox="unelevated"` and `-c mcp_servers.vault.default_tools_approval_mode="approve"` fix it. With them: `list_skills` succeeded, `hostname` ran (allowed by design in the sandbox), the write outside the vault was refused ("writing outside of the project"; no `file_change` item is emitted for a rejected patch). Events: `thread.started{thread_id}`, `turn.started`, `item.started`/`item.completed{item}`, `turn.completed{usage}`. Items: `agent_message{id,text}`; `mcp_tool_call{id,server,tool,arguments,result:{content:[{type,text}]}\|null,error:{message}\|null,status: in_progress\|completed\|failed}`; `command_execution{id,command,aggregated_output,exit_code,status: in_progress\|completed\|declined}`. Resume (`codex exec resume <thread_id> … -`) remembered the first turn and emits `thread.started` again with the same `thread_id`. |
+| S8 | Copilot signed-in field in config.json | Copilot CLI 1.0.105. camelCase: `lastLoggedInUser: {host, login}` and `loggedInUsers: [{host, login}]` (not snake_case). |
+| S9 | Copilot --agent name; event shapes; MCP tool spelling; refusals; resume | `--agent` must be plugin-qualified: `skill-vault-assistant:vault-assistant` (the bare name is rejected: "No such agent … available: skill-vault-assistant:…"). There is no `--no-remote` flag. Copilot's default "manual" permission mode auto-approves commands it classes as read-only: `hostname` ran with only `shell(git:*)` allowed, so a git-only allowlist isn't enforceable → **no shell** (user decision): `--available-tools view create edit grep glob web_fetch skill task update_todo vault` (each its own argv element; `vault` = every vault MCP tool, verified; `vault-*` doesn't work), plus `--allow-tool write --allow-tool vault --disallow-temp-dir`. The allowlist also removes the built-in computer-use plugin MCP, sql, workflow and shell-session tools. Events: JSONL `{type, data, id, timestamp, parentId, ephemeral?}`; `assistant.message_delta{messageId, deltaContent}` (concatenated = the final message `content`); `assistant.message{messageId, content, toolRequests:[{toolCallId,name,arguments,mcpServerName?,mcpToolName?}]}`; `tool.execution_start{toolCallId, toolName, arguments, mcpServerName?, mcpToolName?}`; `tool.execution_complete{toolCallId, success, result:{content, detailedContent?}\|undefined, error:{message, code}\|undefined}`; `tool.shell_output`, `assistant.tool_call_delta`, `assistant.turn_start/turn_end{turnId}`, `assistant.idle{}`, many `session.*` (ignored); final `result{sessionId, exitCode, usage:{premiumRequests,…}}` (no `data`). Tool names: `view`, `create`, `edit`, `grep`, `glob`, `web_fetch`, `skill`, `task`, `update_todo`, `tool_search_tool`, `powershell` (absent under the allowlist), MCP as `vault-<tool>`. The recorded fixture predates the allowlist (a `powershell` call that ran, a `create` denied with `error.code = "denied"`, a `tool_search_tool` call): parser tests use it for shapes only. Resume with the same `--session-id` remembered the first turn. |
+| S10 | Gemini login files; `-p ""` + stdin | Gemini CLI 0.55.1: Google-account sign-in refused server-side (`IneligibleTierError: This client is no longer supported for Gemini Code Assist for individuals … migrate to the Antigravity suite`). **Gemini dropped** from this branch. |
+| S11 | Gemini resume by UUID | Not reached (Gemini dropped). |
+| S12 | Gemini policy; refusals; event shapes; MCP spelling | Not reached, except: Gemini's policy TOML rejects `toolName` as an array. |
