@@ -422,7 +422,7 @@ export const TOOLS: Record<string, ToolDef> = {
   },
   save_skill: {
     description:
-      'Save a skill into the vault from file contents. mode "create" makes a new staging skill: SKILL.md is required and its frontmatter name must equal `name`. mode "update" changes an existing skill: pass expected_sha256 (from read_skill_files) for every existing file you change and none for new files; files you leave out stay as they are and nothing is deleted. A "files changed" error means re-read and confirm with the user again.',
+      'Save a skill into the vault from file contents. mode "create" makes a new staging skill: SKILL.md is required and its frontmatter name must equal `name`. mode "update" changes an existing skill: first show the user the changes and get a yes, then pass expected_sha256 (from read_skill_files) for every existing file you change and none for new files; files you leave out stay as they are and nothing is deleted. A "files changed" error means re-read and confirm with the user again.',
     schema: {
       name: z.string(),
       mode: z.enum(["create", "update"]),

@@ -339,6 +339,10 @@ test("save_skill posts the files and turns a conflict into a re-read instruction
   );
 });
 
+test("save_skill tells agents without the skill to show the changes and get a yes before an update", () => {
+  assert.match(TOOLS.save_skill.description, /mode "update"[^.]*show the user the changes and get a yes/);
+});
+
 test("package_for_desktop packages, and opens the folder only when asked", async () => {
   const plain = fakeHttp([{ status: 200, json: { zip_path: "Z" } }]);
   assert.deepEqual(await TOOLS.package_for_desktop.handler({ skill: "demo" }, plain, noSleep), { zip_path: "Z" });

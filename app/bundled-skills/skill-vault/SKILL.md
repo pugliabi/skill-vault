@@ -1,6 +1,6 @@
 ---
 name: skill-vault
-description: Work with the user's Skill Vault, the local skill library managed by the Skill Vault app. Use when the user asks to save or push a skill to their vault, load or use a skill from their vault, list or search what's in the vault, push a vault skill to another tool (Claude Code, Cursor, Codex, Copilot, Windsurf, OpenClaw), install a vault skill in Claude Desktop or claude.ai, sync skills with Notion, or check whether vault skills are in sync or have updates.
+description: Work with the user's Skill Vault, the local skill library managed by the Skill Vault app. Use when the user asks to save or push a skill to their vault, load or use a skill from their vault, list or search what's in the vault, push a vault skill to another tool (Claude Code, Cursor, Codex, Copilot, Windsurf), install a vault skill in Claude Desktop or claude.ai, sync skills with Notion, or check whether vault skills are in sync or have updates.
 ---
 
 # Skill Vault
@@ -17,30 +17,29 @@ Use the first of these that works:
 1. **Vault tools.** If you have tools named `list_skills`, `get_skill`, `read_skill_files` and
    `save_skill` (under any server name, usually `skill-vault`), call them directly.
 2. **The shared command.** If you can run shell commands, use the command the app installs:
-   `~/.skill-vault/bin/skill-vault` (in Windows `cmd` or PowerShell:
-   `%USERPROFILE%\.skill-vault\bin\skill-vault.cmd`).
+   `~/.skill-vault/bin/skill-vault` in sh, or `skill-vault.cmd` in the same folder on Windows.
    - `skill-vault tools` lists every tool and its arguments.
-   - `skill-vault <tool>` reads the tool's arguments as JSON on stdin and prints the JSON result:
+   - `skill-vault <tool> --file args.json` runs a tool with its JSON arguments from a file and prints
+     the JSON result. Write the file as UTF-8 with your file-writing tool (from PowerShell:
+     `Set-Content -Encoding utf8`), never by quoting JSON or file contents on the command line.
+
+     sh (Git Bash, macOS, Linux), where the arguments can also come on stdin:
 
      ```bash
+     ~/.skill-vault/bin/skill-vault search_skills --file args.json
      echo '{"query":"pdf"}' | ~/.skill-vault/bin/skill-vault search_skills
      ```
 
-     ```powershell
-     '{"query":"pdf"}' | & "$env:USERPROFILE\.skill-vault\bin\skill-vault.cmd" search_skills
+     Windows `cmd`:
+
+     ```bat
+     "%USERPROFILE%\.skill-vault\bin\skill-vault.cmd" search_skills --file args.json
      ```
 
-   - For `save_skill`, write the JSON arguments to a temporary file and feed it in instead of quoting
-     file contents on the command line:
-
-     ```bash
-     ~/.skill-vault/bin/skill-vault save_skill < args.json
-     ```
-
-     PowerShell has no `<` operator, so run it through `cmd`:
+     PowerShell:
 
      ```powershell
-     cmd /c "%USERPROFILE%\.skill-vault\bin\skill-vault.cmd save_skill < args.json"
+     & "$env:USERPROFILE\.skill-vault\bin\skill-vault.cmd" search_skills --file args.json
      ```
 
 3. **Neither.** Tell the user this app isn't connected to their vault yet, and that they can connect

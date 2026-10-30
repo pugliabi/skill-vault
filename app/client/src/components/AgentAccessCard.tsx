@@ -169,8 +169,9 @@ export function AgentAccessCard() {
               sh / Git Bash / macOS / Linux: <code style={MONO}>{s?.command.posix ?? "~/.skill-vault/bin/skill-vault"}</code>
             </div>
             <div style={{ color: "var(--ink-3)" }}>
-              <code style={MONO}>skill-vault tools</code> lists the tools. Give a tool its JSON arguments on stdin.
-              Push the skill to the agent's targets as usual.
+              <code style={MONO}>skill-vault tools</code> lists the tools.{" "}
+              <code style={MONO}>{"skill-vault <tool> --file args.json"}</code> runs one with its JSON arguments
+              from a UTF-8 file (or on stdin). Push the skill to the agent's targets as usual.
             </div>
           </div>
         </Row>
