@@ -113,3 +113,11 @@ test("install: streams the engine's own steps and a done line; one at a time", a
   assert.equal(lines.at(-1).ok, true);
   assert.ok(!seen.flat().join(" ").includes("evil"), "commands never come from the request");
 });
+
+test("install: a throwing installer still ends the stream with one done line", async () => {
+  const { createEngineJobs } = await import("../services/assistant/engines/jobs.ts");
+  const installer = { isRunning: () => false, stop: () => {}, run: async () => { throw new Error("spawn exploded"); } };
+  const base = await serve(mod.assistantRouter({ mode: "development", appRoot: APP_ROOT, registry: reg.createRegistry([fakes.fakeEngine()]), jobs: createEngineJobs({ installer }) }));
+  const lines = (await (await fetch(`${base}/engines/codex/install`, send("POST", {}))).text()).trim().split("\n").map((l) => JSON.parse(l));
+  assert.deepEqual(lines, [{ type: "done", ok: false, message: "spawn exploded" }]);
+});

@@ -206,20 +206,26 @@ export function assistantRouter(opts: AssistantRouterOpts): Router {
     const write = (e: InstallEvent): void => {
       if (!res.writableEnded) res.write(`${JSON.stringify(e)}\n`);
     };
-    const r = await jobs.installer.run(engine, write);
-    states.invalidate(engine.id);
-    const view = await states.view(engine.id, { refresh: true });
-    const found = Boolean(view?.installed);
-    write({
-      type: "done",
-      ok: r.ok && found,
-      ...(view?.version ? { version: view.version } : {}),
-      ...(!r.ok
-        ? { message: r.message }
-        : found
-          ? {}
-          : { message: "Installed, but Skill Vault can't find it yet. Close and reopen Skill Vault, then check again." }),
-    });
+    let doneWritten = false;
+    try {
+      const r = await jobs.installer.run(engine, write);
+      states.invalidate(engine.id);
+      const view = await states.view(engine.id, { refresh: true });
+      const found = Boolean(view?.installed);
+      doneWritten = true;
+      write({
+        type: "done",
+        ok: r.ok && found,
+        ...(view?.version ? { version: view.version } : {}),
+        ...(!r.ok
+          ? { message: r.message }
+          : found
+            ? {}
+            : { message: "Installed, but Skill Vault can't find it yet. Close and reopen Skill Vault, then check again." }),
+      });
+    } catch (err) {
+      if (!doneWritten) write({ type: "done", ok: false, message: (err as Error).message || "The install failed unexpectedly." });
+    }
     res.end();
   });
 

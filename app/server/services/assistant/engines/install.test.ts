@@ -51,3 +51,28 @@ test("failures: a non-zero exit, no npm, not Windows", async () => {
   const mac = createInstaller({ platform: "darwin", npmPath: () => "npm", spawnLines: fakeSpawn(0).spawnLines });
   assert.match((await mac.run(fakeEngine(), () => {})).message ?? "", /Windows only.*npm install -g fake/);
 });
+
+test("stop() between steps keeps the next step from starting", async () => {
+  const calls: string[] = [];
+  let finish!: () => void;
+  const inst = createInstaller({
+    platform: "win32",
+    npmPath: () => "npm.cmd",
+    spawnLines: (command) => {
+      calls.push(command);
+      return { done: new Promise<number>((r) => (finish = () => r(0))), kill: () => {} };
+    },
+  });
+  const engine = fakeEngine({
+    install: [
+      { kind: "npm", label: "One", args: ["install", "-g", "a"], source: "npmjs.com" },
+      { kind: "npm", label: "Two", args: ["install", "-g", "b"], source: "npmjs.com" },
+    ],
+  });
+  const p = inst.run(engine, () => {});
+  inst.stop();
+  finish();
+  const r = await p;
+  assert.equal(r.ok, false);
+  assert.equal(calls.length, 1, "step two never spawned");
+});

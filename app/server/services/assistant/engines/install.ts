@@ -79,17 +79,23 @@ export function createInstaller(over: Partial<InstallDeps> = {}): Installer {
   };
   let current: { kill(): void } | null = null;
   let running = false;
+  let stopped = false;
 
   return {
     isRunning: () => running,
-    stop: () => current?.kill(),
+    stop: () => {
+      stopped = true;
+      current?.kill();
+    },
     async run(engine, onEvent) {
       if (deps.platform !== "win32") {
         return { ok: false, message: `Automatic install is Windows only. Run this yourself: ${engine.install.map(installDisplay).join(" && ")}` };
       }
       running = true;
+      stopped = false;
       try {
         for (const [index, step] of engine.install.entries()) {
+          if (stopped) return { ok: false, message: "The install was stopped." };
           onEvent({ type: "step", index, label: step.label, display: installDisplay(step) });
           let command: string;
           let args: string[];
