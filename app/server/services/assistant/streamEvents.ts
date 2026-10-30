@@ -15,9 +15,10 @@
  * and its eventual tool_result already represent that work in the timeline.
  */
 import { withAuthHint } from "../claude/auth.ts";
+import type { EngineId } from "./engines/types.ts";
 
 export type AssistantStreamEvent =
-  | { type: "session"; session_id: string }
+  | { type: "session"; session_id: string; engine?: EngineId }
   | { type: "text_delta"; text: string }
   | { type: "thinking_delta"; text: string }
   | { type: "tool_start"; tool_use_id: string; name: string; label: string; input_preview?: string }
@@ -89,6 +90,64 @@ export function labelForTool(name: string, input: Record<string, unknown>): stri
   }
 }
 
+/** Native tool name → the Claude name labelForTool and the activity line understand. */
+export type ToolAliases = Record<string, string>;
+
+const PATH_KEYS = ["file_path", "path", "absolute_path", "target_file", "filePath"];
+/** The vault tool across engines: mcp__vault__x (Claude, Codex), vault__x (Grok), vault-x (Copilot). */
+const VAULT_TOOL = /^(?:mcp__vault__|vault__|vault-)(.+)$/;
+
+function firstString(input: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const k of keys) {
+    const v = input[k];
+    if (typeof v === "string" && v) return v;
+  }
+  return undefined;
+}
+
+/** Map another CLI's tool call onto Claude's names and input fields, so every engine's timeline reads the same. */
+export function canonicalTool(
+  aliases: ToolAliases,
+  name: string,
+  input: Record<string, unknown>,
+): { name: string; input: Record<string, unknown> } {
+  if (name === "use_tool" && typeof input.name === "string") {
+    const inner = input.arguments ?? input.input;
+    return canonicalTool(aliases, input.name, inner && typeof inner === "object" ? (inner as Record<string, unknown>) : {});
+  }
+  const vault = name.match(VAULT_TOOL);
+  if (vault) return { name: `mcp__vault__${vault[1]}`, input };
+  const to = aliases[name] ?? name;
+  const out: Record<string, unknown> = { ...input };
+  const fill = (field: string, keys: string[]): void => {
+    if (!out[field]) {
+      const v = firstString(input, keys);
+      if (v) out[field] = v;
+    }
+  };
+  switch (to) {
+    case "Read":
+    case "Edit":
+    case "Write":
+      fill("file_path", PATH_KEYS);
+      break;
+    case "Bash":
+      fill("command", ["command", "cmd", "commandLine"]);
+      break;
+    case "Grep":
+    case "Glob":
+      fill("pattern", ["pattern", "query", "glob", "path", "dir_path"]);
+      break;
+    case "WebSearch":
+      fill("query", ["query", "q"]);
+      break;
+    case "WebFetch":
+      fill("url", ["url", "prompt"]);
+      break;
+  }
+  return { name: to, input: out };
+}
+
 interface CliContentBlock {
   type?: string;
   text?: string;
@@ -125,11 +184,29 @@ function toolResultPreview(content: unknown): string | undefined {
   return undefined;
 }
 
+export function toolStartEvent(id: string, name: string, input: Record<string, unknown>): AssistantStreamEvent {
+  const inputPreview = truncate(JSON.stringify(input), INPUT_PREVIEW_MAX);
+  return {
+    type: "tool_start",
+    tool_use_id: id,
+    name,
+    label: labelForTool(name, input),
+    input_preview: inputPreview === "{}" ? undefined : inputPreview,
+  };
+}
+
+export function toolResultEvent(id: string, ok: boolean, content: unknown): AssistantStreamEvent {
+  return { type: "tool_result", tool_use_id: id, ok, output_preview: toolResultPreview(content) };
+}
+
 /**
  * Parse one JSONL line into wire events. Unknown/irrelevant lines return []
  * — never throw: a malformed line is dropped, not fatal to the stream.
  */
-export function parseStreamJsonLine(line: string): AssistantStreamEvent[] {
+export function parseStreamJsonLine(
+  line: string,
+  opts: { aliases?: ToolAliases; authHint?: (m: string) => string } = {},
+): AssistantStreamEvent[] {
   let msg: CliLine;
   try {
     msg = JSON.parse(line);
@@ -166,14 +243,8 @@ export function parseStreamJsonLine(line: string): AssistantStreamEvent[] {
       for (const b of blocks) {
         if (b?.type === "tool_use" && typeof b.id === "string" && typeof b.name === "string") {
           const input = b.input && typeof b.input === "object" ? b.input : {};
-          const inputPreview = truncate(JSON.stringify(input), INPUT_PREVIEW_MAX);
-          events.push({
-            type: "tool_start",
-            tool_use_id: b.id,
-            name: b.name,
-            label: labelForTool(b.name, input),
-            input_preview: inputPreview === "{}" ? undefined : inputPreview,
-          });
+          const c = opts.aliases ? canonicalTool(opts.aliases, b.name, input) : { name: b.name, input };
+          events.push(toolStartEvent(b.id, c.name, c.input));
         }
       }
       return events;
@@ -185,12 +256,7 @@ export function parseStreamJsonLine(line: string): AssistantStreamEvent[] {
       const events: AssistantStreamEvent[] = [];
       for (const b of blocks) {
         if (b?.type === "tool_result" && typeof b.tool_use_id === "string") {
-          events.push({
-            type: "tool_result",
-            tool_use_id: b.tool_use_id,
-            ok: b.is_error !== true,
-            output_preview: toolResultPreview(b.content),
-          });
+          events.push(toolResultEvent(b.tool_use_id, b.is_error !== true, b.content));
         }
       }
       return events;
@@ -199,7 +265,7 @@ export function parseStreamJsonLine(line: string): AssistantStreamEvent[] {
     case "result": {
       if (msg.is_error) {
         const message = typeof msg.result === "string" && msg.result ? msg.result : "claude CLI reported an error";
-        return [{ type: "error", message: withAuthHint(message) }];
+        return [{ type: "error", message: (opts.authHint ?? withAuthHint)(message) }];
       }
       return [
         {

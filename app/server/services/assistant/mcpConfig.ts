@@ -22,6 +22,9 @@ export interface McpBridgeConfig {
   };
 }
 
+/** One vault server entry — what every engine registers under the name "vault". */
+export type VaultMcpServer = McpBridgeConfig["mcpServers"]["vault"];
+
 export function buildMcpConfig(opts: {
   mode: "development" | "production";
   /** The app package root (the directory holding package.json). */
