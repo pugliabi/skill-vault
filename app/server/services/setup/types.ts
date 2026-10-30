@@ -1,4 +1,5 @@
 /** Shared shapes for the setup guide (draft file, API bodies). */
+import type { EngineId } from "../assistant/engines/types.ts";
 
 export type SetupStep = "welcome" | "vault" | "targets" | "skills" | "notion" | "assistant" | "review";
 
@@ -31,6 +32,7 @@ export interface NotionChoice {
 }
 
 export interface AssistantChoice {
+  engine: EngineId;
   auth: "login" | "api_key";
   workspace_id?: string;
 }

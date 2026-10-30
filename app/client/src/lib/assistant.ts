@@ -8,12 +8,12 @@
  * like the server's line-buffered writer produces them.
  */
 
-import { ApiError } from "./api";
+import { ApiError, readNdjson } from "./api";
 
 // ── Wire events (one JSON object per NDJSON line) ────────────────
 
 export type AssistantStreamEvent =
-  | { type: "session"; session_id: string }
+  | { type: "session"; session_id: string; engine?: EngineId }
   | { type: "text_delta"; text: string }
   | { type: "thinking_delta"; text: string }
   | { type: "tool_start"; tool_use_id: string; name: string; label: string; input_preview?: string }
@@ -39,6 +39,8 @@ export type AgentKind = "vault" | "skill";
 
 export interface AssistantStatus {
   available: boolean;
+  engine: EngineId;
+  label: string;
   version?: string;
   reason?: string;
 }
@@ -55,6 +57,7 @@ export interface SessionSummary {
   id: string;
   title: string;
   agent: AgentKind;
+  engine: EngineId;
   skill?: string;
   turn_count: number;
   total_cost_usd: number;
@@ -74,6 +77,7 @@ export interface SessionDetail {
     id: string;
     title: string;
     agent: AgentKind;
+    engine: EngineId;
     skill?: string;
     chips: AssistantChip[];
     running: boolean;
@@ -124,6 +128,20 @@ export const assistantApi = {
   /** An omitted field is kept; an empty string clears it. */
   setAuth: (body: { auth?: AssistantAuth["auth"]; api_key?: string; workspace_id?: string }) =>
     rest<AssistantAuth>("PUT", "/api/assistant/auth", body),
+  engines: (refresh?: boolean) => rest<{ engines: EngineView[] }>("GET", `/api/assistant/engines${refresh ? "?refresh=1" : ""}`),
+  /** mode: report sign-in for that mode rather than the saved one (the sign-in dialog asks for "login"). */
+  engine: (id: EngineId, refresh?: boolean, mode?: "login" | "api_key") => {
+    const q = new URLSearchParams({ ...(refresh ? { refresh: "1" } : {}), ...(mode ? { mode } : {}) }).toString();
+    return rest<EngineView & { sign_in?: SignInWindowState | null }>("GET", `/api/assistant/engines/${id}${q ? `?${q}` : ""}`);
+  },
+  setEngine: (id: EngineId) => rest<{ engine: EngineId }>("PUT", "/api/assistant/engine", { engine: id }),
+  /** An omitted field is kept; an empty string clears it. */
+  setEngineAuth: (id: EngineId, body: { auth?: "login" | "api_key"; api_key?: string; workspace_id?: string }) =>
+    rest<EngineView>("PUT", `/api/assistant/engines/${id}/auth`, body),
+  /** already_signed_in: the provider read as signed in at start, so only the window's exit code 0 means done. */
+  login: (id: EngineId) => rest<{ started: true; hint: string; already_signed_in?: boolean }>("POST", `/api/assistant/engines/${id}/login`),
+  cancelLogin: (id: EngineId) => rest<{ ok: true }>("POST", `/api/assistant/engines/${id}/login/cancel`),
+  cancelInstall: (id: EngineId) => rest<{ ok: true }>("POST", `/api/assistant/engines/${id}/install/cancel`),
   installable: () => rest<{ skills: string[] }>("GET", "/api/assistant/install-skills"),
   installSkills: (body: { skills?: string[]; agents?: boolean; overwrite?: boolean }) =>
     rest<{
@@ -133,6 +151,70 @@ export const assistantApi = {
       skipped_agents: { name: string; reason: string }[];
     }>("POST", "/api/assistant/install-skills", body),
 };
+
+// ── Providers (engines) ──────────────────────────────────────────
+
+export type EngineId = "claude" | "codex" | "copilot" | "grok";
+
+/** Short names for badges. */
+export const ENGINE_SHORT: Record<EngineId, string> = {
+  claude: "Claude",
+  codex: "Codex",
+  copilot: "Copilot",
+  grok: "Grok",
+};
+
+export interface EngineView {
+  id: EngineId;
+  label: string;
+  selected: boolean;
+  installed: boolean;
+  version: string | null;
+  verified_version: string;
+  reason: string | null;
+  subagents: boolean;
+  auth: { mode: "login" | "api_key"; signed_in: boolean | null; account: string | null; has_saved_key: boolean; env_key_present: boolean };
+  install: { label: string; display: string; source: string }[];
+  login_hint: string;
+}
+
+/** The sign-in window GET /engines/:id reports for that provider (server engines/signIn.ts). */
+export interface SignInWindowState {
+  open: boolean;
+  /** Set once the window exited on its own: 0 = the login command succeeded. */
+  exit_code: number | null;
+  already_signed_in: boolean;
+}
+
+export type InstallEvent =
+  | { type: "step"; index: number; label: string; display: string }
+  | { type: "line"; text: string }
+  | { type: "done"; ok: boolean; version?: string; message?: string };
+
+/** Mirrors the server's readiness rule (engines/state.ts ready()). */
+export function engineReady(v: EngineView): boolean {
+  if (!v.installed) return false;
+  // Claude only needs to be installed: its CLI reports its own sign-in errors.
+  if (v.id === "claude") return true;
+  if (v.auth.mode === "api_key") return v.auth.has_saved_key || v.auth.env_key_present;
+  return v.auth.signed_in !== false;
+}
+
+/** Streams POST /engines/:id/install until the server ends it. */
+export async function installEngine(id: EngineId, onEvent: (e: InstallEvent) => void): Promise<void> {
+  const res = await fetch(`/api/assistant/engines/${id}/install`, { method: "POST" });
+  if (!res.ok || !res.body) {
+    const text = await res.text().catch(() => "");
+    let message = `Install failed to start (${res.status})`;
+    try {
+      message = (JSON.parse(text) as { error?: string }).error ?? message;
+    } catch {
+      /* not JSON */
+    }
+    throw new ApiError(message, res.status, null);
+  }
+  await readNdjson<InstallEvent>(res, onEvent);
+}
 
 // ── Proactive suggestions ("For you") ────────────────────────────
 

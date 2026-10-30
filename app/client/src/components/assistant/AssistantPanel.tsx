@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { assistantApi } from "../../lib/assistant";
+import { assistantApi, engineReady, type EngineView } from "../../lib/assistant";
 import {
   closeAssistant,
   collapseAssistant,
@@ -21,6 +21,8 @@ import { Icon } from "../ui/icons";
 import { Button } from "../ui/primitives";
 import { AgentChip, ContextChips } from "./ContextChips";
 import { Composer } from "./Composer";
+import { EngineInstallDialog } from "./EngineInstallDialog";
+import { EngineSignInDialog } from "./EngineSignInDialog";
 import { MessageThread } from "./MessageThread";
 import { SessionList } from "./SessionList";
 import { SuggestionCards } from "./SuggestionCards";
@@ -53,6 +55,15 @@ export function AssistantPanel() {
     staleTime: 60_000,
   });
   const available = status.data?.available ?? false;
+  const enginesQ = useQuery({ queryKey: ["assistant-engines"], queryFn: () => assistantApi.engines() });
+  const engines = enginesQ.data?.engines ?? [];
+  const selectedView = engines.find((e) => e.selected);
+  // An open chat runs on its own engine; a new chat (engine null) on the selected provider.
+  const chatView = state.engine ? engines.find((e) => e.id === state.engine) : selectedView;
+  // /status describes the selected provider, so its gate is for a new chat only. History always renders.
+  const showGate = state.engine === null && Boolean(status.data && !available);
+  const chatLocked = Boolean(state.engine && chatView && !engineReady(chatView));
+  const [fix, setFix] = useState<{ kind: "install" | "signin"; engine: EngineView } | null>(null);
 
   // Global shortcut: Ctrl/Cmd+J toggles the panel.
   useEffect(() => {
@@ -222,6 +233,11 @@ export function AssistantPanel() {
       >
         <span style={{ display: "inline-flex", color: "var(--accent)", flexShrink: 0 }}>{Icon.sparkle}</span>
         <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)", flexShrink: 0 }}>Assistant</span>
+        {chatView && (
+          <span style={{ fontSize: 11.5, color: "var(--ink-3)", flexShrink: 0 }} title="Provider for this chat">
+            {chatView.label}
+          </span>
+        )}
         <AgentChip agent={state.agent} skill={state.skill} />
         <span style={{ flex: 1 }} />
         {frozen && (
@@ -326,7 +342,7 @@ export function AssistantPanel() {
       )}
 
       {/* Availability gate */}
-      {status.data && !available ? (
+      {showGate ? (
         <div
           style={{
             flex: 1,
@@ -342,18 +358,27 @@ export function AssistantPanel() {
           <span style={{ color: "var(--warn)", display: "inline-flex", transform: "scale(1.4)" }}>{Icon.warn}</span>
           <div style={{ fontSize: 13, fontWeight: 500 }}>Assistant unavailable</div>
           <div style={{ fontFamily: "var(--mono)", fontSize: 11.5, color: "var(--ink-3)", lineHeight: 1.5 }}>
-            {status.data.reason ?? "Claude CLI not found"}
+            {status.data?.reason ?? "The assistant's provider isn't ready."}
           </div>
-          <Button
-            kind="default"
-            size="sm"
-            icon={Icon.refresh}
-            onClick={() => {
-              void assistantApi.status(true).then(() => status.refetch());
-            }}
-          >
-            Retry
-          </Button>
+          {selectedView && !selectedView.installed ? (
+            <Button kind="primary" size="sm" onClick={() => setFix({ kind: "install", engine: selectedView })}>Install {selectedView.label}</Button>
+          ) : selectedView && !engineReady(selectedView) && selectedView.auth.mode === "login" ? (
+            <Button kind="primary" size="sm" onClick={() => setFix({ kind: "signin", engine: selectedView })}>Sign in to {selectedView.label}</Button>
+          ) : (
+            <Button
+              kind="default"
+              size="sm"
+              icon={Icon.refresh}
+              onClick={() => {
+                void assistantApi
+                  .status(true)
+                  .then(() => Promise.all([status.refetch(), enginesQ.refetch()]))
+                  .catch(() => {});
+              }}
+            >
+              Retry
+            </Button>
+          )}
         </div>
       ) : (
         <MessageThread
@@ -368,16 +393,44 @@ export function AssistantPanel() {
         />
       )}
 
+      {chatLocked && chatView && (
+        <div style={{ padding: "8px 14px", fontSize: 12, color: "var(--ink-3)", borderTop: "0.5px solid var(--border)" }}>
+          This chat used {chatView.label} — sign in to continue it, or start a new chat.
+        </div>
+      )}
       <Composer
         draft={state.draft}
         phase={state.phase}
         agent={state.agent}
         skill={state.skill}
-        disabled={Boolean(status.data && !available)}
+        disabled={showGate || chatLocked}
         onDraft={setDraft}
         onSend={() => sendMessage()}
         onStop={stopTurn}
       />
+      {fix?.kind === "install" && (
+        <EngineInstallDialog
+          engine={fix.engine}
+          onClose={() => {
+            setFix(null);
+            void enginesQ.refetch();
+            void status.refetch();
+          }}
+          onInstalled={() => void enginesQ.refetch()}
+          onSignedIn={() => void enginesQ.refetch()}
+        />
+      )}
+      {fix?.kind === "signin" && (
+        <EngineSignInDialog
+          engine={fix.engine}
+          onClose={() => {
+            setFix(null);
+            void enginesQ.refetch();
+            void status.refetch();
+          }}
+          onSignedIn={() => void enginesQ.refetch()}
+        />
+      )}
     </div>
   );
 }

@@ -1,7 +1,8 @@
 /**
  * Assistant chat endpoints.
  *
- *   GET    /api/assistant/status         — claude CLI availability + plugin dir + vault check
+ *   GET    /api/assistant/status         — selected engine readiness + plugin dir + vault check
+ *   GET    /api/assistant/engines[/:id]  — engine views; PUT /engine selects, PUT /engines/:id/auth saves auth
  *   GET    /api/assistant/auth           — sign-in mode (Claude login / API key); never the key itself
  *   PUT    /api/assistant/auth           — {auth?, api_key?, workspace_id?}; "" clears a field
  *   GET    /api/assistant/sessions       — recent chats (newest first)
@@ -21,12 +22,18 @@ import fs from "node:fs";
 import path from "node:path";
 import { Router } from "express";
 import { readAppConfig, readAssistantBlock, writeAssistantBlock } from "../services/appConfig.ts";
-import { applyClaudeAuthPatch, claudeAuthStatus, type ClaudeAuthPatch } from "../services/claude/auth.ts";
-import { claudeAvailable } from "../services/claude/cli.ts";
+import { applyClaudeAuthPatch, claudeAuthStatus, type ClaudeAuthConfig, type ClaudeAuthPatch } from "../services/claude/auth.ts";
+import type { ClaudeStreamRunner } from "../services/claude/cli.ts";
 import { getServerPort } from "../services/runtime.ts";
-import { mcpConfigArg } from "../services/assistant/mcpConfig.ts";
+import { buildMcpConfig } from "../services/assistant/mcpConfig.ts";
 import { buildTurnContext, gatherTurnContext, pickLeadAgent, resolveReposDir } from "../services/assistant/context.ts";
-import { buildTurnArgs, runTurn } from "../services/assistant/turn.ts";
+import { runTurn } from "../services/assistant/turn.ts";
+import { defaultRegistry, engineWorkDir, type EngineRegistry } from "../services/assistant/engines/registry.ts";
+import { applyEngineAuthPatch, engineAuth, isEngineId, selectedEngine, withSelectedEngine } from "../services/assistant/engines/config.ts";
+import { createEngineStates, type EngineStates } from "../services/assistant/engines/state.ts";
+import { createEngineJobs, type EngineJobs } from "../services/assistant/engines/jobs.ts";
+import type { InstallEvent } from "../services/assistant/engines/install.ts";
+import type { TurnInput, TurnSpec } from "../services/assistant/engines/types.ts";
 import {
   anyTurnCapacity,
   beginTurn,
@@ -44,6 +51,7 @@ import { composeSuggestions, gatherSuggestionInputs } from "../services/assistan
 import { addDismissal, readDismissals, readSweepCache, removeDismissal } from "../services/assistant/suggestionStore.ts";
 import type { UpdateSweeper } from "../services/assistant/updateSweep.ts";
 import { broadcastSse } from "./events.ts";
+import { isLoopbackRequest, refuseCrossSiteWrites } from "./sameOrigin.ts";
 import type { AssistantStreamEvent } from "../services/assistant/streamEvents.ts";
 
 export interface AssistantRouterOpts {
@@ -52,6 +60,11 @@ export interface AssistantRouterOpts {
   appRoot: string;
   /** The background update sweeper — lets /suggestions report + trigger it. */
   sweeper?: Pick<UpdateSweeper, "runNow" | "isRunning">;
+  registry?: EngineRegistry;
+  states?: EngineStates;
+  jobs?: EngineJobs;
+  /** Tests replace the CLI spawn. */
+  streamRunner?: ClaudeStreamRunner;
 }
 
 const VALID_CHIP_KINDS = new Set(["skill", "skills", "filter", "failure", "notion", "page", "suggestion"]);
@@ -79,31 +92,193 @@ function sanitizeChips(raw: unknown): ChatContextChip[] {
   return chips;
 }
 
+/**
+ * The body of PUT /auth and PUT /engines/:id/auth: every field that's present must be a string
+ * (an omitted field is kept, "" clears it). Returns the patch, or the error to answer 400 with.
+ */
+function parseAuthPatch(body: unknown): ClaudeAuthPatch | string {
+  const b = (body ?? {}) as Record<string, unknown>;
+  const patch: ClaudeAuthPatch = {};
+  for (const k of ["auth", "api_key", "workspace_id"] as const) {
+    if (b[k] === undefined) continue;
+    if (typeof b[k] !== "string") return `${k} must be a string`;
+    (patch as Record<string, string>)[k] = b[k] as string;
+  }
+  return patch;
+}
+
 export function assistantRouter(opts: AssistantRouterOpts): Router {
   const router = Router();
+  router.use(refuseCrossSiteWrites);
+  const registry = opts.registry ?? defaultRegistry();
+  const states = opts.states ?? createEngineStates({ registry, readBlock: readAssistantBlock });
+  const jobs = opts.jobs ?? createEngineJobs();
+
+  /** Claude's fields, for PUT /auth and PUT /engines/claude/auth alike. Throws on a bad auth value. */
+  const saveClaudeAuth = (patch: ClaudeAuthPatch): ClaudeAuthConfig => {
+    const next = applyClaudeAuthPatch(readAssistantBlock(), patch);
+    writeAssistantBlock(next);
+    states.invalidate("claude");
+    return next;
+  };
   const pluginDir = path.join(opts.appRoot, "assistant-plugin");
 
   router.get("/status", async (req, res) => {
-    const refresh = req.query.refresh === "1" || req.query.refresh === "true";
-    if (refresh) {
-      const { resetClaudeAvailableCache } = await import("../services/claude/cli.ts");
-      resetClaudeAvailableCache();
-    }
     const cfg = readAppConfig();
-    const claude = await claudeAvailable();
+    const id = selectedEngine(readAssistantBlock());
+    const view = await states.view(id, { refresh: req.query.refresh === "1" || req.query.refresh === "true" });
     const plugin = fs.existsSync(path.join(pluginDir, ".claude-plugin", "plugin.json"));
-    const available = claude.available && plugin && Boolean(cfg.vault_path);
-    res.json({
-      available,
-      version: claude.version,
-      reason: !cfg.vault_path
-        ? "vault not configured"
-        : !claude.available
-          ? claude.reason
-          : !plugin
-            ? "assistant plugin bundle missing"
-            : undefined,
-    });
+    const ready = await states.ready(id);
+    const reason = !cfg.vault_path
+      ? "vault not configured"
+      : !plugin
+        ? "assistant plugin bundle missing"
+        : ready.ok
+          ? undefined
+          : ready.reason;
+    res.json({ available: !reason, engine: id, label: view?.label ?? id, version: view?.version ?? undefined, reason });
+  });
+
+  router.get("/engines", async (req, res) => {
+    res.json({ engines: await states.views({ refresh: req.query.refresh === "1" }) });
+  });
+
+  router.get("/engines/:id", async (req, res) => {
+    const id = req.params.id;
+    const mode = req.query.mode === "login" || req.query.mode === "api_key" ? req.query.mode : undefined;
+    const view = isEngineId(id) ? await states.view(id, { refresh: req.query.refresh === "1", mode }) : null;
+    if (!view) {
+      res.status(404).json({ error: "unknown provider" });
+      return;
+    }
+    // The sign-in window for this provider, if any. One started already signed in proves itself only by
+    // exiting 0, so signed_in never closes it.
+    const signIn = jobs.signIn.state(view.id);
+    if (signIn?.open && !signIn.already_signed_in && view.auth.mode === "login" && view.auth.signed_in === true) {
+      jobs.signIn.finish(view.id);
+    }
+    res.json({ ...view, sign_in: jobs.signIn.state(view.id) });
+  });
+
+  router.put("/engine", (req, res) => {
+    const id = (req.body ?? {}).engine;
+    if (!isEngineId(id) || !registry.get(id)) {
+      res.status(400).json({ error: "unknown provider" });
+      return;
+    }
+    writeAssistantBlock(withSelectedEngine(readAssistantBlock(), id));
+    res.json({ engine: id });
+  });
+
+  router.put("/engines/:id/auth", async (req, res) => {
+    const id = req.params.id;
+    if (!isEngineId(id) || !registry.get(id)) {
+      res.status(404).json({ error: "unknown provider" });
+      return;
+    }
+    const patch = parseAuthPatch(req.body);
+    if (typeof patch === "string") {
+      res.status(400).json({ error: patch });
+      return;
+    }
+    try {
+      if (id === "claude") {
+        saveClaudeAuth(patch); // the same path as PUT /auth
+      } else {
+        writeAssistantBlock(applyEngineAuthPatch(readAssistantBlock(), id, { auth: patch.auth, api_key: patch.api_key }));
+        states.invalidate(id);
+      }
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+      return;
+    }
+    res.json(await states.view(id));
+  });
+
+  router.post("/engines/:id/install", async (req, res) => {
+    const id = req.params.id;
+    const engine = isEngineId(id) ? registry.get(id) : undefined;
+    if (!engine) {
+      res.status(404).json({ error: "unknown provider" });
+      return;
+    }
+    if (jobs.installer.isRunning()) {
+      res.status(409).json({ error: "an install is already running" });
+      return;
+    }
+    res.setHeader("Content-Type", "application/x-ndjson");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.flushHeaders?.();
+    const write = (e: InstallEvent): void => {
+      if (!res.writableEnded) res.write(`${JSON.stringify(e)}\n`);
+    };
+    let doneWritten = false;
+    try {
+      const r = await jobs.installer.run(engine, write);
+      states.invalidate(engine.id);
+      const view = await states.view(engine.id, { refresh: true });
+      const found = Boolean(view?.installed);
+      doneWritten = true;
+      write({
+        type: "done",
+        ok: r.ok && found,
+        ...(view?.version ? { version: view.version } : {}),
+        ...(!r.ok
+          ? { message: r.message }
+          : found
+            ? {}
+            : { message: "Installed, but Skill Vault can't find it yet. Close and reopen Skill Vault, then check again." }),
+      });
+    } catch (err) {
+      if (!doneWritten) write({ type: "done", ok: false, message: (err as Error).message || "The install failed unexpectedly." });
+    }
+    res.end();
+  });
+
+  // Stops a running install (its stream then ends with done ok:false). OK when nothing runs.
+  router.post("/engines/:id/install/cancel", (req, res) => {
+    const id = req.params.id;
+    if (!isEngineId(id) || !registry.get(id)) {
+      res.status(404).json({ error: "unknown provider" });
+      return;
+    }
+    if (jobs.installer.isRunning()) jobs.installer.stop();
+    res.json({ ok: true });
+  });
+
+  router.post("/engines/:id/login", async (req, res) => {
+    const id = req.params.id;
+    const engine = isEngineId(id) ? registry.get(id) : undefined;
+    if (!engine) {
+      res.status(404).json({ error: "unknown provider" });
+      return;
+    }
+    if (!isLoopbackRequest(req)) {
+      res.status(403).json({ error: "sign-in can only be started from this PC" });
+      return;
+    }
+    // "Sign in again": when the login already reads as signed in, only the window's exit code can say it worked.
+    const before = await states.view(engine.id, { mode: "login" });
+    const alreadySignedIn = before?.auth.signed_in === true;
+    const env = { ...engine.childEnv({ auth: "login" }, process.env), ...engine.loginEnv() };
+    const r = jobs.signIn.start(engine, env, { alreadySignedIn });
+    if ("error" in r) {
+      res.status(r.reason === "spawn_failed" ? 500 : 409).json({ error: r.error });
+      return;
+    }
+    states.invalidate(engine.id);
+    res.json({ started: true, hint: engine.loginHint, already_signed_in: alreadySignedIn });
+  });
+
+  router.post("/engines/:id/login/cancel", (req, res) => {
+    const id = req.params.id;
+    if (!isEngineId(id) || !registry.get(id)) {
+      res.status(404).json({ error: "unknown provider" });
+      return;
+    }
+    // Only this provider's window: another provider's sign-in may be the one open now.
+    if (jobs.signIn.current() === id) jobs.signIn.cancel();
+    res.json({ ok: true });
   });
 
   router.get("/auth", (_req, res) => {
@@ -111,24 +286,18 @@ export function assistantRouter(opts: AssistantRouterOpts): Router {
   });
 
   router.put("/auth", (req, res) => {
-    const body = (req.body ?? {}) as Record<string, unknown>;
-    const patch: ClaudeAuthPatch = {};
-    for (const k of ["auth", "api_key", "workspace_id"] as const) {
-      if (body[k] === undefined) continue;
-      if (typeof body[k] !== "string") {
-        res.status(400).json({ error: `${k} must be a string` });
-        return;
-      }
-      (patch as Record<string, string>)[k] = body[k] as string;
+    const patch = parseAuthPatch(req.body);
+    if (typeof patch === "string") {
+      res.status(400).json({ error: patch });
+      return;
     }
-    let next;
+    let next: ClaudeAuthConfig;
     try {
-      next = applyClaudeAuthPatch(readAssistantBlock(), patch);
+      next = saveClaudeAuth(patch);
     } catch (err) {
       res.status(400).json({ error: (err as Error).message });
       return;
     }
-    writeAssistantBlock(next);
     res.json(claudeAuthStatus(next));
   });
 
@@ -148,6 +317,7 @@ export function assistantRouter(opts: AssistantRouterOpts): Router {
         title: s.title || "(new chat)",
         agent: s.agent,
         skill: s.skill,
+        engine: s.engine,
         chips: s.chips,
         running: s.running,
         total_cost_usd: s.totalCostUsd,
@@ -275,7 +445,20 @@ export function assistantRouter(opts: AssistantRouterOpts): Router {
       return;
     }
 
-    let session = body.session_id ? getSession(body.session_id) : undefined;
+    const existing = body.session_id ? getSession(body.session_id) : undefined;
+    const engineId = existing?.engine ?? selectedEngine(readAssistantBlock());
+    const engine = registry.get(engineId);
+    if (!engine) {
+      res.status(409).json({ error: "That assistant provider isn't available in this version of Skill Vault." });
+      return;
+    }
+    const ready = await states.ready(engineId);
+    if (!ready.ok) {
+      res.status(409).json({ error: ready.reason });
+      return;
+    }
+
+    let session = existing;
     if (body.session_id && !session) {
       res.status(404).json({ error: "session not found" });
       return;
@@ -286,6 +469,7 @@ export function assistantRouter(opts: AssistantRouterOpts): Router {
         agent,
         skill: agent === "skill" ? body.skill : undefined,
         chips: sanitizeChips(body.context),
+        engine: engineId,
       });
     }
 
@@ -312,7 +496,7 @@ export function assistantRouter(opts: AssistantRouterOpts): Router {
     const emit = (ev: AssistantStreamEvent): void => {
       if (!res.writableEnded) res.write(`${JSON.stringify(ev)}\n`);
     };
-    emit({ type: "session", session_id: session.id });
+    emit({ type: "session", session_id: session.id, engine: session.engine });
 
     // A dropped connection (tab closed, Stop without the POST) kills the
     // turn. NOTE: this must hang off `res`, not `req` — IncomingMessage
@@ -322,32 +506,39 @@ export function assistantRouter(opts: AssistantRouterOpts): Router {
       if (!res.writableEnded) abort.abort();
     });
 
-    const isFirstTurn = session.turns.length === 0;
     const contextBlock = buildTurnContext(
       gatherTurnContext({ agent: session.agent, skill: session.skill, chips: session.chips }),
     );
-    const args = buildTurnArgs({
+    const input: TurnInput = {
       sessionId: session.id,
-      isFirstTurn,
+      engineSessionId: session.engine_session_id,
+      isFirstTurn: session.turns.length === 0,
+      message,
       leadAgent: pickLeadAgent(session.agent),
       contextBlock,
-      mcpConfigJson: mcpConfigArg({ mode: opts.mode, appRoot: opts.appRoot, port }),
-      pluginDir,
+      mcp: buildMcpConfig({ mode: opts.mode, appRoot: opts.appRoot, port }).mcpServers.vault,
+      vaultPath: cfg.vault_path,
       reposDir: resolveReposDir(cfg as unknown as Record<string, unknown>),
-    });
+      pluginDir,
+      workDir: engineWorkDir(engine.id),
+      auth: engineAuth(readAssistantBlock(), engine.id),
+      baseEnv: process.env,
+    };
 
     try {
+      fs.mkdirSync(input.workDir, { recursive: true });
+      const spec: TurnSpec = engine.buildTurn(input);
       const result = await runTurn({
-        session,
-        message,
-        args,
-        cwd: cfg.vault_path,
+        spec,
+        parser: engine.createParser(),
+        authHint: (m) => engine.authHint(m),
         abort,
         emit,
+        streamRunner: opts.streamRunner,
       });
-      endTurn(session, { user: message, events: result.events, costUsd: result.costUsd });
+      endTurn(session, { user: message, events: result.events, costUsd: result.costUsd, engineSessionId: result.engineSessionId });
     } catch (err) {
-      // runTurn contains its own failures; this is a belt-and-braces guard.
+      // buildTurn refusals (not installed) land here too.
       endTurn(session, {
         user: message,
         events: [{ type: "error", message: (err as Error).message }],

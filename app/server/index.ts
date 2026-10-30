@@ -42,6 +42,7 @@ import {
 import { activityRouter } from "./routes/activity.ts";
 import { assistantRouter } from "./routes/assistant.ts";
 import { abortAllTurns, anyTurnRunning } from "./services/assistant/session.ts";
+import { createEngineJobs } from "./services/assistant/engines/jobs.ts";
 import { foregroundCheckActive, startUpdateSweep } from "./services/assistant/updateSweep.ts";
 import { subscribeActivity } from "./services/activity.ts";
 import {
@@ -163,8 +164,9 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
 
   // In-app updates (git checkout installs): background check + one-click apply.
   const setupApplier = createSetupApplier(defaultApplyDeps());
+  const engineJobs = createEngineJobs();
   const busyWithoutUpdate = (): boolean =>
-    anyNotionJobRunning() || anyTurnRunning() || foregroundCheckActive() || setupApplier.isRunning();
+    anyNotionJobRunning() || anyTurnRunning() || foregroundCheckActive() || setupApplier.isRunning() || engineJobs.busy();
   const updater = createAppUpdater({
     appDir: APP_ROOT,
     mode: opts.mode,
@@ -181,6 +183,7 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
   // rebuildWatcher(), so close whichever one is currently registered.
   app.locals.cleanupLiveUpdates = async (): Promise<void> => {
     abortAllTurns(); // kill any in-flight assistant CLI processes
+    engineJobs.stopAll();
     unsubActivity();
     closeAllSse();
     historyRecorder.flush();
@@ -232,7 +235,7 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
   app.use("/api/notion", notionRouter());
   app.use("/api/claude", claudeRouter());
   app.use("/api/activity", activityRouter());
-  app.use("/api/assistant", assistantRouter({ mode: opts.mode, appRoot: APP_ROOT, sweeper: updateSweeper }));
+  app.use("/api/assistant", assistantRouter({ mode: opts.mode, appRoot: APP_ROOT, sweeper: updateSweeper, jobs: engineJobs }));
   app.use("/api/events", eventsRouter());
 
   // JSON error handler for API routes — anything the route handlers

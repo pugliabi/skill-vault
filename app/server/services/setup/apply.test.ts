@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import type { Run } from "../appUpdate.ts";
 import type { SetupConfigPatch } from "../appConfig.ts";
-import { SetupBusyError, createSetupApplier, type SetupApplyDeps, type SetupEvent } from "./apply.ts";
+import { SetupBusyError, configPatch, createSetupApplier, type SetupApplyDeps, type SetupEvent } from "./apply.ts";
 import { startDraft } from "./draft.ts";
 import type { SetupDraft } from "./types.ts";
 
@@ -63,7 +63,7 @@ test("new vault: folder, config, items, then the draft is deleted", async () => 
       targets: [{ id: "t1", path: t1, enabled: true, is_default: true, known: false }],
       skills: { adopt: [{ name: "found", from: "t1" }], push: ["mine"] },
       notion: { data_source_id: "11111111-2222-3333-4444-555555555555", data_source_name: "Skills", add_last_edited: true },
-      assistant: { auth: "api_key", workspace_id: "wrk" },
+      assistant: { engine: "claude", auth: "api_key", workspace_id: "wrk" },
     });
     const state = await applier.apply({ draft, api_key: "sk-secret" }, (e) => events.push(e));
     assert.equal(state.ok, true);
@@ -75,7 +75,7 @@ test("new vault: folder, config, items, then the draft is deleted", async () => 
       default_targets: ["t1"],
       repo_url: "",
       machine_id: "PC",
-      assistant: { auth: "api_key", workspace_id: "wrk", api_key: "sk-secret" },
+      assistant: { engine: "claude", auth: "api_key", workspace_id: "wrk", api_key: "sk-secret" },
     });
     assert.equal(calls.watcher, 1);
     assert.deepEqual(calls.adopt, ["found"]);
@@ -277,4 +277,12 @@ test("a new vault folder holding only an empty skeleton can be re-run; anything 
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("configPatch: a non-Claude engine writes engine + engines.<id> auth, never Claude's fields", () => {
+  const vault = { mode: "new" as const, path: "C:\\v" };
+  const codex = configPatch(draftWith({ vault, assistant: { engine: "codex", auth: "api_key" } }), [], " sk-o ");
+  assert.deepEqual(codex.assistant, { engine: "codex", engine_auth: { auth: "api_key", api_key: "sk-o" } });
+  const claude = configPatch(draftWith({ vault, assistant: { engine: "claude", auth: "login" } }), []);
+  assert.deepEqual(claude.assistant, { engine: "claude", auth: "login", workspace_id: "" });
 });

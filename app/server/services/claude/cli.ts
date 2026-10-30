@@ -27,6 +27,7 @@ import os from "node:os";
 import path from "node:path";
 import { readAssistantBlock } from "../appConfig.ts";
 import { claudeChildEnv } from "./auth.ts";
+import { registryPathDirs, type SpawnTarget } from "../assistant/engines/exe.ts";
 
 export type ClaudeRunner = (
   args: string[],
@@ -104,31 +105,45 @@ export function parseClaudeCmdShim(shimContent: string, shimDir: string): string
 
 let resolvedExeCache: string | null | undefined;
 
+/** Where claude.exe can be: PATH as the app saw it, PATH as stored now (a fresh install), the native installer's folder. */
+export function claudeExeSearchDirs(processPath: string, registryDirs: string[], home: string): string[] {
+  return [...processPath.split(path.delimiter).filter(Boolean), ...registryDirs, path.join(home, ".local", "bin")];
+}
+
+/**
+ * Pure over `fs`: the first claude.exe in `dirs`, directly or behind a
+ * claude.cmd shim. A shim whose exe is missing is skipped, so a later folder
+ * (the registry PATH, ~/.local/bin) can still supply a working install.
+ */
+export function findClaudeExe(dirs: string[], fs: { exists(p: string): boolean; read(p: string): string }): string | null {
+  for (const dir of dirs) {
+    const exeCandidate = path.join(dir, "claude.exe");
+    if (fs.exists(exeCandidate)) return exeCandidate;
+    const cmdCandidate = path.join(dir, "claude.cmd");
+    if (fs.exists(cmdCandidate)) {
+      const parsed = parseClaudeCmdShim(fs.read(cmdCandidate), dir);
+      if (parsed && fs.exists(parsed)) return parsed;
+    }
+  }
+  return null;
+}
+
 /**
  * Best-effort: find the `claude` command on PATH and, if it's a `.cmd`
  * shim, resolve it to the real executable via `parseClaudeCmdShim`. Cached
  * for the process lifetime — call `resetResolvedExeCache` in tests.
  */
-function resolveClaudeExe(): string | null {
+export function resolveClaudeExe(): string | null {
   if (resolvedExeCache !== undefined) return resolvedExeCache;
 
   let result: string | null = null;
   try {
-    const dirs = (process.env.PATH || process.env.Path || "").split(path.delimiter).filter(Boolean);
-    for (const dir of dirs) {
-      const exeCandidate = path.join(dir, "claude.exe");
-      if (fsSync.existsSync(exeCandidate)) {
-        result = exeCandidate;
-        break;
-      }
-      const cmdCandidate = path.join(dir, "claude.cmd");
-      if (fsSync.existsSync(cmdCandidate)) {
-        const content = fsSync.readFileSync(cmdCandidate, "utf-8");
-        const parsed = parseClaudeCmdShim(content, dir);
-        if (parsed && fsSync.existsSync(parsed)) result = parsed;
-        break;
-      }
-    }
+    const dirs = claudeExeSearchDirs(
+      process.env.PATH || process.env.Path || "",
+      process.platform === "win32" ? registryPathDirs() : [],
+      os.homedir(),
+    );
+    result = findClaudeExe(dirs, { exists: (p) => fsSync.existsSync(p), read: (p) => fsSync.readFileSync(p, "utf-8") });
   } catch {
     result = null;
   }
@@ -421,6 +436,10 @@ export type ClaudeStreamRunner = (
     signal?: AbortSignal;
     /** Called once per complete stdout line (no trailing newline). */
     onLine: (line: string) => void;
+    /** Spawn this instead of resolving `claude` (the other engines). No shell either way. */
+    target?: SpawnTarget;
+    /** The child's whole env when `target` is set; otherwise the runner's own (Claude's auth env). */
+    env?: NodeJS.ProcessEnv;
   },
 ) => Promise<{ code: number | null; stderr: string }>;
 
@@ -442,14 +461,25 @@ export function createStreamRunner(
   const platform = deps.platform ?? process.platform;
 
   return (args, stdin, opts) => {
+    const label = opts.target?.label ?? "claude CLI";
     return new Promise((resolve, reject) => {
       if (opts.signal?.aborted) {
-        reject(new ClaudeError("claude CLI call aborted"));
+        reject(new ClaudeError(`${label} call aborted`));
         return;
       }
       let invocation: SpawnInvocation;
       try {
-        invocation = buildSpawnInvocation(args, opts.cwd, resolveExe, platform, deps.env?.());
+        invocation = opts.target
+          ? {
+              command: opts.target.command,
+              args: [...opts.target.prefixArgs, ...args],
+              options: {
+                cwd: opts.cwd,
+                ...(platform === "win32" ? { windowsHide: true } : { detached: true }),
+                ...(opts.env ? { env: opts.env } : {}),
+              },
+            }
+          : buildSpawnInvocation(args, opts.cwd, resolveExe, platform, deps.env?.());
       } catch (err) {
         reject(err);
         return;
@@ -480,20 +510,18 @@ export function createStreamRunner(
       const onAbort = () => {
         if (settled) return;
         killTreeFn(child);
-        settleReject(new ClaudeError("claude CLI call aborted"));
+        settleReject(new ClaudeError(`${label} call aborted`));
       };
       opts.signal?.addEventListener("abort", onAbort, { once: true });
 
       let idleTimer = setTimeout(onIdle, opts.idleTimeoutMs);
       function onIdle() {
         killTreeFn(child);
-        settleReject(
-          new ClaudeError(`claude CLI produced no output for ${Math.round(opts.idleTimeoutMs / 1000)}s`),
-        );
+        settleReject(new ClaudeError(`${label} produced no output for ${Math.round(opts.idleTimeoutMs / 1000)}s`));
       }
       const hardTimer = setTimeout(() => {
         killTreeFn(child);
-        settleReject(new ClaudeError(`claude CLI exceeded the ${Math.round(opts.hardTimeoutMs / 1000)}s turn cap`));
+        settleReject(new ClaudeError(`${label} exceeded the ${Math.round(opts.hardTimeoutMs / 1000)}s turn cap`));
       }, opts.hardTimeoutMs);
 
       const emitLines = (chunk: string) => {

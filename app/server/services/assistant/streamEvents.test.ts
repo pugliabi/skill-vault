@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { labelForTool, parseStreamJsonLine } from "./streamEvents.ts";
+import { canonicalTool, labelForTool, parseStreamJsonLine, toolResultEvent, toolStartEvent } from "./streamEvents.ts";
 
 test("system init maps to a session event; other system subtypes are dropped", () => {
   assert.deepEqual(parseStreamJsonLine(JSON.stringify({ type: "system", subtype: "init", session_id: "abc-123" })), [
@@ -141,4 +141,64 @@ test("labelForTool renders scannable action lines per tool", () => {
   assert.equal(labelForTool("TodoWrite", {}), "Updating plan");
   assert.equal(labelForTool("mcp__vault__set_origin", {}), "vault: set_origin");
   assert.equal(labelForTool("SomeFutureTool", {}), "SomeFutureTool");
+});
+
+test("canonicalTool: native names map to Claude's, with the fields labelForTool reads", () => {
+  const aliases = { run_terminal_cmd: "Bash", read_file: "Read", search_replace: "Edit", list_dir: "Glob" };
+  assert.deepEqual(canonicalTool(aliases, "run_terminal_cmd", { command: "git status" }), {
+    name: "Bash",
+    input: { command: "git status" },
+  });
+  assert.equal(canonicalTool(aliases, "read_file", { target_file: "C:\v\skills\a\SKILL.md" }).input.file_path, "C:\v\skills\a\SKILL.md");
+  assert.equal(canonicalTool(aliases, "list_dir", { path: "skills" }).input.pattern, "skills");
+  assert.equal(canonicalTool(aliases, "something_new", {}).name, "something_new");
+});
+
+test("canonicalTool: every engine's spelling of a vault tool becomes mcp__vault__<tool>", () => {
+  for (const n of ["mcp__vault__list_skills", "vault__list_skills", "vault-list_skills"]) {
+    assert.equal(canonicalTool({}, n, {}).name, "mcp__vault__list_skills");
+  }
+  // Grok calls MCP tools through a use_tool meta-tool: { tool_name, tool_input } live, { name, arguments } in its docs.
+  assert.deepEqual(canonicalTool({}, "use_tool", { tool_name: "vault__get_skill", tool_input: { name: "pdf" } }), {
+    name: "mcp__vault__get_skill",
+    input: { name: "pdf" },
+  });
+  assert.deepEqual(canonicalTool({}, "use_tool", { name: "vault__get_skill", arguments: { name: "pdf" } }), {
+    name: "mcp__vault__get_skill",
+    input: { name: "pdf" },
+  });
+});
+
+test("a result error names a non-Claude CLI and its reason; Claude's text is unchanged", () => {
+  const line = JSON.stringify({ type: "result", is_error: true, errors: ["cancelled"] });
+  assert.deepEqual(parseStreamJsonLine(line, { cliLabel: "Grok Build", authHint: (m) => m }), [{ type: "error", message: "Grok Build reported an error: cancelled" }]);
+  assert.deepEqual(parseStreamJsonLine(line, { authHint: (m) => m }), [{ type: "error", message: "claude CLI reported an error" }]);
+});
+
+test("toolStartEvent / toolResultEvent build the same events the Claude parser emits", () => {
+  assert.deepEqual(toolStartEvent("t1", "Bash", { command: "git log -1" }), {
+    type: "tool_start",
+    tool_use_id: "t1",
+    name: "Bash",
+    label: "Running: git log -1",
+    input_preview: '{"command":"git log -1"}',
+  });
+  assert.deepEqual(toolResultEvent("t1", false, [{ type: "text", text: "denied" }]), {
+    type: "tool_result",
+    tool_use_id: "t1",
+    ok: false,
+    output_preview: "denied",
+  });
+});
+
+test("parseStreamJsonLine with aliases relabels another CLI's tools; authHint replaces Claude's hint", () => {
+  const line = JSON.stringify({
+    type: "assistant",
+    message: { content: [{ type: "tool_use", id: "x", name: "run_terminal_cmd", input: { command: "git status" } }] },
+  });
+  const [ev] = parseStreamJsonLine(line, { aliases: { run_terminal_cmd: "Bash" } });
+  assert.equal(ev.type === "tool_start" && ev.name, "Bash");
+  assert.equal(ev.type === "tool_start" && ev.label, "Running: git status");
+  const err = JSON.stringify({ type: "result", is_error: true, result: "boom" });
+  assert.deepEqual(parseStreamJsonLine(err, { authHint: (m) => `${m}!` }), [{ type: "error", message: "boom!" }]);
 });

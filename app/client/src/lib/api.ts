@@ -59,6 +59,28 @@ export class ApiError extends Error {
 }
 
 /**
+ * Reads an NDJSON response body to its end, calling onEvent once per line.
+ * The caller checks `res.ok` first (an error response isn't NDJSON).
+ */
+export async function readNdjson<T>(res: Response, onEvent: (e: T) => void): Promise<void> {
+  if (!res.body) return;
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (line) onEvent(JSON.parse(line) as T);
+    }
+  }
+}
+
+/**
  * Encode a relative file path for use in /files/<relpath> URLs.
  * Each segment is encoded INDEPENDENTLY so legal '/' separators are
  * preserved while filename oddities (spaces, unicode, etc.) are

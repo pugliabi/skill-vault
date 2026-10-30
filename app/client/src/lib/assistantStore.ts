@@ -21,6 +21,7 @@ import {
   type AgentKind,
   type AssistantChip,
   type AssistantStreamEvent,
+  type EngineId,
   type StoredTurn,
   type SuggestionAction,
   type SuggestionCard,
@@ -68,6 +69,8 @@ export interface AssistantState {
   chips: AssistantChip[];
   draft: string;
   sessionId: string | null;
+  /** The open chat's engine; null = a new chat (runs on the selected provider). */
+  engine: EngineId | null;
   sessionTitle: string;
   items: ChatItem[];
   phase: Phase;
@@ -93,6 +96,7 @@ let state: AssistantState = {
   chips: [],
   draft: "",
   sessionId: localStorage.getItem(LS_SESSION),
+  engine: null,
   sessionTitle: "",
   items: [],
   phase: "idle",
@@ -294,6 +298,7 @@ function resetToNewSession(): void {
   abortController?.abort();
   abortController = null;
   state.sessionId = null;
+  state.engine = null;
   state.sessionTitle = "";
   state.items = [];
   state.phase = "idle";
@@ -329,6 +334,7 @@ export async function loadSession(id: string, opts: { silent?: boolean } = {}): 
   try {
     const detail = await assistantApi.session(id);
     state.sessionId = detail.session.id;
+    state.engine = detail.session.engine ?? "claude";
     state.sessionTitle = detail.session.title;
     state.agent = detail.session.agent;
     state.skill = detail.session.skill;
@@ -412,6 +418,7 @@ export function sendMessage(text?: string): void {
     (ev) => {
       if (ev.type === "session") {
         state.sessionId = ev.session_id;
+        if (ev.engine) state.engine = ev.engine;
         localStorage.setItem(LS_SESSION, ev.session_id);
         return;
       }
@@ -532,5 +539,5 @@ export function __resetAssistantStoreForTests(): void {
   deltaTimer = null;
   sessionLoaded = false;
   lastUserMessage = "";
-  state = { ...state, mode: "closed", agent: "vault", skill: undefined, chips: [], draft: "", sessionId: null, sessionTitle: "", items: [], phase: "idle", error: null, loadingSession: false };
+  state = { ...state, mode: "closed", agent: "vault", skill: undefined, chips: [], draft: "", sessionId: null, engine: null, sessionTitle: "", items: [], phase: "idle", error: null, loadingSession: false };
 }

@@ -5,6 +5,7 @@
  * field, so unknown keys (and any secret a client sends) are dropped.
  */
 import crypto from "node:crypto";
+import { isEngineId } from "../assistant/engines/config.ts";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -149,8 +150,9 @@ function normalizeAssistant(v: unknown): AssistantChoice | null {
   if (v == null) return null;
   const o = v as Record<string, unknown>;
   if (o.auth !== "login" && o.auth !== "api_key") throw new DraftError('assistant.auth must be "login" or "api_key"');
+  if (o.engine !== undefined && !isEngineId(o.engine)) throw new DraftError("assistant.engine isn't a known provider");
   const ws = isStr(o.workspace_id) && o.workspace_id.trim() ? { workspace_id: o.workspace_id.trim() } : {};
-  return { auth: o.auth, ...ws };
+  return { engine: isEngineId(o.engine) ? o.engine : "claude", auth: o.auth, ...ws };
 }
 
 export function normalizeDraft(input: unknown): SetupDraft {

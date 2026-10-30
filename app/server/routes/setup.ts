@@ -4,7 +4,6 @@
  * refused when a browser marks it as coming from another site.
  *
  *   GET    /capabilities   { folder_dialog } — Windows + a request from this PC
- *   GET    /assistant      { installed, version, reason, login, saved } — the claude CLI and its sign-in (?refresh=1 re-checks)
  *   GET    /draft          { draft, stale } — the saved draft, and whether config changed since
  *   POST   /draft/start    { draft } — start a draft pre-filled from config
  *   PUT    /draft          { draft } — save the draft (400 if malformed)
@@ -20,9 +19,7 @@
  */
 import os from "node:os";
 import { Router, type Response } from "express";
-import { readAppConfig, readAssistantBlock, readSetupBase } from "../services/appConfig.ts";
-import { claudeAuthStatus, type ClaudeAuthStatus } from "../services/claude/auth.ts";
-import { claudeAvailable, claudeLoginStatus, resetClaudeAvailableCache, type ClaudeLoginStatus } from "../services/claude/cli.ts";
+import { readAppConfig, readSetupBase } from "../services/appConfig.ts";
 import { defaultRun, type Run } from "../services/appUpdate.ts";
 import { configFingerprint, deleteDraft, normalizeDraft, readDraft, startDraft, writeDraft } from "../services/setup/draft.ts";
 import { CloneError, isCloneUrl, previewClone } from "../services/setup/clonePreview.ts";
@@ -55,12 +52,6 @@ export interface SetupRouterDeps {
   picker?: FolderPicker;
   /** The app folder (holds scripts/pick-folder.ps1); without it the dialog is unavailable. */
   appRoot?: string;
-  /** Is the claude CLI installed (tests pass a fake). */
-  claudeAvailable?: () => Promise<{ available: boolean; version?: string; reason?: string }>;
-  /** Is the claude CLI signed in (tests pass a fake). */
-  claudeLoginStatus?: () => Promise<ClaudeLoginStatus | null>;
-  /** The saved assistant sign-in mode (tests pass a fake). */
-  readSavedAuth?: () => ClaudeAuthStatus;
 }
 
 /** Run a job and stream its events as NDJSON (same format as POST /api/app/update). */
@@ -88,19 +79,6 @@ export function setupRouter(deps: SetupRouterDeps = {}): Router {
 
   router.get("/capabilities", (req, res) => {
     res.json({ folder_dialog: platform === "win32" && isLoopbackRequest(req) });
-  });
-
-  router.get("/assistant", async (req, res) => {
-    if (req.query.refresh === "1" && !deps.claudeAvailable) resetClaudeAvailableCache();
-    const cli = await (deps.claudeAvailable ?? (() => claudeAvailable()))();
-    const login = cli.available ? await (deps.claudeLoginStatus ?? (() => claudeLoginStatus()))() : null;
-    res.json({
-      installed: cli.available,
-      version: cli.version ?? null,
-      reason: cli.reason ?? null,
-      login,
-      saved: (deps.readSavedAuth ?? (() => claudeAuthStatus(readAssistantBlock())))(),
-    });
   });
 
   router.get("/draft", (_req, res) => {

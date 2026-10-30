@@ -2,7 +2,8 @@
  * Setup guide API (server: routes/setup.ts). Finish and Retry stream NDJSON
  * progress events, like the in-app update (lib/appUpdate.ts).
  */
-import { ApiError } from "./api";
+import { ApiError, readNdjson } from "./api";
+import type { EngineId } from "./assistant";
 
 export type SetupStep = "welcome" | "vault" | "targets" | "skills" | "notion" | "assistant" | "review";
 
@@ -38,7 +39,7 @@ export interface SetupDraft {
   targets: SetupTarget[] | null;
   skills: { adopt: { name: string; from: string }[]; push: string[] };
   notion: { data_source_id: string; data_source_name: string; add_last_edited: boolean } | null;
-  assistant: { auth: "login" | "api_key"; workspace_id?: string } | null;
+  assistant: { engine: EngineId; auth: "login" | "api_key"; workspace_id?: string } | null;
 }
 
 export type FolderKind =
@@ -98,14 +99,6 @@ export interface SetupJobState {
   failed: { step: "adopt" | "push" | "notion"; item: string; message: string }[];
 }
 
-export interface AssistantCheck {
-  installed: boolean;
-  version: string | null;
-  reason: string | null;
-  login: { logged_in: boolean; auth_method: string | null; email: string | null } | null;
-  saved: { auth: "login" | "api_key"; has_saved_key: boolean; env_key_present: boolean; workspace_id: string | null };
-}
-
 async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
     method,
@@ -127,20 +120,7 @@ async function stream(url: string, body: unknown, onEvent: (e: SetupEvent) => vo
     const data = await res.json().catch(() => null);
     throw new ApiError((data as { error?: string } | null)?.error ?? `Setup failed to start (${res.status})`, res.status, data);
   }
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let nl: number;
-    while ((nl = buf.indexOf("\n")) >= 0) {
-      const line = buf.slice(0, nl).trim();
-      buf = buf.slice(nl + 1);
-      if (line) onEvent(JSON.parse(line) as SetupEvent);
-    }
-  }
+  await readNdjson<SetupEvent>(res, onEvent);
 }
 
 export const setupApi = {
@@ -155,7 +135,6 @@ export const setupApi = {
   targets: () => call<{ targets: DetectedTarget[] }>("GET", "/api/setup/targets"),
   clonePreview: (url: string) => call<{ candidates: VaultCandidate[] }>("POST", "/api/setup/clone-preview", { url }),
   plan: (draft: SetupDraft) => call<SkillsPlan>("POST", "/api/setup/plan", { draft }),
-  assistant: (refresh = false) => call<AssistantCheck>("GET", `/api/setup/assistant${refresh ? "?refresh=1" : ""}`),
   apply: (draft: SetupDraft, apiKey: string, onEvent: (e: SetupEvent) => void) =>
     stream("/api/setup/apply", { draft, ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}) }, onEvent),
   retry: (onEvent: (e: SetupEvent) => void) => stream("/api/setup/apply/retry", {}, onEvent),
