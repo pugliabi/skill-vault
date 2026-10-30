@@ -16,9 +16,9 @@ export interface EngineNoteOpts {
   /** How this engine spells a vault tool, e.g. "vault__<tool>". */
   vaultToolSpelling: string;
   subagents: boolean;
-  /** "git": the shell tool runs git commands only. "none": this engine has no shell tool at all (Copilot, Grok for now). */
-  shell: "git" | "none" | "sandboxed";
-  /** false: no file edit/write tool either (Grok until its limits are verified). Default true. */
+  /** "git": the shell tool runs git commands only. "none": this engine has no shell tool at all (Codex, Copilot, Grok). */
+  shell: "git" | "none";
+  /** false: no file edit/write tool either (Grok). Default true. */
   writes?: boolean;
 }
 
@@ -27,9 +27,7 @@ export function engineNote(o: EngineNoteOpts): string {
   const shell =
     o.shell === "none"
       ? 'There is no shell tool here ("Bash" doesn\'t exist), so you can\'t run git or any other command. When these instructions call for one, use a vault tool that does the job; if none does, give the user the exact command to run themselves.'
-      : o.shell === "sandboxed"
-        ? 'Your shell tool stands in for "Bash". It runs in a sandbox: commands can write only inside the vault and the repos folder, and they have no network access, so git pull, git clone and curl won\'t work. For updates, adopting or cloning, use the vault tools (they run in the app); local git commands like git log still work. Ask the user before anything destructive.'
-        : '"Bash" is your shell tool, and only git commands are allowed.';
+      : '"Bash" is your shell tool, and only git commands are allowed.';
   const equivalents = writes
     ? '"Read", "Edit", "Write", "Glob", "Grep", "WebSearch" and "WebFetch" are your equivalent tools.'
     : '"Read", "Glob", "Grep", "WebSearch" and "WebFetch" are your equivalent tools.';

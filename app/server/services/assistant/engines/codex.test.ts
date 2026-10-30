@@ -58,14 +58,23 @@ test("first turn: exec --json with the sandbox, the vault server, prompt on stdi
     'mcp_servers.vault.args=["C:\\\\app\\\\dist\\\\assistant-mcp.js"]',
     'mcp_servers.vault.env={ SKILL_VAULT_URL = "http://127.0.0.1:9994" }',
     'mcp_servers.vault.default_tools_approval_mode="approve"',
+    // User decision 2026-10-30: no shell (the Windows sandbox reached the app's own API with network off).
+    "features.shell_tool=false",
+    "features.unified_exec=false",
+    "features.computer_use=false",
+    "features.browser_use=false",
+    "features.browser_use_external=false",
+    "features.in_app_browser=false",
+    "features.apps=false",
+    "features.plugins=false",
   ]) {
     const i = spec.args.indexOf(setting);
     assert.ok(i > 0 && spec.args[i - 1] === "-c", `missing -c ${setting}`);
   }
   for (const bad of [...FORBIDDEN_FLAGS, ...CODEX_FORBIDDEN]) assert.ok(!spec.args.some((a) => a.includes(bad)), `must not pass ${bad}`);
-  // User decision 2026-10-30: with network on, a sandboxed command could call the app's own API on 127.0.0.1.
   assert.ok(!spec.args.some((a) => a.includes("network_access=true")), "the sandbox never gets the network");
-  assert.match(spec.stdin, /no network access/);
+  assert.ok(!spec.args.some((a) => /^features\.[a-z_]+=true$/.test(a)), "no feature is switched on");
+  assert.match(spec.stdin, /There is no shell tool here/);
   assert.equal(spec.cwd, "C:\\vault");
   assert.match(spec.stdin, /^<skill-vault-instructions>/);
   assert.match(spec.stdin, /running on OpenAI Codex/);
@@ -80,6 +89,7 @@ test("later turns resume the thread and skip the instructions", () => {
   assert.deepEqual(spec.args.slice(-2), ["thread-1", "-"]);
   assert.ok(spec.args.includes('windows.sandbox="unelevated"'));
   assert.ok(spec.args.includes("sandbox_workspace_write.network_access=false"), "resumed turns have no network either");
+  assert.ok(spec.args.includes("features.shell_tool=false"), "resumed turns have no shell either");
   assert.ok(!spec.args.some((a) => a.includes("network_access=true")));
   assert.ok(!spec.stdin.includes("<skill-vault-instructions>"));
   // A failed first turn left no thread id: start a fresh thread with instructions.

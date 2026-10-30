@@ -3,13 +3,15 @@
  * OpenAI Codex (`codex exec --json`). Checked against codex-cli 0.144.4 (spike S5–S7).
  *
  * Codex has no per-tool allowlist, so the shell can't be limited to git the
- * way Claude's is. Instead every turn runs in the workspace-write sandbox:
- * commands can run, but writes land only in the vault and repos folders, and
- * the sandbox has NO network (user decision 2026-10-30). With network on, a
- * sandboxed command could call the app's own unauthenticated API on
- * 127.0.0.1 (curl -X PATCH /api/config, then /api/push) and so write outside
- * the sandbox. The vault tools, adopting and cloning run in the app server
- * instead, so they still work. --ignore-user-config keeps the
+ * way Claude's is. And on Windows its sandbox can't keep a command off the
+ * network: the live check (2026-10-30) reached the app's own unauthenticated
+ * API on 127.0.0.1 with network_access=false, in every sandbox mode tried
+ * (workspace, read-only, elevated). So Codex runs with no shell at all
+ * (features.shell_tool=false, user decision 2026-10-30), like Copilot and Grok,
+ * and with its desktop/browser-control features off. Its own file edits still
+ * land only in the vault and repos folders (the workspace-write sandbox's
+ * writable roots). The vault tools, adopting and cloning run in the app
+ * server, so they still work. --ignore-user-config keeps the
  * user's own Codex MCP servers and settings out; auth still comes from
  * CODEX_HOME. Without the user's config Codex has no Windows sandbox and
  * falls back to read-only (every command "blocked by policy", MCP calls
@@ -27,6 +29,9 @@ const LABEL = "OpenAI Codex";
 /** S6 unverified (no key was offered in the spike): CODEX_API_KEY is the documented variable. */
 const KEYS = ["CODEX_API_KEY", "OPENAI_API_KEY"];
 const authHint = makeAuthHint(LABEL, /not logged in|unauthori[sz]ed|\b401\b|log ?in required|sign in|expired|invalid api key/i);
+
+/** Codex features (`codex features list`, 0.144.4) switched off for app turns. */
+export const CODEX_FEATURES_OFF = ["shell_tool", "unified_exec", "computer_use", "browser_use", "browser_use_external", "in_app_browser", "apps", "plugins"];
 
 /** TOML basic string: JSON's escaping of \ and " is valid TOML. */
 const toml = (s: string): string => JSON.stringify(s);
@@ -81,7 +86,9 @@ export function createCodexEngine(deps: EngineDeps = defaultEngineDeps()): Assis
         "-c", 'sandbox_mode="workspace-write"',
         "-c", 'windows.sandbox="unelevated"', // S7: without it Codex falls back to read-only
         "-c", `sandbox_workspace_write.writable_roots=[${[input.vaultPath, input.reposDir].map(toml).join(",")}]`,
-        "-c", "sandbox_workspace_write.network_access=false", // no route to the app's own API (see the header)
+        "-c", "sandbox_workspace_write.network_access=false",
+        // No shell (see the header), and nothing that drives the desktop, a browser, or the user's ChatGPT apps/plugins.
+        ...CODEX_FEATURES_OFF.flatMap((f) => ["-c", `features.${f}=false`]),
         "-c", 'approval_policy="never"',
         "-c", `mcp_servers.vault.command=${toml(input.mcp.command)}`,
         "-c", `mcp_servers.vault.args=[${input.mcp.args.map(toml).join(",")}]`,
@@ -92,7 +99,7 @@ export function createCodexEngine(deps: EngineDeps = defaultEngineDeps()): Assis
         ? composeInstructions({
             pluginDir: input.pluginDir,
             lead: input.leadAgent,
-            note: { label: LABEL, vaultToolSpelling: "the `vault` MCP server's tools", subagents: false, shell: "sandboxed" },
+            note: { label: LABEL, vaultToolSpelling: "the `vault` MCP server's tools", subagents: false, shell: "none" },
             includeLead: true,
           })
         : undefined;

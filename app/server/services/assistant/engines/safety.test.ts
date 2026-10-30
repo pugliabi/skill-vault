@@ -2,8 +2,8 @@
  * The Global Constraints, checked across every engine at once: no bypass /
  * yolo / allow-all flag in any turn (new or resumed chat, login or API key),
  * Copilot has no shell permission at all, Grok has no shell and no file-write
- * tool (fail-closed until its live check), Claude's shell is git-only, and
- * Codex always runs in its workspace-write sandbox.
+ * tool, Codex has no shell and runs its edits in the workspace-write sandbox,
+ * and Claude's shell is git-only.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -70,7 +70,7 @@ test("no engine's turn carries a bypass, yolo or allow-all flag", () => {
   }
 });
 
-test("shell: none on Copilot and Grok, git-only on Claude, sandboxed on Codex", () => {
+test("shell: none on Codex, Copilot and Grok; git-only on Claude", () => {
   const byId = (id: string) => ENGINES.find((e) => e.id === id) as AssistantEngine;
   for (const args of turns(byId("copilot"))) assert.ok(!args.some((a) => a.includes("shell(")), "Copilot gets no shell permission");
   // Grok has no shell and no file writes (grok.ts GROK_TOOLS): its only allow rule is for the vault's MCP tools.
@@ -89,11 +89,12 @@ test("shell: none on Copilot and Grok, git-only on Claude, sandboxed on Codex", 
     }
   }
   for (const args of turns(byId("codex"))) {
-    assert.ok(args.includes('sandbox_mode="workspace-write"'));
+    // User decision 2026-10-30: no shell, because on Windows the sandbox reached the app's own API with network off.
+    const i = args.indexOf("features.shell_tool=false");
+    assert.ok(i > 0 && args[i - 1] === "-c", "Codex has no shell tool");
+    assert.ok(!args.some((a) => /^features\.(shell_tool|unified_exec|computer_use)=true$/.test(a)));
+    assert.ok(args.includes('sandbox_mode="workspace-write"'), "its own edits stay in the writable roots");
     assert.ok(!args.some((a) => a.includes("danger-full-access")));
-    // User decision 2026-10-30: no network, so a sandboxed command can't reach the app's own API.
-    const i = args.indexOf("sandbox_workspace_write.network_access=false");
-    assert.ok(i > 0 && args[i - 1] === "-c", "Codex's sandbox has no network");
     assert.ok(!args.some((a) => a.includes("network_access=true")), "never network on");
   }
 });
