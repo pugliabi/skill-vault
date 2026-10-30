@@ -35,6 +35,7 @@ export function EngineSignInDialog({
     // Per run, so a StrictMode re-run or a retry never leaves a second poll chain going.
     let cancelled = false;
     let already = false;
+    let exitedOkPolls = 0;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const started = Date.now();
     const succeed = (view: EngineView) => {
@@ -70,6 +71,12 @@ export function EngineSignInDialog({
         } else {
           if (view.auth.mode === "login" && view.auth.signed_in === true) return succeed(view);
           if (win && !win.open && win.exit_code !== null && win.exit_code !== 0) return fail(win.exit_code);
+          // The login exited fine but nothing reads as signed in: say so after a few polls' grace.
+          if (win && !win.open && win.exit_code === 0 && ++exitedOkPolls >= 3) {
+            setError(`The sign-in window closed, but ${engine.label} doesn't read as signed in.`);
+            setState("failed");
+            return;
+          }
         }
       } catch {
         /* keep polling */

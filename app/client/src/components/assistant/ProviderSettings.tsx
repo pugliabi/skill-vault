@@ -74,7 +74,8 @@ export function ProviderSettings() {
                 name="assistant-provider"
                 value={v.id}
                 aria-label={v.label}
-                checked={v.selected}
+                // Shows the choice at once; the provider list takes a few seconds to come back.
+                checked={select.isPending ? select.variables === v.id : v.selected}
                 onChange={() => select.mutate(v.id)}
                 style={{ accentColor: "var(--accent)", flexShrink: 0 }}
               />
