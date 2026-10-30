@@ -52,7 +52,7 @@ test("fingerprint ignores key order but sees target changes", () => {
 test("normalizeDraft strips secrets and unknown keys", () => {
   const raw = { ...startDraft(base), assistant: { auth: "api_key", workspace_id: "w", api_key: "sk-secret" }, extra: 1 };
   const d = normalizeDraft(raw);
-  assert.deepEqual(d.assistant, { auth: "api_key", workspace_id: "w" });
+  assert.deepEqual(d.assistant, { engine: "claude", auth: "api_key", workspace_id: "w" });
   assert.ok(!JSON.stringify(d).includes("sk-secret"));
   assert.ok(!("extra" in d));
 });
@@ -126,4 +126,11 @@ test("write, read and delete round-trip; a corrupt file reads as none", () => {
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
+});
+
+test("assistant: engine defaults to claude, keeps a known one, rejects an unknown one", () => {
+  const input = { version: 1, started_at: "2026-10-29T00:00:00Z", base: "x" };
+  assert.equal(normalizeDraft({ ...input, assistant: { auth: "login" } }).assistant?.engine, "claude");
+  assert.equal(normalizeDraft({ ...input, assistant: { engine: "codex", auth: "api_key" } }).assistant?.engine, "codex");
+  assert.throws(() => normalizeDraft({ ...input, assistant: { engine: "bard", auth: "login" } }), /assistant\.engine/);
 });

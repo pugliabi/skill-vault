@@ -153,11 +153,12 @@ export function configPatch(draft: SetupDraft, targets: EffectiveTarget[], apiKe
   }
   if (draft.machine_id) patch.machine_id = draft.machine_id;
   if (draft.assistant) {
-    patch.assistant = {
-      auth: draft.assistant.auth,
-      workspace_id: draft.assistant.workspace_id ?? "",
-      ...(apiKey?.trim() ? { api_key: apiKey.trim() } : {}),
-    };
+    const a = draft.assistant;
+    const key = apiKey?.trim();
+    patch.assistant =
+      a.engine === "claude"
+        ? { engine: "claude", auth: a.auth, workspace_id: a.workspace_id ?? "", ...(key ? { api_key: key } : {}) }
+        : { engine: a.engine, engine_auth: { auth: a.auth, ...(key ? { api_key: key } : {}) } };
   }
   return patch;
 }

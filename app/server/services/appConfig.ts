@@ -29,8 +29,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import type { AppConfig, Provider } from "../types/vault.ts";
-import { applyClaudeAuthPatch, type ClaudeAuthConfig, type ClaudeAuthPatch } from "./claude/auth.ts";
-import type { AssistantBlock } from "./assistant/engines/config.ts";
+import { applyAssistantSetupPatch, type AssistantBlock, type AssistantSetupPatch } from "./assistant/engines/config.ts";
 import type { SetupBase } from "./setup/types.ts";
 
 const CLI_CONFIG_DIR = path.join(os.homedir(), ".skill-vault");
@@ -170,7 +169,7 @@ export interface SetupConfigPatch {
   default_targets?: string[];
   repo_url?: string;
   machine_id?: string;
-  assistant?: ClaudeAuthPatch;
+  assistant?: AssistantSetupPatch;
 }
 
 /** One atomic write for the setup guide. Keys the app doesn't own are preserved. */
@@ -182,8 +181,8 @@ export function writeSetupConfig(patch: SetupConfigPatch): AppConfig {
   if (patch.repo_url !== undefined) raw.repo_url = patch.repo_url;
   if (patch.machine_id) raw.machine_id = patch.machine_id;
   if (patch.assistant) {
-    const current = raw.assistant && typeof raw.assistant === "object" ? (raw.assistant as ClaudeAuthConfig) : {};
-    raw.assistant = applyClaudeAuthPatch(current, patch.assistant);
+    const current = raw.assistant && typeof raw.assistant === "object" ? (raw.assistant as AssistantBlock) : {};
+    raw.assistant = applyAssistantSetupPatch(current, patch.assistant);
   }
   writeRaw(raw);
   return readAppConfig();

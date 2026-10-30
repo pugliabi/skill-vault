@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { ApiError } from "../../../lib/api";
 import { setupApi, type SetupDraft, type SetupEvent, type SetupJobState } from "../../../lib/setup";
+import { ENGINE_SHORT } from "../../../lib/assistant";
 import { Button } from "../../../components/ui/primitives";
 import type { StepProps } from "../types";
 import { Hint, StepHeader, StepNav, listBox, rowStyle } from "../ui";
@@ -31,7 +32,7 @@ function plannedActions(d: SetupDraft): string[] {
   }
   if (d.machine_id) parts.push(`this PC: ${d.machine_id}`);
   if (v?.repo_url) parts.push(`repo: ${v.repo_url}`);
-  if (d.assistant) parts.push(`assistant: ${d.assistant.auth === "login" ? "Claude account" : "API key"}`);
+  if (d.assistant) parts.push(`assistant: ${ENGINE_SHORT[d.assistant.engine ?? "claude"]} · ${d.assistant.auth === "login" ? "account login" : "API key"}`);
   out.push(`Save settings${parts.length ? ` (${parts.join("; ")})` : ""}`);
 
   if (d.skills.adopt.length) out.push(`Adopt ${d.skills.adopt.length} skill${d.skills.adopt.length === 1 ? "" : "s"} into the vault`);
