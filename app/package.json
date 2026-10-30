@@ -1,6 +1,6 @@
 {
   "name": "skill-vault-app",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Standalone web UI for managing a Skill Vault directory",
   "type": "module",
   "bin": {
