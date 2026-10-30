@@ -74,7 +74,10 @@ export function createCopilotEngine(deps: EngineDeps = defaultEngineDeps()): Ass
         const file = configFile();
         if (!deps.exists(file)) return { signed_in: false, method: "login" };
         // S8: camelCase — lastLoggedInUser / loggedInUsers carry { host, login }.
-        const j = JSON.parse(deps.readFile(file)) as { lastLoggedInUser?: { login?: string }; loggedInUsers?: Array<{ login?: string }> };
+        // Copilot writes "// …" comment lines above the JSON; JSON strings can't span lines,
+        // so dropping whole comment lines is safe.
+        const text = deps.readFile(file).replace(/^\s*\/\/.*$/gm, "");
+        const j = JSON.parse(text) as { lastLoggedInUser?: { login?: string }; loggedInUsers?: Array<{ login?: string }> };
         const raw = j.lastLoggedInUser?.login ?? j.loggedInUsers?.[0]?.login;
         const login = typeof raw === "string" && raw ? raw : null;
         return login ? { signed_in: true, method: "login", account: login } : { signed_in: false, method: "login" };

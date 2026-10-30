@@ -97,6 +97,20 @@ test("authStatus reads the signed-in user from config.json (camelCase, S8)", asy
   assert.equal((await createCopilotEngine(deps({ readFile: () => "{" })).authStatus({ auth: "login" })).signed_in, null);
 });
 
+test("authStatus reads config.json with the comment lines Copilot writes above it", async () => {
+  const real = [
+    "// User settings belong in settings.json.",
+    "// This file is managed automatically.",
+    "{",
+    '  "trustedFolders": ["C:\\\\Users\\\\octo"],',
+    '  "lastLoggedInUser": { "host": "https://github.com", "login": "octo" },',
+    '  "loggedInUsers": [{ "host": "https://github.com", "login": "octo" }]',
+    "}",
+  ].join("\r\n");
+  const r = await createCopilotEngine(deps({ readFile: () => real })).authStatus({ auth: "login" });
+  assert.deepEqual(r, { signed_in: true, method: "login", account: "octo" });
+});
+
 test("detect: the version line loses its trailing full stop", async () => {
   assert.deepEqual(await createCopilotEngine(deps()).detect(), { installed: true, version: "GitHub Copilot CLI 1.0.105" });
 });
