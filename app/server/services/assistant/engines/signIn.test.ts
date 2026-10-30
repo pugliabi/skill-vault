@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createSignInManager, powershellLoginCommand } from "./signIn.ts";
+import { createSignInManager, powershellLoginCommand, windowLauncherScript } from "./signIn.ts";
 import { fakeEngine } from "./testFakes.ts";
 
 /** What follows the login command: its exit code becomes the window's, and a failure waits for Enter. */
@@ -97,7 +97,39 @@ test("a window the user closed is finished: no pending, and later close/finish n
   assert.equal(kills, 0);
 });
 
-test("start opens one window; a second start replaces it; cancel and timeout close it", () => {
+test("windowLauncherScript starts the window with Start-Process and exits with its exit code", () => {
+  const command = powershellLoginCommand("Sign in to O'Brien CLI", { command: "C:\\x\\grok.exe", prefixArgs: [], label: "x" }, ["login"]);
+  const script = windowLauncherScript("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", command);
+  const encoded = Buffer.from(command, "utf16le").toString("base64");
+  assert.equal(
+    script,
+    `$p = Start-Process -FilePath 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe' -ArgumentList '-NoProfile','-EncodedCommand','${encoded}' -PassThru; ` +
+      "$null = $p.Handle; $p.WaitForExit(); exit $p.ExitCode",
+  );
+  assert.equal(Buffer.from(encoded, "base64").toString("utf16le"), command, "the window runs the login script unchanged");
+});
+
+test("a second start for the same engine keeps its open window; another engine's start replaces it", () => {
+  const opened: Array<{ closed: boolean }> = [];
+  const m = createSignInManager({
+    platform: "win32",
+    openWindow: () => {
+      const w = { closed: false };
+      opened.push(w);
+      return { isOpen: () => !w.closed, close: () => void (w.closed = true) };
+    },
+    setTimer: () => ({ cancel: () => {} }),
+  });
+  m.start(fakeEngine(), {});
+  assert.deepEqual(m.start(fakeEngine(), {}), { started: true });
+  assert.equal(opened.length, 1, "no second window");
+  assert.equal(opened[0].closed, false, "the sign-in in progress survives");
+  m.start(fakeEngine({ id: "copilot", label: "Fake Copilot" }), {});
+  assert.equal(opened[0].closed, true);
+  assert.equal(m.current(), "copilot");
+});
+
+test("start opens one window; another start replaces it once it closed; cancel and timeout close it", () => {
   const opened: Array<{ title: string; command: string; closed: boolean }> = [];
   let fire: () => void = () => {};
   const m = createSignInManager({
@@ -105,7 +137,7 @@ test("start opens one window; a second start replaces it; cancel and timeout clo
     openWindow: (title, command) => {
       const w = { title, command, closed: false };
       opened.push(w);
-      return { isOpen: () => true, close: () => (w.closed = true) };
+      return { isOpen: () => !w.closed, close: () => (w.closed = true) };
     },
     setTimer: (fn) => {
       fire = fn;
@@ -116,7 +148,7 @@ test("start opens one window; a second start replaces it; cancel and timeout clo
   assert.equal(opened[0].title, "Sign in to Fake Codex");
   assert.match(opened[0].command, /'login'; \$code = /);
   assert.equal(m.current(), "codex");
-  m.start(fakeEngine(), {});
+  m.start(fakeEngine({ id: "copilot", label: "Fake Copilot" }), {});
   assert.equal(opened[0].closed, true);
   m.cancel();
   assert.equal(opened[1].closed, true);

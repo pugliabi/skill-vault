@@ -77,13 +77,29 @@ function powershellExe(): string {
   return root ? path.win32.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe") : "powershell.exe";
 }
 
+/**
+ * A child Node spawns gets NUL for stdin even with its own console, so a login that also reads
+ * the keyboard (grok login waits on its browser callback and stdin) sees end-of-input and quits
+ * at once with 0 (live check 2026-10-30). So a hidden PowerShell opens the visible window with
+ * Start-Process, which gives it the new console's real input, waits for it, and exits with its
+ * exit code. The window's script travels base64-encoded: no second layer of quoting.
+ */
+export function windowLauncherScript(powershell: string, command: string): string {
+  const encoded = Buffer.from(command, "utf16le").toString("base64");
+  return [
+    `$p = Start-Process -FilePath ${psQuote(powershell)} -ArgumentList '-NoProfile','-EncodedCommand','${encoded}' -PassThru`,
+    "$null = $p.Handle", // keeps the handle, or ExitCode can read as $null after the exit
+    "$p.WaitForExit()",
+    "exit $p.ExitCode",
+  ].join("; ");
+}
+
 function defaultOpenWindow(_title: string, command: string, env: NodeJS.ProcessEnv): SignInWindow | { error: string } {
   let child: ChildProcess;
   try {
-    // detached on Windows = the child gets its own (visible) console window.
-    child = spawn(powershellExe(), ["-NoProfile", "-Command", command], {
-      detached: true,
-      windowsHide: false,
+    // The launcher stays hidden; the window it starts is a child of it, so killProcessTree closes both.
+    child = spawn(powershellExe(), ["-NoProfile", "-NonInteractive", "-Command", windowLauncherScript(powershellExe(), command)], {
+      windowsHide: true,
       stdio: "ignore",
       env,
     });
@@ -155,6 +171,9 @@ export function createSignInManager(over: Partial<SignInDeps> = {}): SignInManag
       }
       const target = engine.target();
       if (!target) return { error: `${engine.label} isn't installed — install it first.`, reason: "not_installed" };
+      // A second start while this engine's window is open (a double click, a StrictMode re-run)
+      // keeps that window: replacing it would kill a sign-in the user is in the middle of.
+      if (run?.id === engine.id && open()) return { started: true };
       close();
       const title = `Sign in to ${engine.label}`;
       const win = deps.openWindow(title, powershellLoginCommand(title, target, engine.loginArgs), env);
