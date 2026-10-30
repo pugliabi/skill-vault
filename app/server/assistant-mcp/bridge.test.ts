@@ -380,3 +380,36 @@ test("read_skill_files leaves out files under ignored folders", async () => {
   assert.deepEqual(out.files.map((f) => f.path), ["SKILL.md"]);
   assert.deepEqual(out.skipped, []);
 });
+
+test("read_skill_files matches ignored folders without case, as save_skill does", async () => {
+  const http = fakeHttp([
+    {
+      status: 200,
+      json: {
+        files: {
+          name: "demo", path: "", type: "dir",
+          children: [
+            { name: "SKILL.md", path: "SKILL.md", type: "file", size: 5 },
+            { name: ".GIT", path: ".GIT", type: "dir", children: [{ name: "config", path: ".GIT/config", type: "file", size: 4 }] },
+            { name: "Node_Modules", path: "Node_Modules", type: "dir", children: [{ name: "a.js", path: "Node_Modules/a.js", type: "file", size: 4 }] },
+          ],
+        },
+      },
+    },
+    textFile("hello"),
+  ]);
+  const out = (await TOOLS.read_skill_files.handler({ name: "demo" }, http, noSleep)) as { files: Array<{ path: string }> };
+  assert.deepEqual(out.files.map((f) => f.path), ["SKILL.md"]);
+  assert.equal(http.calls.length, 2);
+});
+
+test("read_skill_files with paths won't read an ignored folder either", async () => {
+  const http = fakeHttp([textFile("hello")]);
+  const out = (await TOOLS.read_skill_files.handler({ name: "demo", paths: [".git/config", ".GIT/config", "SKILL.md"] }, http, noSleep)) as {
+    files: Array<{ path: string }>;
+    skipped: Array<{ path: string; reason: string }>;
+  };
+  assert.deepEqual(http.calls.map((c) => c.path), ["/api/skills/demo/files/SKILL.md"]);
+  assert.deepEqual(out.files.map((f) => f.path), ["SKILL.md"]);
+  assert.deepEqual(out.skipped, [{ path: ".git/config", reason: "ignored" }, { path: ".GIT/config", reason: "ignored" }]);
+});

@@ -46,6 +46,16 @@ export function parseBridgeArgs(argv: string[], fallbackClient: string): BridgeA
   return { client, command, file };
 }
 
+export const USAGE = "usage: skill-vault tools | skill-vault <tool> [--file args.json]";
+
+/**
+ * Command-line use with no tool name. Without this check it would start the
+ * MCP server and wait on stdin for a client that isn't coming.
+ */
+export function missingTool(args: BridgeArgs): boolean {
+  return args.command === null && (args.file !== null || args.client === "command");
+}
+
 /** A tool's JSON arguments: text read from stdin, or the file named by --file. */
 export type CommandInput = string | { file: string };
 

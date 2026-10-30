@@ -20,7 +20,7 @@
 
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { IGNORE_NAMES } from "../services/skillHash.ts";
+import { isIgnoredName } from "../services/skillHash.ts";
 
 /** Minimal HTTP seam: method + path (+ optional JSON body) → status + parsed JSON. */
 export type BridgeHttp = (
@@ -141,7 +141,9 @@ interface FileRead {
   content: string | null;
 }
 
-/** SKILL.md first, then the rest by path; binaries and files past the budget are listed in `skipped`. */
+const inIgnoredFolder = (p: string): boolean => p.split("/").some(isIgnoredName);
+
+/** SKILL.md first, then the rest by path; binaries, ignored paths and files past the budget are listed in `skipped`. */
 async function readSkillFiles(http: BridgeHttp, name: string, only?: string[]): Promise<unknown> {
   const enc = encodeURIComponent(name);
   let wanted: Array<{ path: string; size: number }>;
@@ -150,13 +152,17 @@ async function readSkillFiles(http: BridgeHttp, name: string, only?: string[]): 
   } else {
     const detail = expectOk(await http("GET", `/api/skills/${enc}`), "read_skill_files") as { files?: TreeNode };
     // Ignored folders (.git, node_modules...) are listed by the tree but save_skill refuses their paths.
-    wanted = (detail.files ? treeFiles(detail.files) : []).filter((w) => !w.path.split("/").some((seg) => IGNORE_NAMES.has(seg)));
+    wanted = (detail.files ? treeFiles(detail.files) : []).filter((w) => !inIgnoredFolder(w.path));
     wanted.sort((a, b) => (a.path === "SKILL.md" ? -1 : b.path === "SKILL.md" ? 1 : a.path.localeCompare(b.path)));
   }
   const files: Array<{ path: string; content: string; sha256: string | null; size: number }> = [];
-  const skipped: Array<{ path: string; reason: "binary" | "too_large" | "over_budget" }> = [];
+  const skipped: Array<{ path: string; reason: "binary" | "too_large" | "over_budget" | "ignored" }> = [];
   let total = 0;
   for (const w of wanted) {
+    if (inIgnoredFolder(w.path)) {
+      skipped.push({ path: w.path, reason: "ignored" });
+      continue;
+    }
     if (files.length > 0 && total + w.size > READ_BUDGET_BYTES) {
       skipped.push({ path: w.path, reason: "over_budget" });
       continue;
