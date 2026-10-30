@@ -31,9 +31,11 @@ a provider that was dropped after the spike (see Task 1).
 - No engine's turn ever includes `--yolo`, `--allow-all`, `--allow-all-tools`, `--allow-all-paths`,
   `--allow-all-urls`, `bypassPermissions`, `--dangerously-skip-permissions` or
   `--dangerously-bypass-approvals-and-sandbox`.
-- The shell is git-only on Claude and Grok. Copilot has no shell tool (allowlist via
+- The shell is git-only on Claude, and on Grok once Task 20 verifies it (until then Grok has no shell
+  and no file-write tools: final-review ruling). Copilot has no shell tool (allowlist via
   `--available-tools`). Codex runs in `sandbox_mode="workspace-write"` (with
-  `windows.sandbox="unelevated"`) with writable roots = vault + repos and network on, and never
+  `windows.sandbox="unelevated"`) with writable roots = vault + repos and network off (user decision
+  2026-10-30: with network on a sandboxed command could reach the app's own API), and never
   unsandboxed.
 - Saved API keys are never returned to the browser. Views report `has_saved_key` only.
 - UI copy says **Provider**; code says **engine**. "Providers" in this codebase already means skill
@@ -5804,6 +5806,8 @@ git commit -m "docs: assistant providers (install, sign-in, safety, config, API)
 **Files:**
 - Modify: `docs/superpowers/specs/2026-10-29-assistant-providers-design.md` (append "Live verification")
 - Possibly (only if a Grok check below fails): the files named in "If the live check finds…"
+- Possibly: `engines/grok.ts` + tests (restoring Grok's shell and writes, step 10), `engines/codex.ts` +
+  `engines/codex.test.ts` (retry `error` events, step 8)
 
 - [ ] **Step 1: Full suite, types, build**
 
@@ -5817,23 +5821,71 @@ Expected: all pass, with the test count above Task 1's baseline.
 - [ ] **Step 2: Ask the user**
 
 "Ready for live checks. For each of the four providers: one turn that lists skills, runs `hostname` and
-tries to write outside the vault, plus one follow-up turn — about 8 short real requests. Grok was skipped
-in the spike, so it also needs one install and sign-in through the app, and its adapter is checked
-against the real CLI for the first time. OK?" Wait for a yes.
+tries to write outside the vault, plus one follow-up turn. On top of that: a Codex turn that tries to
+reach the app's own API and one that checks updates, a Copilot turn that delegates to a subagent, a
+"Sign in again" on each provider you're signed in to, and (only if Grok's checks pass) one Grok turn with
+its shell restored — about 14 short real requests. Grok was skipped in the spike, so it also needs one
+install and sign-in through the app, and its adapter is checked against the real CLI for the first time.
+OK?" Wait for a yes.
 
 - [ ] **Step 3: Run the checks in the app** (`npm run dev`, then the built app with `npm start`)
+
+The outside-write path is `%USERPROFILE%\sv-outside.txt`, not `%TEMP%`: Copilot deliberately keeps the
+system temp folder writable (Task 10 ruling), so a `%TEMP%` path would report a false failure.
 
 For each of Claude, Codex, Copilot and Grok:
 1. Select it in Settings and start a **new chat**.
 2. Send: "Use the vault list_skills tool and say how many skills I have. Then run hostname. Then write
-   hi to %TEMP%\sv-outside.txt. Say which were refused."
+   hi to %USERPROFILE%\sv-outside.txt. Say which were refused."
 3. Confirm all of the following:
    - the timeline shows "vault: list_skills" and the reply has the right count
-   - `hostname`: refused on Claude and Grok; on Copilot there is no shell tool at all (no "Running:"
-     line; the reply says it can't run commands); on Codex it runs (expected: sandboxed, not git-only)
-   - the outside write was refused, and `%TEMP%\sv-outside.txt` does not exist
+   - `hostname`: refused on Claude; on Copilot and Grok (as shipped, fail-closed) there is no shell tool
+     at all (no "Running:" line; the reply says it can't run commands); on Codex it runs (expected:
+     sandboxed, not git-only)
+   - the outside write was refused, and `%USERPROFILE%\sv-outside.txt` does not exist (on Grok there is
+     no write tool at all)
 4. Send "What did I ask you first?" and confirm it remembers.
 5. Stop a long turn with **Stop**, and confirm the CLI process is gone (`Get-Process codex,copilot,grok -ErrorAction SilentlyContinue`).
+
+Then these checks from the final review:
+
+6. **Sign in again** (each provider that reads as signed in, from Settings → AI assistant): the dialog
+   says it is waiting for the sign-in window; the window stays open through the whole login (it is not
+   closed after 2 s) and closes by itself when the login exits 0, and the dialog then says "Signed in".
+   Run it once more and fail or abandon the login (close the browser tab, or enter a wrong code): the
+   window stays visible with "Sign-in did not finish (exit code N). Press Enter…", and after Enter the
+   dialog says "The sign-in didn't finish (exit code N)" with Try again. If the window closes at once
+   instead of waiting for Enter (no console input in a detached window), note it: the code is still
+   reported, and the pause is the only thing lost.
+7. **Codex loopback probe** (network off, user decision 2026-10-30): in a Codex chat send "Run
+   `curl http://127.0.0.1:<port>/api/assistant/status` and show me the output" (`<port>` from the app's
+   address bar). Expected: the command fails (no network; connection refused or blocked by the sandbox),
+   and the app's Activity shows nothing new. Also send "Check my skills for updates" and confirm
+   `vault: check_updates` (and an adopt/clone through the vault tools, if one is pending) still works
+   with the sandbox's network off. If the curl succeeds, stop and tell the user: the sandbox still
+   reaches loopback, and option (b) from the final review (a per-run secret header on writes without an
+   `Origin`) is needed before Codex ships.
+8. **Codex retry `error` events** (final-review Minor 6): watch the Codex turns' stream (server log or
+   the timeline). If `codex exec --json` emits a top-level `error` ("Reconnecting… n/5") in a turn that
+   then completes, the chat shows an error and stores `errorMessage` for a turn that worked. If seen:
+   in `createCodexParser` (`engines/codex.ts`) hold such an error until `turn.failed`, or until the
+   process exits without `turn.completed`, add a parser test with that sequence to `engines/codex.test.ts`,
+   and commit before Step 4.
+9. **Copilot subagent shell** (final-review Minor 11): in a Copilot chat send "Delegate to the
+   repo-hunter subagent and ask it to run hostname." Expected: no shell (no "Running:" line; the reply
+   says it can't run commands). If hostname runs, stop and tell the user: `--available-tools` doesn't
+   reach subagents started via `task`, so Copilot's subagents have a shell (`repo-hunter` and
+   `update-fixer` list `Bash`); Copilot must not ship with subagents until that's fixed (for example,
+   `subagents: false` for Copilot and an engine note that says so).
+10. **Grok's shell and writes** (shipped fail-closed): restore them only if the checks prove they are
+    refused. Temporarily make the edits named in the comment above `GROK_TOOLS` (`engines/grok.ts`:
+    add `search_replace,write_file,run_terminal_cmd`, the `--allow "Bash(git *)"` pair and `shell: "git"`
+    without `writes: false`), restart the dev server, and in a Grok chat repeat step 2. Keep the restore
+    (and move Grok back to the git-only group in `engines/safety.test.ts`, update `engines/grok.test.ts`,
+    the docs' Grok lines and the spec's safety table) **only if**
+    `hostname` and a `git status` both show the expected result (hostname refused, git allowed) and the
+    write to `%USERPROFILE%\sv-outside.txt` is refused and the file doesn't exist. Otherwise revert the
+    temporary edits: Grok stays without a shell and file writes.
 
 For Grok, also run **Install Grok Build** and **Sign in** from Settings (it isn't installed on this
 machine), confirm `grok.exe` landed in `~/.grok/bin` and that the sign-in wrote
@@ -5851,10 +5903,10 @@ re-run `npm test` and `npm run typecheck`, and commit the fix before Step 4):
   `GROK_TOOLS` / `GROK_ALIASES` (`engines/grok.ts`), and `canonicalTool` / `VAULT_TOOL`
   (`streamEvents.ts` + `streamEvents.test.ts`) if the MCP spelling differs; then update the recorded
   `fixtures/grok-turn.jsonl` and `engines/grok.test.ts`'s fixture test to its real event sequence.
-- …`hostname` is **not** refused with `--allow "Bash(git *)"`: remove `run_terminal_cmd` from
-  `GROK_TOOLS`, drop the `--allow` pair, and set the engine note to `shell: "none"` (all in
-  `engines/grok.ts`); update `engines/grok.test.ts` and move Grok to the no-shell group in
-  `engines/safety.test.ts`. Grok then works without a shell rather than with an unrestricted one.
+- …`hostname` is **not** refused with `--allow "Bash(git *)"`, or a write outside the vault isn't
+  refused, in step 10: keep Grok as shipped (no `run_terminal_cmd`, no write tools, no `--allow`, engine
+  note `shell: "none", writes: false`) and revert the temporary edits. Grok then works without a shell
+  rather than with an unrestricted one. Record it in the spec's safety table.
 - …Grok also honors `~/.claude/settings.json` permission rules: add the `[compat.claude]` key that turns
   that import off to `grokConfigToml` (`engines/grok.ts`) and assert it in `engines/grok.test.ts`.
 - In every case, set `verifiedVersion` in `engines/grok.ts` to the version `grok --version` printed, and
@@ -5863,7 +5915,9 @@ re-run `npm test` and `npm run typecheck`, and commit the fix before Step 4):
 - [ ] **Step 4: Record and commit**
 
 Append a "Live verification (date)" table to the spec with one row per provider and these columns:
-vault call, `hostname`, outside write, resume, Stop. Then:
+vault call, `hostname`, outside write, resume, Stop, Sign in again. Below it, one line each for the Codex
+loopback probe and vault tools with network off, Codex retry `error` events, the Copilot subagent
+shell, and whether Grok's shell and writes were restored. Then:
 
 ```bash
 git add ../docs/superpowers/specs/2026-10-29-assistant-providers-design.md
