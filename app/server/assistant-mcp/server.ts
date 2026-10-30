@@ -69,10 +69,12 @@ export function realServerDeps(appDir: string): ServerDeps {
     },
     startHeadless: () => {
       const script = path.join(appDir, "scripts", "launch.ps1");
+      // Not detached: a detached powershell.exe exits 0 without running the
+      // script. The server launch.ps1 starts outlives this process anyway.
       const child = spawn(
         "powershell.exe",
         ["-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", script, "-Headless"],
-        { detached: true, stdio: "ignore", windowsHide: true },
+        { stdio: "ignore", windowsHide: true },
       );
       child.on("error", () => {
         /* reported by the 60 s wait instead */

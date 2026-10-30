@@ -1,8 +1,32 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ServerUnavailableError, createResolvingFetch, findOrStartServer, type ServerDeps } from "./server.ts";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { ServerUnavailableError, createResolvingFetch, findOrStartServer, realServerDeps, type ServerDeps } from "./server.ts";
 
 const lock = (pid: number, port: number) => ({ pid, port, started_at: "t", version: "v", mode: "production" as const });
+
+// Not mocked on purpose: a detached powershell.exe exits 0 without running the
+// script, which only a real spawn shows.
+test("startHeadless really runs launch.ps1 -Headless", { skip: process.platform !== "win32" }, async () => {
+  const appDir = fs.mkdtempSync(path.join(os.tmpdir(), "sv-headless-"));
+  const marker = path.join(appDir, "ran.txt");
+  fs.mkdirSync(path.join(appDir, "scripts"));
+  fs.writeFileSync(
+    path.join(appDir, "scripts", "launch.ps1"),
+    `param([switch]$Headless)\nSet-Content -LiteralPath '${marker}' -Value "headless=$Headless"\n`,
+  );
+  try {
+    realServerDeps(appDir).startHeadless();
+    const deadline = Date.now() + 20_000;
+    while (!fs.existsSync(marker) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100));
+    assert.ok(fs.existsSync(marker), "powershell.exe exited without running launch.ps1");
+    assert.match(fs.readFileSync(marker, "utf8"), /headless=True/);
+  } finally {
+    fs.rmSync(appDir, { recursive: true, force: true });
+  }
+});
 
 function deps(over: Partial<ServerDeps> & { liveAfter?: number } = {}): ServerDeps & { starts: number } {
   let t = 0;
