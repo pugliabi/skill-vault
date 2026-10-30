@@ -3067,7 +3067,8 @@ test("turn: -p prompt, JSON output, same session id, plugin agent, no shell tool
   assert.ok(!a.some((x) => x.includes("shell(")), "no shell permission anywhere");
   for (const bad of FORBIDDEN_FLAGS) assert.ok(!a.some((x) => x.includes(bad)), `must not pass ${bad}`);
   assert.ok(!a.includes("--no-remote"), "Copilot has no --no-remote flag");
-  for (const flag of ["--disallow-temp-dir", "--disable-builtin-mcps", "--no-ask-user", "--no-auto-update"]) assert.ok(a.includes(flag), `missing ${flag}`);
+  assert.ok(!a.includes("--disallow-temp-dir"), "Copilot reads its own large tool output from temp");
+  for (const flag of ["--disable-builtin-mcps", "--no-ask-user", "--no-auto-update"]) assert.ok(a.includes(flag), `missing ${flag}`);
   assert.match(after("-p"), /running on GitHub Copilot CLI/);
   assert.match(after("-p"), /There is no shell tool here/);
   assert.ok(after("-p").endsWith("hi"));
@@ -3155,7 +3156,8 @@ Expected: FAIL — module not found.
  * be enforced. --available-tools is an allowlist of everything else the
  * assistant needs ("vault" = every tool of the vault MCP server); it also
  * drops Copilot's built-in computer-use, sql, workflow and shell-session
- * tools. --disallow-temp-dir keeps writes out of the system temp folder.
+ * tools. The system temp folder stays allowed: Copilot saves large tool output (e.g. a big
+ * list_skills) there and reads it back.
  * COPILOT_GITHUB_TOKEN / GH_TOKEN / GITHUB_TOKEN outrank the stored login, so
  * login mode strips all three.
  */
@@ -3253,7 +3255,6 @@ export function createCopilotEngine(deps: EngineDeps = defaultEngineDeps()): Ass
           "--available-tools", ...COPILOT_TOOLS,
           "--allow-tool", "write",
           "--allow-tool", "vault",
-          "--disallow-temp-dir",
           "--no-ask-user",
           "--no-auto-update",
         ],
@@ -3324,8 +3325,8 @@ What the spike settled (S8–S9), already reflected above:
   rejected. There is **no** `--no-remote` flag.
 - `--available-tools` takes each tool as its own argv element; `vault` means every tool of the vault MCP
   server (`vault-*` does not work). The list also drops Copilot's built-in computer-use (desktop
-  control), sql, workflow and shell-session tools. `--disallow-temp-dir` stops Copilot from also
-  allowing the system temp folder.
+  control), sql, workflow and shell-session tools. The system temp folder stays allowed
+  (no `--disallow-temp-dir`): Copilot saves tool output over ~20 KB there and reads it back.
 - MCP tools are named `vault-<tool>` in events; `canonicalTool` maps them to `mcp__vault__<tool>`.
 - The recorded fixture predates the allowlist: it still has a `powershell` call (hostname ran), a
   `create` denied with `error.code = "denied"`, and a `tool_search_tool` call. Its test checks shapes
