@@ -141,6 +141,10 @@ try {
         # Code's session markers so the server and the in-app assistant's
         # claude don't run as if inside that session.
         $env:Path = ((@([Environment]::GetEnvironmentVariable('Path', 'Machine'), [Environment]::GetEnvironmentVariable('Path', 'User')) -split ';') | Where-Object { $_ }) -join ';'
+        # The one thing kept from the caller: the folder of the node running this launch,
+        # which may be on the agent's PATH only. Last, so the user's own tools still win.
+        $nodeDir = Split-Path -Parent $node.Source
+        if (($env:Path -split ';') -notcontains $nodeDir) { $env:Path = "$env:Path;$nodeDir" }
         @(Get-ChildItem Env: | Where-Object { $_.Name -eq 'CLAUDECODE' -or $_.Name -like 'CLAUDE_CODE_*' }) | ForEach-Object { Remove-Item -LiteralPath "Env:$($_.Name)" }
         Write-Log 'headless: the server gets the user PATH and no Claude Code session variables'
       }
