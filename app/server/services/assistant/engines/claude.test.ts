@@ -10,11 +10,11 @@ const INPUT: TurnInput = {
   message: "hello",
   leadAgent: "vault-assistant",
   contextBlock: "# ctx",
-  mcp: { command: "C:\node.exe", args: ["C:\app\dist\assistant-mcp.js"], env: { SKILL_VAULT_URL: "http://127.0.0.1:9994" } },
-  vaultPath: "C:\vault",
-  reposDir: "C:\repos",
-  pluginDir: "C:\app\assistant-plugin",
-  workDir: "C:\Users\me\.skill-vault\engines\claude",
+  mcp: { command: "C:\\node.exe", args: ["C:\\app\\dist\\assistant-mcp.js"], env: { SKILL_VAULT_URL: "http://127.0.0.1:9994" } },
+  vaultPath: "C:\\vault",
+  reposDir: "C:\\repos",
+  pluginDir: "C:\\app\\assistant-plugin",
+  workDir: "C:\\Users\\me\\.skill-vault\\engines\\claude",
   auth: { auth: "login" },
   baseEnv: {},
 };
@@ -34,7 +34,7 @@ test("Claude's turn is exactly today's buildTurnArgs, message on stdin, no targe
     }),
   );
   assert.equal(spec.stdin, "hello");
-  assert.equal(spec.cwd, "C:\vault");
+  assert.equal(spec.cwd, "C:\\vault");
   assert.equal(spec.target, undefined);
   assert.equal(spec.env, undefined);
   assert.equal(spec.label, "claude CLI");

@@ -168,7 +168,13 @@ export async function runTurn(opts: {
       opts.emit(ev);
     }
   } finally {
-    for (const f of opts.spec.tempFiles ?? []) fs.rmSync(f, { force: true });
+    for (const f of opts.spec.tempFiles ?? []) {
+      try {
+        fs.rmSync(f, { force: true });
+      } catch {
+        /* a file still locked after an abort must not discard the turn's result */
+      }
+    }
   }
 
   flushText();
