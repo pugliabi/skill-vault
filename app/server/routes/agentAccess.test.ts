@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { Server } from "node:http";
+import type { PathEnv } from "../services/agentAccess/desktopConfig.ts";
 
 let root: string;
 let fakeHome: string;
@@ -21,6 +22,14 @@ const ccCalls: string[][] = [];
 const opened: string[] = [];
 
 const SKILL_MD = "---\nname: skill-vault\ndescription: test skill for the agent access routes\n---\n\nBody\n";
+
+const pathEnv = (): PathEnv => ({
+  platform: "win32",
+  appData: path.dirname(claudeDir),
+  home: fakeHome,
+  exists: (p) => desktopInstalled && fs.existsSync(p),
+  list: () => [],
+});
 
 before(async () => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), "sv-agent-"));
@@ -56,13 +65,7 @@ before(async () => {
     agentAccessRouter({
       appRoot,
       nodePath: process.execPath,
-      pathEnv: () => ({
-        platform: "win32",
-        appData: path.dirname(claudeDir),
-        home: fakeHome,
-        exists: (p) => desktopInstalled && fs.existsSync(p),
-        list: () => [],
-      }),
+      pathEnv,
       claudeAvailable: async () => (claudeInstalled ? { available: true } : { available: false, reason: "no claude" }),
       claudeCodeEntry: () => ccEntry,
       claudeRunner: async (args) => {
@@ -274,4 +277,97 @@ test("adding when already up to date succeeds without changes; zip then packages
   assert.ok((await zipSkillMd()).includes("VaultCopy"));
   const { hashSkillDirNormalized } = await import("../services/skillHash.ts");
   assert.equal(manifestSkills()["skill-vault"].desktop_package.content_hash, hashSkillDirNormalized(path.join(vault, "skills", "skill-vault")));
+});
+
+test("add leaves a default target's own skill-vault folder alone and reports it", async () => {
+  const { linkSkillDir, unlinkOrRemove } = await import("../services/linking.ts");
+  const theirs = path.join(providerDir, "skill-vault");
+  dropFromVault();
+  unlinkOrRemove(theirs);
+  fs.mkdirSync(theirs);
+  fs.writeFileSync(path.join(theirs, "SKILL.md"), "mine");
+  const res = await post("/skill/add");
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as { imported: string[]; pushed: string[]; failed: Array<{ provider_id: string; error: string }> };
+  assert.deepEqual(body.imported, ["skill-vault"]);
+  assert.deepEqual(body.pushed, []);
+  assert.deepEqual(body.failed.map((f) => f.provider_id), ["claude"]);
+  assert.match(body.failed[0].error, /isn't from your vault/);
+  assert.equal(fs.readFileSync(path.join(theirs, "SKILL.md"), "utf-8"), "mine");
+  assert.deepEqual(manifestSkills()["skill-vault"].targets, []);
+
+  // A link left behind to the vault copy is ours: Add pushes through it.
+  fs.rmSync(theirs, { recursive: true, force: true });
+  linkSkillDir(path.join(vault, "skills", "skill-vault"), theirs);
+  dropFromVault();
+  const again = (await (await post("/skill/add")).json()) as { pushed: string[]; failed: unknown[] };
+  assert.deepEqual(again.pushed, ["claude"]);
+  assert.deepEqual(again.failed, []);
+});
+
+test("the vault copy is recognised from another checkout's bundled-skills folder, and Update re-points it here", async () => {
+  const { bundledSkillsRoot } = await import("../services/agentAccess/bundledSkill.ts");
+  const setOriginPath = (p: string) => {
+    const m = JSON.parse(fs.readFileSync(path.join(vault, "skills.json"), "utf-8"));
+    m.skills["skill-vault"].origin.path = p;
+    fs.writeFileSync(path.join(vault, "skills.json"), JSON.stringify(m));
+  };
+  setOriginPath(path.join(root, "other-checkout", "app", "Bundled-Skills"));
+  assert.equal((await get()).skill.state, "in_vault");
+  fs.writeFileSync(bundledMd(), SKILL_MD + "\nMoved\n");
+  assert.equal((await get()).skill.state, "update_available");
+  const res = await post("/skill/add");
+  assert.equal(res.status, 200);
+  assert.deepEqual(((await res.json()) as { updated: string[] }).updated, ["skill-vault"]);
+  assert.equal(manifestSkills()["skill-vault"].origin.path, bundledSkillsRoot(appRoot));
+  assert.equal((await get()).skill.state, "in_vault");
+
+  // A dir origin in any other folder is still someone else's skill.
+  setOriginPath(path.join(root, "my-skills"));
+  assert.equal((await get()).skill.state, "name_taken");
+  setOriginPath(bundledSkillsRoot(appRoot));
+});
+
+test("without a built bridge, status says so and both connects refuse without touching anything", async () => {
+  const express = (await import("express")).default;
+  const { agentAccessRouter } = await import("./agentAccess.ts");
+  const unbuilt = path.join(root, "app-unbuilt");
+  fs.mkdirSync(path.join(unbuilt, "bundled-skills", "skill-vault"), { recursive: true });
+  fs.writeFileSync(path.join(unbuilt, "bundled-skills", "skill-vault", "SKILL.md"), SKILL_MD);
+  const calls: string[][] = [];
+  const app = express();
+  app.use(express.json());
+  app.use(
+    "/api/agent-access",
+    agentAccessRouter({
+      appRoot: unbuilt,
+      nodePath: process.execPath,
+      pathEnv,
+      claudeAvailable: async () => ({ available: true }),
+      claudeCodeEntry: () => undefined,
+      claudeRunner: async (args) => {
+        calls.push(args);
+        return { stdout: "", stderr: "", code: 0 };
+      },
+      openFolder: async () => {},
+    }),
+  );
+  const srv = app.listen(0);
+  await new Promise<void>((resolve) => srv.once("listening", () => resolve()));
+  const addr = srv.address();
+  const base = `http://127.0.0.1:${typeof addr === "object" && addr ? addr.port : 0}/api/agent-access`;
+  const file = path.join(claudeDir, "claude_desktop_config.json");
+  const before = fs.readFileSync(file, "utf-8");
+  try {
+    assert.equal(((await (await fetch(base)).json()) as { bridge_built: boolean }).bridge_built, false);
+    for (const p of ["/desktop/connect", "/claude-code/connect"]) {
+      const res = await fetch(`${base}${p}`, { method: "POST" });
+      assert.equal(res.status, 409, p);
+      assert.match(((await res.json()) as { error: string }).error, /Build the app first/, p);
+    }
+    assert.equal(fs.readFileSync(file, "utf-8"), before);
+    assert.deepEqual(calls, []);
+  } finally {
+    await new Promise<void>((resolve) => srv.close(() => resolve()));
+  }
 });

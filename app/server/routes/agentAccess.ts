@@ -22,6 +22,7 @@ import open from "open";
 import { readAppConfig, readClaudeDesktopStage } from "../services/appConfig.ts";
 import { recordActivity } from "../services/activity.ts";
 import { importSkills } from "../services/adoption.ts";
+import { isLink, resolveLink } from "../services/linking.ts";
 import { claudeAvailable as realClaudeAvailable, type ClaudeRunner } from "../services/claude/cli.ts";
 import { defaultStageDir, packageFolderForClaudeDesktop, recordDesktopPackage } from "../services/desktopPackaging.ts";
 import { pushSkillToProvider } from "../services/pushSkill.ts";
@@ -53,6 +54,20 @@ export interface AgentAccessOptions {
 const samePath = (a: string | undefined, b: string): boolean =>
   !!a && path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
 
+const realOr = (p: string): string => {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return p;
+  }
+};
+
+/** True when `p` is a symlink or junction to `vaultCopy` (an earlier push of ours). */
+function linksTo(p: string, vaultCopy: string): boolean {
+  const target = isLink(p) ? resolveLink(p) : null;
+  return !!target && (samePath(target, vaultCopy) || samePath(realOr(target), realOr(vaultCopy)));
+}
+
 /** Display text for sh users; the shim lives under ~/.skill-vault/bin. */
 const POSIX_COMMAND = "~/.skill-vault/bin/skill-vault";
 
@@ -74,8 +89,14 @@ export function agentAccessRouter(opts: AgentAccessOptions): Router {
     const vaultCopy = skillDir(cfg.vault_path, BUNDLED_SKILL_NAME);
     if (!entry && !fs.existsSync(vaultCopy)) return { state: "not_in_vault", targets: [] };
     const origin = entry?.origin;
+    // Any app checkout's bundled-skills folder, not only this one: a moved or
+    // re-cloned app must still know its own copy. win32 basename splits on
+    // both separators, so a vault shared with another OS reads the same.
     const ours =
-      origin?.type === "dir" && samePath(origin.path, bundledSkillsRoot(opts.appRoot)) && origin.subpath === BUNDLED_SKILL_NAME;
+      origin?.type === "dir" &&
+      origin.subpath === BUNDLED_SKILL_NAME &&
+      !!origin.path &&
+      path.win32.basename(origin.path).toLowerCase() === path.basename(bundledSkillsRoot(opts.appRoot)).toLowerCase();
     if (!entry || !origin || !ours) return { state: "name_taken", targets: entry?.targets ?? [] };
     const vaultHash = hashSkillDirNormalized(vaultCopy);
     // One-click refresh only while the vault copy is untouched since import;
@@ -184,10 +205,20 @@ export function agentAccessRouter(opts: AgentAccessOptions): Router {
     const pushed: string[] = [];
     const failed: Array<{ provider_id: string; error: string }> = [];
     if (row.state === "not_in_vault") {
+      const vaultCopy = skillDir(vaultPath, BUNDLED_SKILL_NAME);
       for (const id of cfg.default_targets ?? []) {
         const provider = cfg.providers.find((p) => p.id === id);
         if (!provider) {
           failed.push({ provider_id: id, error: "not configured" });
+          continue;
+        }
+        // A push replaces whatever is at the target. Only a link to the vault
+        // copy is known to be ours; anything else may be the user's own skill.
+        const dest = path.join(provider.path, BUNDLED_SKILL_NAME);
+        if ((fs.existsSync(dest) || isLink(dest)) && !linksTo(dest, vaultCopy)) {
+          const error = `a ${BUNDLED_SKILL_NAME} folder that isn't from your vault is already there (${dest}) — adopt or remove it first`;
+          failed.push({ provider_id: id, error });
+          recordActivity({ kind: "push", skill: BUNDLED_SKILL_NAME, provider_id: id, ok: false, message: error });
           continue;
         }
         try {
