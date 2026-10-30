@@ -25,6 +25,7 @@ import path from "node:path";
 import archiver from "archiver";
 import AdmZip from "adm-zip";
 import { hashFileBuffersNormalized } from "./skillHash.ts";
+import { readManifest, writeManifest } from "./vault.ts";
 
 export function defaultStageDir(vaultPath: string): string {
   return path.resolve(vaultPath, "..", ".claude-desktop-packages");
@@ -74,7 +75,15 @@ export async function packageForClaudeDesktop(
   stageDir: string,
   skillName: string,
 ): Promise<string> {
-  const skillFolder = path.join(vaultPath, "skills", skillName);
+  return packageFolderForClaudeDesktop(path.join(vaultPath, "skills", skillName), stageDir, skillName);
+}
+
+/** Zip any skill folder in the claude.ai upload format (used for the bundled skill-vault skill too). */
+export async function packageFolderForClaudeDesktop(
+  skillFolder: string,
+  stageDir: string,
+  skillName: string,
+): Promise<string> {
   if (!fs.existsSync(skillFolder) || !fs.statSync(skillFolder).isDirectory()) {
     throw new Error(`skill folder not found: ${skillFolder}`);
   }
@@ -92,4 +101,24 @@ export async function packageForClaudeDesktop(
     archive.finalize();
   });
   return outputPath;
+}
+
+/**
+ * Record the packaging in the skill's manifest entry. There is no API to
+ * see what's actually in the user's claude.ai account (custom skills don't
+ * sync across surfaces and can't be listed programmatically), so this
+ * record is the source of truth for desktop_status. Creates a minimal
+ * entry for disk-only skills the manifest doesn't track yet.
+ */
+export function recordDesktopPackage(
+  vaultPath: string,
+  skill: string,
+  contentHash: string,
+  packagedAt: string,
+): void {
+  const manifest = readManifest(vaultPath);
+  const entry = manifest.skills[skill] ?? { targets: [] };
+  entry.desktop_package = { packaged_at: packagedAt, content_hash: contentHash };
+  manifest.skills[skill] = entry;
+  writeManifest(vaultPath, manifest);
 }

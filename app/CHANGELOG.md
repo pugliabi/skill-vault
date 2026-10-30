@@ -37,6 +37,29 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
   and Grok get no shell (none can be limited to git, and on Windows Codex's sandbox reached the app's
   own API with its network off); Grok also gets no direct file edits. Checked live with Codex 0.144.4,
   Copilot CLI 1.0.105 and Grok 1.0.70. AI tagging and merge-on-update still use Claude Code.
+- **Agent access** (Settings → Agent access): Claude Desktop, Claude Code and any
+  agent with a shell can now work with the vault: save a skill from a chat, load a
+  vault skill, push skills to your other tools, build a Claude Desktop zip, and run
+  Notion syncs.
+  - **Claude Desktop**: **Connect** adds a `skill-vault` MCP server to
+    `claude_desktop_config.json` (backed up first; other servers untouched).
+  - **Claude Code**: **Connect** runs `claude mcp add --scope user skill-vault`;
+    status is read from `~/.claude.json`.
+  - **Other agents**: `~/.skill-vault/bin/skill-vault <tool> --file args.json`
+    (JSON arguments from a UTF-8 file or stdin, JSON out);
+    `%USERPROFILE%\.skill-vault\bin\skill-vault.cmd` for cmd and PowerShell.
+  - **The `skill-vault` skill** ships with the app. **Add to vault** adopts it and
+    pushes it to your default targets (a target that already has a `skill-vault`
+    folder of its own is left alone); install it in Claude Desktop with the zip or
+    the copy-paste prompt. **Update** appears only while your vault copy is untouched;
+    if you edited it, updates go through the Updates page and your edits are never
+    overwritten by the card.
+  - Vault tools start the app in the background when it isn't open (Windows); it
+    stops again about 10 minutes after the last call.
+  - New bridge tools: `read_skill_files`, `save_skill`, `package_for_desktop`.
+    `save_skill` refuses a `SKILL.md` path in any casing other than exactly
+    `SKILL.md`, and `read_skill_files` leaves out files under ignored folders
+    (`.git`, `node_modules`, etc.).
 
 ### Fixed
 - Notion sign-in returns to the page that started it (`POST /api/notion/connect`

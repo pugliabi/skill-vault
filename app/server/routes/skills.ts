@@ -18,6 +18,9 @@ import {
 } from "../services/vault.ts";
 import { validateSkillName } from "../services/skillName.ts";
 import { withHistory, recordVersion } from "../services/history.ts";
+import { SaveError, parseSaveRequest, saveSkill, type SaveRequest } from "../services/saveSkill.ts";
+import { AGENT_CLIENT_HEADER, clientLabel } from "../services/agentActivity.ts";
+import { refuseCrossSiteWrites } from "./sameOrigin.ts";
 import { SkillOpError, deleteVaultSkill, renameVaultSkill } from "../services/skillLifecycle.ts";
 import { OriginError, clearSkillOrigin, originBodyTooLarge, setSkillOrigin, type OriginInput } from "../services/origin.ts";
 import { fixSkillName, listNameMismatches } from "../services/skillNames.ts";
@@ -48,6 +51,7 @@ export function isSafeNameSegment(name: unknown): name is string {
  *   DELETE /api/skills/:name     — remove from manifest AND filesystem
  *   GET    /api/skills/name-mismatches      — folders whose SKILL.md `name` differs
  *   POST   /api/skills/:name/fix-name {use: "name"|"folder"} — make the two agree
+ *   POST   /api/skills/:name/save — create or update a skill from file contents (bridge save_skill)
  *
  * All routes require a configured vault and 409 with "vault not
  * configured" otherwise so the client can redirect to /setup.
@@ -466,6 +470,65 @@ export function skillsRouter(opts: { isBusy?: () => boolean } = {}): Router {
     // without an extra round-trip.
     const after = readSkillFile(abs);
     res.json({ sha256: after.sha256, size: after.size });
+  });
+
+  /**
+   * POST /:name/save — create or update a skill from file contents (the
+   * bridge's save_skill tool; services/saveSkill.ts has the rules).
+   *
+   * Body: { mode: "create" | "update", files: [{ path, content, expected_sha256? }] }
+   * index.ts raises the JSON limit for this path (up to 5 MB of files).
+   * The X-Skill-Vault-Client header names who saved it, for `source` and
+   * the activity log.
+   */
+  router.post("/:name/save", refuseCrossSiteWrites, (req, res) => {
+    const cfg = readAppConfig();
+    if (!cfg.vault_path) {
+      res.status(409).json({ error: "vault not configured" });
+      return;
+    }
+    const vaultPath = cfg.vault_path;
+    const name = req.params.name;
+    if (!isSafeNameSegment(name)) {
+      res.status(400).json({ error: "invalid skill name" });
+      return;
+    }
+    let body: SaveRequest;
+    try {
+      body = parseSaveRequest(req.body);
+    } catch (err) {
+      res.status((err as SaveError).status ?? 400).json({ error: (err as Error).message });
+      return;
+    }
+    const source = `saved from ${clientLabel(req.get(AGENT_CLIENT_HEADER))}`;
+    const kind = body.mode === "create" ? "adopt" : "update";
+    try {
+      const result =
+        body.mode === "update"
+          ? withHistory(vaultPath, name, "vault-edit", () => saveSkill(vaultPath, name, body, source))
+          : saveSkill(vaultPath, name, body, source);
+      if (body.mode === "create") {
+        try {
+          recordVersion(vaultPath, name, { source: "vault-edit", note: "created" });
+        } catch (err) {
+          console.error(`[history] save ${name}: ${(err as Error).message}`);
+        }
+      }
+      recordActivity({
+        kind,
+        skill: name,
+        ok: true,
+        message: body.mode === "create" ? source : `${source} (${result.written.length} files)`,
+      });
+      res.status(body.mode === "create" ? 201 : 200).json(result);
+    } catch (err) {
+      if (err instanceof SaveError) {
+        res.status(err.status).json({ error: err.message, ...(err.conflicts ? { conflicts: err.conflicts } : {}) });
+        return;
+      }
+      recordActivity({ kind, skill: name, ok: false, message: (err as Error).message });
+      throw err;
+    }
   });
 
   /**

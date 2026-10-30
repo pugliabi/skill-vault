@@ -7,6 +7,7 @@ import { Layout } from "../components/Layout";
 import { Icon } from "../components/ui/icons";
 import { Button, ProviderChip, Rule } from "../components/ui/primitives";
 import ImportVaultDialog from "../components/ImportVaultDialog";
+import { AgentAccessCard } from "../components/AgentAccessCard";
 import { NotionSection } from "../components/NotionSection";
 import { assistantApi } from "../lib/assistant";
 import { ProviderSettings } from "../components/assistant/ProviderSettings";
@@ -46,6 +47,8 @@ export default function Settings() {
             Run setup guide…
           </Button>
         </div>
+
+        <AgentAccessCard />
 
         <Rule label="Vault" />
         <VaultSection config={config} qc={qc} />

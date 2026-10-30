@@ -7,6 +7,11 @@
      bound to 127.0.0.1 (a desktop app; the health probe and window use it).
   3. Open an Edge app window (default browser if Edge isn't installed).
 
+  -Headless (used by the vault bridge for Claude Desktop, Claude Code and
+  the skill-vault command): steps 1-2 only, no window. Failures go to the
+  log and exit 1 without a message box, so repeated agent calls don't
+  stack dialogs.
+
   Steps 1-3 run one launch at a time per user (a named mutex), so quick
   double-clicks reuse the first server instead of starting a second one or
   rebuilding dist/ twice.
@@ -14,6 +19,7 @@
   Steps go to ~/.skill-vault/logs/launch.log; any failure shows a message box
   naming the log. Windows PowerShell 5.1 compatible.
 #>
+param([switch]$Headless)
 $ErrorActionPreference = 'Stop'
 $AppDir    = Split-Path -Parent $PSScriptRoot
 $SvDir     = Join-Path $env:USERPROFILE '.skill-vault'
@@ -29,6 +35,7 @@ function Write-Log([string]$Message) {
 
 function Stop-WithError([string]$Message) {
   Write-Log "ERROR: $Message"
+  if ($Headless) { exit 1 }
   Add-Type -AssemblyName PresentationFramework
   [System.Windows.MessageBox]::Show("$Message`n`nDetails: $LaunchLog", 'Skill Vault', 'OK', 'Error') | Out-Null
   exit 1
@@ -94,7 +101,7 @@ function Open-AppWindow([int]$Port) {
 }
 
 try {
-  Write-Log '--- launch'
+  Write-Log $(if ($Headless) { '--- launch (headless)' } else { '--- launch' })
   # One launch at a time: a second click waits here, then finds the first
   # click's server and reuses it. A launcher that died holding the mutex
   # leaves it abandoned, which the next WaitOne reports and we take over.
@@ -128,6 +135,15 @@ try {
         Pop-Location
       }
 
+      if ($Headless) {
+        # A bridge started this launch, so this is the calling agent's
+        # environment. Give the server the user's own PATH, and drop Claude
+        # Code's session markers so the server and the in-app assistant's
+        # claude don't run as if inside that session.
+        $env:Path = ((@([Environment]::GetEnvironmentVariable('Path', 'Machine'), [Environment]::GetEnvironmentVariable('Path', 'User')) -split ';') | Where-Object { $_ }) -join ';'
+        @(Get-ChildItem Env: | Where-Object { $_.Name -eq 'CLAUDECODE' -or $_.Name -like 'CLAUDE_CODE_*' }) | ForEach-Object { Remove-Item -LiteralPath "Env:$($_.Name)" }
+        Write-Log 'headless: the server gets the user PATH and no Claude Code session variables'
+      }
       $env:NODE_ENV = 'production'
       # 127.0.0.1 explicitly: a HOST setting (.env or config) must not move the
       # server somewhere the health probe below can't reach.
@@ -140,7 +156,7 @@ try {
       }
       Write-Log "started the server (pid $($live.pid), port $($live.port))"
     }
-    Open-AppWindow ([int]$live.port)
+    if ($Headless) { Write-Log 'headless: no window' } else { Open-AppWindow ([int]$live.port) }
   } finally {
     if ($owned) { $mutex.ReleaseMutex() }
     $mutex.Dispose()

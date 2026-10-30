@@ -71,6 +71,16 @@ Only when you press **Finish** with "Use an API key" chosen, and then only in `~
 **Can I use a vault that lives inside a bigger repo?**
 Yes. When you clone from GitHub, the guide finds `skills.json` at the repo root or one folder down (like `agent-skills/skills/`) and uses that folder as the vault. If it finds two candidates it asks which one; if it finds none, it offers to use the repo root as a new vault.
 
+**Can Claude Desktop save skills to my vault?**
+Yes. In Settings → Agent access, connect Claude Desktop and install the `skill-vault` skill (zip or
+copy-paste prompt). Then ask a Desktop chat to "save this skill to my vault". Before it changes a skill
+that's already in your vault, the skill tells it to show you the changes and ask first, and every update
+is kept in the skill's version history.
+
+**Why do I have to restart Claude Desktop after connecting?**
+Claude Desktop reads its MCP servers only when it starts. Quit it from the tray icon (closing the
+window isn't enough) and reopen it.
+
 ### Why does Grok ask me to sign in again inside Skill Vault?
 Grok Build reads MCP servers from your other tools' configs (Claude, Cursor). Skill Vault runs Grok with its
 own home folder that holds only the vault tools, so your other servers can't join a chat — and that folder
