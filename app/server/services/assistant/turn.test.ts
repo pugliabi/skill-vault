@@ -189,7 +189,7 @@ test("runTurn still returns its result and deletes the other temp files when one
     return { code: 0, stderr: "" };
   }) as ClaudeStreamRunner;
   const result = await runTurn({
-    spec: { label: "codex CLI", args: [], stdin: "x", cwd: "C:\vault", tempFiles: [dir, second] },
+    spec: { label: "codex CLI", args: [], stdin: "x", cwd: "C:\\vault", tempFiles: [dir, second] },
     parser: { parse: (l) => (l === "done" ? [{ type: "turn_end", cost_usd: 0.5 }] : []), engineSessionId: () => "thread-1" },
     authHint: (m) => m,
     abort: new AbortController(),
