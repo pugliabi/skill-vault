@@ -101,23 +101,17 @@ test("detect and authStatus never throw", async () => {
   assert.equal((await engine.authStatus({ auth: "login" })).signed_in, null);
 });
 
-test("parser: the hand-written Grok fixture maps tools to the shared vocabulary", () => {
+test("parser: the recorded Grok turn (grok 1.0.70) — skill read, tool search, the vault call, the reply", () => {
   const p = createGrokEngine(deps({})).createParser();
   const events = fs.readFileSync(FIXTURE, "utf-8").split(/\r?\n/).filter(Boolean).flatMap((l) => p.parse(l));
-  assert.deepEqual(events.map((e) => e.type), [
-    "session", "text_delta", "tool_start", "tool_result", "tool_start", "tool_result", "tool_start", "tool_result", "text_delta", "turn_end",
-  ]);
-  assert.ok(events.some((e) => e.type === "tool_start" && e.name === "mcp__vault__list_skills"));
-  const shell = events.find((e) => e.type === "tool_start" && e.name === "Bash");
-  const write = events.find((e) => e.type === "tool_start" && e.name === "Write");
-  assert.ok(shell?.type === "tool_start" && shell.label === "Running: hostname");
-  assert.ok(write?.type === "tool_start");
-  for (const start of [shell, write]) {
-    const r = events.find((e) => e.type === "tool_result" && start?.type === "tool_start" && e.tool_use_id === start.tool_use_id);
-    assert.ok(r?.type === "tool_result" && r.ok === false, "an is_error result is a refusal");
-  }
+  assert.equal(events[0].type, "session");
+  const starts = events.flatMap((e) => (e.type === "tool_start" ? [`${e.name}|${e.label}`] : []));
+  assert.deepEqual(starts, ["Read|Reading skills/vault-operations/SKILL.md", "ToolSearch|Loading tools", "mcp__vault__list_skills|vault: list_skills"]);
+  assert.ok(events.filter((e) => e.type === "tool_result").every((e) => e.type === "tool_result" && e.ok));
+  const reply = events.flatMap((e) => (e.type === "text_delta" ? [e.text] : [])).join("");
+  assert.match(reply, /281/);
   const end = events.at(-1);
-  assert.ok(end?.type === "turn_end" && end.cost_usd === 0.0042, "cost comes from the result record");
+  assert.ok(end?.type === "turn_end" && end.cost_usd === 0.04337652, "cost comes from the result record");
 });
 
 test("parser: Grok's live use_tool shape and a cancelled turn's error", () => {
