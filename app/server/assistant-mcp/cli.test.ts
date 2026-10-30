@@ -1,8 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { PassThrough } from "node:stream";
 import type { BridgeHttp } from "./bridge.ts";
-import { listTools, parseBridgeArgs, readStdinWithin, runCommand } from "./cli.ts";
+import { defaultClient, listTools, parseBridgeArgs, readStdinWithin, runCommand } from "./cli.ts";
 
 const noSleep = async (): Promise<void> => {};
 const httpReturning = (json: unknown, status = 200): BridgeHttp & { calls: unknown[] } => {
@@ -15,10 +18,48 @@ const httpReturning = (json: unknown, status = 200): BridgeHttp & { calls: unkno
   return http;
 };
 
-test("parseBridgeArgs reads --client and the first positional", () => {
-  assert.deepEqual(parseBridgeArgs([]), { client: "assistant", command: null });
-  assert.deepEqual(parseBridgeArgs(["--client", "claude-desktop"]), { client: "claude-desktop", command: null });
-  assert.deepEqual(parseBridgeArgs(["--client=command", "list_skills", "extra"]), { client: "command", command: "list_skills" });
+test("parseBridgeArgs reads --client, --file and the first positional", () => {
+  assert.deepEqual(parseBridgeArgs([], "assistant"), { client: "assistant", command: null, file: null });
+  assert.deepEqual(parseBridgeArgs(["--client", "claude-desktop"], "agent"), { client: "claude-desktop", command: null, file: null });
+  assert.deepEqual(parseBridgeArgs(["--client=command", "list_skills", "extra"], "agent"), { client: "command", command: "list_skills", file: null });
+  assert.deepEqual(parseBridgeArgs(["save_skill", "--file", "args.json"], "agent"), { client: "agent", command: "save_skill", file: "args.json" });
+  assert.deepEqual(parseBridgeArgs(["--file=a b.json", "save_skill"], "agent"), { client: "agent", command: "save_skill", file: "a b.json" });
+});
+
+test("without --client the bridge is the assistant only when SKILL_VAULT_URL is set", () => {
+  assert.equal(defaultClient({ SKILL_VAULT_URL: "http://127.0.0.1:5173" }), "assistant");
+  assert.equal(defaultClient({}), "agent");
+  assert.equal(parseBridgeArgs([], defaultClient({})).client, "agent");
+  assert.equal(parseBridgeArgs(["--client", "claude-code"], defaultClient({})).client, "claude-code");
+});
+
+test("runCommand reads --file as UTF-8, UTF-8 with a BOM, or UTF-16LE with a BOM", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sv-cli-"));
+  try {
+    const json = '{"query":"café ✓"}';
+    const files: Array<[string, Buffer]> = [
+      ["utf8.json", Buffer.from(json, "utf-8")],
+      ["utf8-bom.json", Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(json, "utf-8")])],
+      ["utf16le-bom.json", Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(json, "utf16le")])],
+    ];
+    for (const [name, bytes] of files) {
+      fs.writeFileSync(path.join(dir, name), bytes);
+      const http = httpReturning({ matches: [] });
+      const r = await runCommand("search_skills", { file: path.join(dir, name) }, http, noSleep);
+      assert.deepEqual(r, { code: 0, out: { matches: [] } }, name);
+      assert.equal((http.calls[0] as { path: string }).path, `/api/skills/search?q=${encodeURIComponent("café ✓")}`, name);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runCommand reports a missing --file as a JSON error with exit code 1", async () => {
+  const http = httpReturning({});
+  const r = await runCommand("search_skills", { file: path.join(os.tmpdir(), "sv-cli-missing", "args.json") }, http, noSleep);
+  assert.equal(r.code, 1);
+  assert.match((r.out as { error: string }).error, /--file/);
+  assert.deepEqual(http.calls, []);
 });
 
 test("listTools gives every tool a JSON schema", () => {

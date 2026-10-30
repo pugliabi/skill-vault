@@ -16,10 +16,10 @@ import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createHttp, registerTools } from "./bridge.ts";
-import { parseBridgeArgs, readStdinWithin, runCommand } from "./cli.ts";
+import { defaultClient, parseBridgeArgs, readStdinWithin, runCommand, type CommandInput } from "./cli.ts";
 import { createResolvingFetch, findOrStartServer, realServerDeps } from "./server.ts";
 
-const args = parseBridgeArgs(process.argv.slice(2));
+const args = parseBridgeArgs(process.argv.slice(2), defaultClient(process.env));
 
 // <app>/dist/assistant-mcp.js when built, <app>/server/assistant-mcp/main.ts in dev.
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -30,8 +30,14 @@ const http = process.env.SKILL_VAULT_URL
   : createHttp("", createResolvingFetch(() => findOrStartServer(realServerDeps(appDir))), args.client);
 
 if (args.command) {
-  const stdinText = args.command === "tools" || process.stdin.isTTY ? "" : await readStdinWithin(process.stdin, 2_000);
-  const { code, out } = await runCommand(args.command, stdinText, http, (ms) => new Promise((r) => setTimeout(r, ms)));
+  // With --file, stdin is never read (or waited on).
+  const input: CommandInput =
+    args.file !== null
+      ? { file: args.file }
+      : args.command === "tools" || process.stdin.isTTY
+        ? ""
+        : await readStdinWithin(process.stdin, 2_000);
+  const { code, out } = await runCommand(args.command, input, http, (ms) => new Promise((r) => setTimeout(r, ms)));
   process.stdout.write(JSON.stringify(out, null, 2) + "\n");
   process.exitCode = code;
 } else {
