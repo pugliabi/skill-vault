@@ -131,6 +131,35 @@ test("install: a throwing installer still ends the stream with one done line", a
   assert.deepEqual(lines, [{ type: "done", ok: false, message: "spawn exploded" }]);
 });
 
+test("install/cancel stops the running install: its stream ends with done ok:false; 404 unknown; ok when idle", async () => {
+  const { createInstaller } = await import("../services/assistant/engines/install.ts");
+  const { createEngineJobs } = await import("../services/assistant/engines/jobs.ts");
+  let kills = 0;
+  const installer = createInstaller({
+    platform: "win32",
+    npmPath: () => "npm.cmd",
+    spawnLines: (_c, _a, _o, onLine) => {
+      onLine("waiting for input…");
+      return { done: new Promise<number>(() => {}), kill: () => void kills++ };
+    },
+  });
+  const jobs = createEngineJobs({ installer });
+  const base = await serve(mod.assistantRouter({ mode: "development", appRoot: APP_ROOT, registry: reg.createRegistry([fakes.fakeEngine()]), jobs }));
+  assert.deepEqual(await (await fetch(`${base}/engines/codex/install/cancel`, send("POST", {}))).json(), { ok: true }, "nothing running is fine");
+  assert.equal((await fetch(`${base}/engines/bard/install/cancel`, send("POST", {}))).status, 404);
+  const stream = fetch(`${base}/engines/codex/install`, send("POST", {}));
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(jobs.busy(), true);
+  const crossSite = await fetch(`${base}/engines/codex/install/cancel`, { ...send("POST", {}), headers: { "content-type": "application/json", Origin: "http://evil.example" } });
+  assert.equal(crossSite.status, 403);
+  assert.equal(kills, 0);
+  assert.deepEqual(await (await fetch(`${base}/engines/codex/install/cancel`, send("POST", {}))).json(), { ok: true });
+  const lines = (await (await stream).text()).trim().split("\n").map((l) => JSON.parse(l));
+  assert.deepEqual(lines.at(-1), { type: "done", ok: false, version: "codex-cli 1.0.0", message: "The install was stopped." });
+  assert.equal(kills, 1);
+  assert.equal(jobs.busy(), false);
+});
+
 /** A sign-in manager whose window is recorded instead of opened; exit(code) is the login command ending. */
 async function signInHarness(over: { openWindow?: () => { close(): void; isOpen(): boolean } | { error: string } } = {}) {
   const { createSignInManager } = await import("../services/assistant/engines/signIn.ts");

@@ -235,6 +235,17 @@ export function assistantRouter(opts: AssistantRouterOpts): Router {
     res.end();
   });
 
+  // Stops a running install (its stream then ends with done ok:false). OK when nothing runs.
+  router.post("/engines/:id/install/cancel", (req, res) => {
+    const id = req.params.id;
+    if (!isEngineId(id) || !registry.get(id)) {
+      res.status(404).json({ error: "unknown provider" });
+      return;
+    }
+    if (jobs.installer.isRunning()) jobs.installer.stop();
+    res.json({ ok: true });
+  });
+
   router.post("/engines/:id/login", async (req, res) => {
     const id = req.params.id;
     const engine = isEngineId(id) ? registry.get(id) : undefined;

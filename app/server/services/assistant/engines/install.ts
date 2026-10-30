@@ -4,7 +4,9 @@
  * steps use the npm next to the app's own node (falling back to PATH);
  * PowerShell steps run the vendor's documented one-liner with the execution
  * policy bypassed for that one process. Windows only; elsewhere the user is
- * shown the command to run.
+ * shown the command to run. Steps get no stdin (a prompt fails instead of
+ * waiting forever), and a step still running after 10 minutes is killed, as
+ * is one the user cancels.
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -18,6 +20,8 @@ export type InstallEvent =
   | { type: "line"; text: string }
   | { type: "done"; ok: boolean; version?: string; message?: string };
 
+export const INSTALL_STEP_TIMEOUT_MS = 600_000;
+
 export interface InstallDeps {
   platform: NodeJS.Platform;
   npmPath(): string | null;
@@ -27,6 +31,7 @@ export interface InstallDeps {
     opts: { windowsVerbatimArguments?: boolean },
     onLine: (line: string) => void,
   ): { done: Promise<number | null>; kill(): void };
+  setTimer(fn: () => void, ms: number): { cancel(): void };
 }
 
 export interface Installer {
@@ -45,7 +50,8 @@ function defaultNpmPath(): string | null {
 }
 
 function defaultSpawnLines(command: string, args: string[], opts: { windowsVerbatimArguments?: boolean }, onLine: (l: string) => void) {
-  const child = spawn(command, args, { windowsHide: true, windowsVerbatimArguments: opts.windowsVerbatimArguments });
+  // No stdin: a vendor script that prompts (Read-Host) gets end-of-input instead of waiting forever.
+  const child = spawn(command, args, { windowsHide: true, windowsVerbatimArguments: opts.windowsVerbatimArguments, stdio: ["ignore", "pipe", "pipe"] });
   let pending = "";
   const feed = (chunk: unknown): void => {
     pending += String(chunk);
@@ -76,7 +82,15 @@ export function createInstaller(over: Partial<InstallDeps> = {}): Installer {
     platform: over.platform ?? process.platform,
     npmPath: over.npmPath ?? defaultNpmPath,
     spawnLines: over.spawnLines ?? defaultSpawnLines,
+    setTimer:
+      over.setTimer ??
+      ((fn, ms) => {
+        const t = setTimeout(fn, ms);
+        t.unref?.();
+        return { cancel: () => clearTimeout(t) };
+      }),
   };
+  /** The running step: stop() kills it and ends the wait at once, even if its pipes never close. */
   let current: { kill(): void } | null = null;
   let running = false;
   let stopped = false;
@@ -112,10 +126,26 @@ export function createInstaller(over: Partial<InstallDeps> = {}): Installer {
             args = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", step.script];
           }
           const proc = deps.spawnLines(command, args, { windowsVerbatimArguments: verbatim }, (text) => onEvent({ type: "line", text }));
-          current = proc;
-          const code = await proc.done;
+          let interrupt!: (why: "stopped" | "timeout") => void;
+          const interrupted = new Promise<"stopped" | "timeout">((resolve) => (interrupt = resolve));
+          const timer = deps.setTimer(() => {
+            proc.kill();
+            interrupt("timeout");
+          }, INSTALL_STEP_TIMEOUT_MS);
+          current = {
+            kill: () => {
+              proc.kill();
+              interrupt("stopped");
+            },
+          };
+          const outcome = await Promise.race([proc.done, interrupted]);
+          timer.cancel();
           current = null;
-          if (code !== 0) return { ok: false, message: `${step.label} failed (exit code ${code ?? "none"}).` };
+          if (outcome === "stopped" || stopped) return { ok: false, message: "The install was stopped." };
+          if (outcome === "timeout") {
+            return { ok: false, message: `${step.label} was still running after 10 minutes, so it was stopped. You can run the command yourself.` };
+          }
+          if (outcome !== 0) return { ok: false, message: `${step.label} failed (exit code ${outcome ?? "none"}).` };
         }
         return { ok: true };
       } finally {
