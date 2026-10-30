@@ -43,11 +43,11 @@ const INPUT: TurnInput = {
   baseEnv: { XAI_API_KEY: "stray" },
 };
 
-test("config.toml: only the vault server, Claude/Cursor imports off", () => {
+test("config.toml: only the vault server, Claude/Cursor MCP and hook imports off", () => {
   const t = grokConfigToml(MCP);
   assert.match(t, /\[mcp_servers\.vault\]\ncommand = "C:\\\\node\.exe"/);
-  assert.match(t, /\[compat\.claude\]\nmcps = false/);
-  assert.match(t, /\[compat\.cursor\]\nmcps = false/);
+  assert.match(t, /\[compat\.claude\]\nmcps = false\nhooks = false/);
+  assert.match(t, /\[compat\.cursor\]\nmcps = false\nhooks = false/);
 });
 
 test("turn: prompt file, Claude-format stream, app-owned GROK_HOME, no shell and no file writes (fail-closed)", () => {
@@ -66,7 +66,8 @@ test("turn: prompt file, Claude-format stream, app-owned GROK_HOME, no shell and
   assert.equal(after("--cwd"), "C:\\vault");
   assert.equal(after("--tools"), GROK_TOOLS);
   assert.deepEqual(GROK_TOOLS.split(","), ["read_file", "grep", "list_dir", "web_search", "web_fetch"]);
-  assert.ok(!a.includes("--allow"), "no shell rule: there is no shell tool to allow");
+  // One allow rule, for the vault's MCP tools (headless Grok cancels anything that would prompt). No shell rule.
+  assert.deepEqual(a.flatMap((x, i) => (x === "--allow" ? [a[i + 1]] : [])), ["MCPTool(vault__*)"]);
   for (const bad of [...FORBIDDEN_FLAGS, "--always-approve"]) assert.ok(!a.some((x) => x.includes(bad)), `must not pass ${bad}`);
   assert.equal(spec.env?.GROK_HOME, grokHome("C:\\Users\\me", "login"));
   assert.equal(spec.env?.XAI_API_KEY, undefined);
@@ -117,6 +118,15 @@ test("parser: the hand-written Grok fixture maps tools to the shared vocabulary"
   }
   const end = events.at(-1);
   assert.ok(end?.type === "turn_end" && end.cost_usd === 0.0042, "cost comes from the result record");
+});
+
+test("parser: Grok's live use_tool shape and a cancelled turn's error", () => {
+  const p = createGrokEngine(deps({})).createParser();
+  const call = { type: "tool_use", id: "c1", name: "use_tool", input: { tool_name: "vault__list_skills", tool_input: {} } };
+  const [start] = p.parse(JSON.stringify({ type: "assistant", message: { content: [call] } }));
+  assert.ok(start.type === "tool_start" && start.name === "mcp__vault__list_skills" && start.label === "vault: list_skills");
+  const [err] = p.parse(JSON.stringify({ type: "result", subtype: "error_during_execution", is_error: true, errors: ["cancelled"] }));
+  assert.ok(err.type === "error" && err.message.startsWith("Grok Build reported an error: cancelled"), "names Grok, not claude");
 });
 
 test("parser: a model-chosen tool name like constructor or __proto__ never throws", () => {

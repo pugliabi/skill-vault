@@ -158,11 +158,21 @@ test("canonicalTool: every engine's spelling of a vault tool becomes mcp__vault_
   for (const n of ["mcp__vault__list_skills", "vault__list_skills", "vault-list_skills"]) {
     assert.equal(canonicalTool({}, n, {}).name, "mcp__vault__list_skills");
   }
-  // Grok calls MCP tools through a use_tool meta-tool.
+  // Grok calls MCP tools through a use_tool meta-tool: { tool_name, tool_input } live, { name, arguments } in its docs.
+  assert.deepEqual(canonicalTool({}, "use_tool", { tool_name: "vault__get_skill", tool_input: { name: "pdf" } }), {
+    name: "mcp__vault__get_skill",
+    input: { name: "pdf" },
+  });
   assert.deepEqual(canonicalTool({}, "use_tool", { name: "vault__get_skill", arguments: { name: "pdf" } }), {
     name: "mcp__vault__get_skill",
     input: { name: "pdf" },
   });
+});
+
+test("a result error names a non-Claude CLI and its reason; Claude's text is unchanged", () => {
+  const line = JSON.stringify({ type: "result", is_error: true, errors: ["cancelled"] });
+  assert.deepEqual(parseStreamJsonLine(line, { cliLabel: "Grok Build", authHint: (m) => m }), [{ type: "error", message: "Grok Build reported an error: cancelled" }]);
+  assert.deepEqual(parseStreamJsonLine(line, { authHint: (m) => m }), [{ type: "error", message: "claude CLI reported an error" }]);
 });
 
 test("toolStartEvent / toolResultEvent build the same events the Claude parser emits", () => {

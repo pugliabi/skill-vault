@@ -1,9 +1,9 @@
 // app/server/services/assistant/engines/grok.ts
 /**
  * Grok Build (`grok --prompt-file … --output-format streaming-messages-json`).
- * Built from xAI's docs only: Grok wasn't run in the spike (S1–S4 unverified),
- * so the install folder, the auth.json check, the tool names and the
- * refusals are confirmed live in plan Task 20.
+ * Built from xAI's docs, then checked live with grok 1.0.70 (2026-10-30): it
+ * installs to ~/.grok/bin, `grok login` writes GROK_HOME/auth.json, and MCP
+ * calls are use_tool { tool_name: "vault__<tool>", tool_input }.
  *
  * Grok reads MCP servers only from files: its own config.toml plus
  * ~/.claude.json, Cursor's config and .mcp.json. So the app gives Grok its own
@@ -12,7 +12,7 @@
  * uses a second home that never holds a login (a stored login would outrank
  * XAI_API_KEY). Grok's streaming-messages-json is Claude's stream-json wire
  * format, so the Claude parser reads it, with Grok's tool names mapped.
- * Until the live check, Grok runs without a shell or direct file edits (see GROK_TOOLS).
+ * Grok runs without a shell or direct file edits (see GROK_TOOLS).
  */
 import path from "node:path";
 import { parseStreamJsonLine, type ToolAliases } from "../streamEvents.ts";
@@ -26,12 +26,11 @@ const KEYS = ["XAI_API_KEY"];
 const authHint = makeAuthHint(LABEL, /not (logged|signed) in|unauthori[sz]ed|\b401\b|grok login|XAI_API_KEY/i);
 
 /**
- * Headless tool allowlist, per xAI's docs (S3, unverified). MCP calls go through use_tool.
- * Fail-closed until plan Task 20 checks Grok live: no shell and no file writes, because nobody has seen
- * headless Grok refuse a non-git command or a write outside --cwd. Once the live check proves both are
- * refused, restore `search_replace,write_file,run_terminal_cmd` here, the `--allow "Bash(git *)"` pair in
- * buildTurn, and the engine note's `shell: "git"` (dropping `writes: false`); then move Grok back to the
- * git-only group in safety.test.ts.
+ * Headless tool allowlist (S3). MCP calls go through use_tool / search_tool, which --tools leaves in place.
+ * No shell and no file writes, and the live check (2026-10-30) settled that they stay off: Grok
+ * auto-approves "read-only" commands (hostname, ps, cat …) in every mode, and it imports the
+ * permissions.allow rules of ~/.claude/settings*.json and the vault repo's .claude/settings*.json
+ * (e.g. `Bash(node -e ' *)`) with no switch to turn that import off. So `Bash(git *)` can't make it git-only.
  */
 export const GROK_TOOLS = "read_file,grep,list_dir,web_search,web_fetch";
 
@@ -62,11 +61,14 @@ export function grokConfigToml(mcp: VaultMcpServer): string {
     `args = [${mcp.args.map(toml).join(", ")}]`,
     `env = { SKILL_VAULT_URL = ${toml(mcp.env.SKILL_VAULT_URL)} }`,
     "",
+    // hooks: the user's Claude/Cursor hooks must not fire on the app's turns (Claude's turns load no user settings either).
     "[compat.claude]",
     "mcps = false",
+    "hooks = false",
     "",
     "[compat.cursor]",
     "mcps = false",
+    "hooks = false",
     "",
   ].join("\n");
 }
@@ -77,7 +79,7 @@ export function createGrokEngine(deps: EngineDeps = defaultEngineDeps()): Assist
     id: "grok",
     label: LABEL,
     cliName: "grok",
-    verifiedVersion: "xAI docs only (not run yet)",
+    verifiedVersion: "grok 1.0.70",
     subagents: false,
     apiKeyEnv: KEYS,
     install: [{ kind: "powershell", label: "Install Grok Build", script: "irm https://x.ai/cli/install.ps1 | iex", source: "x.ai" }],
@@ -97,7 +99,7 @@ export function createGrokEngine(deps: EngineDeps = defaultEngineDeps()): Assist
     async authStatus(cfg): Promise<EngineAuthStatus> {
       try {
         if (cfg.auth === "api_key") return { signed_in: apiKeyPresent(cfg, deps.env, KEYS), method: "api_key" };
-        // S2 (unverified): `grok login` writes auth.json into GROK_HOME.
+        // S2 (checked live): `grok login` writes auth.json into GROK_HOME.
         return { signed_in: deps.exists(path.join(grokHome(deps.home, "login"), "auth.json")), method: "login" };
       } catch {
         return { signed_in: null, method: cfg.auth === "api_key" ? "api_key" : "login" };
@@ -134,6 +136,8 @@ export function createGrokEngine(deps: EngineDeps = defaultEngineDeps()): Assist
           ...(input.isFirstTurn ? ["-s", input.sessionId] : ["-r", input.sessionId]),
           "--cwd", input.vaultPath,
           "--tools", GROK_TOOLS,
+          // Headless Grok cancels any call that would prompt, the vault's MCP tools included.
+          "--allow", "MCPTool(vault__*)",
           "--no-auto-update",
         ],
         stdin: "",
@@ -142,7 +146,7 @@ export function createGrokEngine(deps: EngineDeps = defaultEngineDeps()): Assist
         tempFiles: [promptFile],
       };
     },
-    createParser: () => ({ parse: (line) => parseStreamJsonLine(line, { aliases: GROK_ALIASES, authHint }) }),
+    createParser: () => ({ parse: (line) => parseStreamJsonLine(line, { aliases: GROK_ALIASES, authHint, cliLabel: LABEL }) }),
     authHint,
   };
   return engine;

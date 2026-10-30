@@ -73,12 +73,12 @@ test("no engine's turn carries a bypass, yolo or allow-all flag", () => {
 test("shell: none on Copilot and Grok, git-only on Claude, sandboxed on Codex", () => {
   const byId = (id: string) => ENGINES.find((e) => e.id === id) as AssistantEngine;
   for (const args of turns(byId("copilot"))) assert.ok(!args.some((a) => a.includes("shell(")), "Copilot gets no shell permission");
-  // Grok is fail-closed until the live check (grok.ts GROK_TOOLS): no shell tool, no shell rule, no file-write tool.
+  // Grok has no shell and no file writes (grok.ts GROK_TOOLS): its only allow rule is for the vault's MCP tools.
   for (const args of turns(byId("grok"))) {
     const tools = (args[args.indexOf("--tools") + 1] ?? "").split(",");
     assert.ok(tools.includes("read_file"), "the --tools allowlist is there");
     for (const t of ["run_terminal_cmd", "write_file", "search_replace"]) assert.ok(!tools.includes(t), `Grok must not get ${t}`);
-    assert.ok(!args.includes("--allow"), "Grok gets no shell rule");
+    assert.deepEqual(args.flatMap((a, i) => (a === "--allow" ? [args[i + 1]] : [])), ["MCPTool(vault__*)"], "Grok's only allow rule");
     assert.ok(!args.some((a) => /Bash\(/.test(a)), "Grok gets no Bash(...) permission");
   }
   for (const id of ["claude"]) {

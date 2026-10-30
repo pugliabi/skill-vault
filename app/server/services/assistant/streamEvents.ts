@@ -111,9 +111,11 @@ export function canonicalTool(
   name: string,
   input: Record<string, unknown>,
 ): { name: string; input: Record<string, unknown> } {
-  if (name === "use_tool" && typeof input.name === "string") {
-    const inner = input.arguments ?? input.input;
-    return canonicalTool(aliases, input.name, inner && typeof inner === "object" ? (inner as Record<string, unknown>) : {});
+  // Grok's MCP calls: { tool_name, tool_input } live (grok 1.0.70); { name, arguments } was the docs' shape.
+  const innerName = name === "use_tool" ? firstString(input, ["tool_name", "name"]) : undefined;
+  if (innerName) {
+    const inner = input.tool_input ?? input.arguments ?? input.input;
+    return canonicalTool(aliases, innerName, inner && typeof inner === "object" ? (inner as Record<string, unknown>) : {});
   }
   const vault = name.match(VAULT_TOOL);
   if (vault) return { name: `mcp__vault__${vault[1]}`, input };
@@ -169,6 +171,7 @@ interface CliLine {
   message?: { role?: string; content?: CliContentBlock[] };
   result?: unknown;
   is_error?: boolean;
+  errors?: unknown[];
   total_cost_usd?: number;
   duration_ms?: number;
 }
@@ -206,7 +209,7 @@ export function toolResultEvent(id: string, ok: boolean, content: unknown): Assi
  */
 export function parseStreamJsonLine(
   line: string,
-  opts: { aliases?: ToolAliases; authHint?: (m: string) => string } = {},
+  opts: { aliases?: ToolAliases; authHint?: (m: string) => string; cliLabel?: string } = {},
 ): AssistantStreamEvent[] {
   let msg: CliLine;
   try {
@@ -265,7 +268,12 @@ export function parseStreamJsonLine(
 
     case "result": {
       if (msg.is_error) {
-        const message = typeof msg.result === "string" && msg.result ? msg.result : "claude CLI reported an error";
+        // Another engine's errors name it and say why (Grok: errors: ["cancelled"]); Claude's text stays as it was.
+        const why = opts.cliLabel && Array.isArray(msg.errors) ? msg.errors.filter((e) => typeof e === "string").join(", ") : "";
+        const message =
+          typeof msg.result === "string" && msg.result
+            ? msg.result
+            : `${opts.cliLabel ?? "claude CLI"} reported an error${why ? `: ${why}` : ""}`;
         return [{ type: "error", message: (opts.authHint ?? withAuthHint)(message) }];
       }
       return [
