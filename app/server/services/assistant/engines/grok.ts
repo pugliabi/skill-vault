@@ -12,6 +12,7 @@
  * uses a second home that never holds a login (a stored login would outrank
  * XAI_API_KEY). Grok's streaming-messages-json is Claude's stream-json wire
  * format, so the Claude parser reads it, with Grok's tool names mapped.
+ * Until the live check, Grok runs without a shell or direct file edits (see GROK_TOOLS).
  */
 import path from "node:path";
 import { parseStreamJsonLine, type ToolAliases } from "../streamEvents.ts";
@@ -24,8 +25,15 @@ const LABEL = "Grok Build";
 const KEYS = ["XAI_API_KEY"];
 const authHint = makeAuthHint(LABEL, /not (logged|signed) in|unauthori[sz]ed|\b401\b|grok login|XAI_API_KEY/i);
 
-/** Headless tool allowlist, per xAI's docs (S3, unverified). MCP calls go through use_tool. */
-export const GROK_TOOLS = "read_file,grep,list_dir,search_replace,write_file,run_terminal_cmd,web_search,web_fetch";
+/**
+ * Headless tool allowlist, per xAI's docs (S3, unverified). MCP calls go through use_tool.
+ * Fail-closed until plan Task 20 checks Grok live: no shell and no file writes, because nobody has seen
+ * headless Grok refuse a non-git command or a write outside --cwd. Once the live check proves both are
+ * refused, restore `search_replace,write_file,run_terminal_cmd` here, the `--allow "Bash(git *)"` pair in
+ * buildTurn, and the engine note's `shell: "git"` (dropping `writes: false`); then move Grok back to the
+ * git-only group in safety.test.ts.
+ */
+export const GROK_TOOLS = "read_file,grep,list_dir,web_search,web_fetch";
 
 export const GROK_ALIASES: ToolAliases = {
   run_terminal_cmd: "Bash",
@@ -110,7 +118,8 @@ export function createGrokEngine(deps: EngineDeps = defaultEngineDeps()): Assist
         ? composeInstructions({
             pluginDir: input.pluginDir,
             lead: input.leadAgent,
-            note: { label: LABEL, vaultToolSpelling: "vault__<tool>, called through use_tool", subagents: false, shell: "git" },
+            // Fail-closed until verified (see GROK_TOOLS): no shell, no direct file edits.
+            note: { label: LABEL, vaultToolSpelling: "vault__<tool>, called through use_tool", subagents: false, shell: "none", writes: false },
             includeLead: true,
           })
         : undefined;
@@ -125,7 +134,6 @@ export function createGrokEngine(deps: EngineDeps = defaultEngineDeps()): Assist
           ...(input.isFirstTurn ? ["-s", input.sessionId] : ["-r", input.sessionId]),
           "--cwd", input.vaultPath,
           "--tools", GROK_TOOLS,
-          "--allow", "Bash(git *)",
           "--no-auto-update",
         ],
         stdin: "",

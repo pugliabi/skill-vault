@@ -117,7 +117,12 @@ export function createEngineStates(deps: {
     async ready(id) {
       const v = await view(id);
       if (!v) return { ok: false, reason: "That assistant provider isn't available in this version of Skill Vault." };
-      if (!v.installed) return { ok: false, reason: `${v.label} isn't installed — install it in Settings → AI assistant.` };
+      if (!v.installed) {
+        return { ok: false, reason: `${v.label} isn't installed${v.reason ? ` (${v.reason})` : ""} — install it in Settings → AI assistant.` };
+      }
+      // Claude only needs to be installed, as before providers: its login check can't see Bedrock, Vertex or
+      // token sign-ins, and the CLI reports its own sign-in errors. Settings and the panel still show the hint.
+      if (v.id === "claude") return { ok: true };
       if (v.auth.mode === "api_key" && !v.auth.has_saved_key && !v.auth.env_key_present) {
         return { ok: false, reason: `${v.label} has no API key — add one in Settings → AI assistant.` };
       }

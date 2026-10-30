@@ -16,21 +16,32 @@ export interface EngineNoteOpts {
   /** How this engine spells a vault tool, e.g. "vault__<tool>". */
   vaultToolSpelling: string;
   subagents: boolean;
-  /** "git": the shell tool runs git commands only. "none": this engine has no shell tool at all (Copilot). */
+  /** "git": the shell tool runs git commands only. "none": this engine has no shell tool at all (Copilot, Grok for now). */
   shell: "git" | "none" | "sandboxed";
+  /** false: no file edit/write tool either (Grok until its limits are verified). Default true. */
+  writes?: boolean;
 }
 
 export function engineNote(o: EngineNoteOpts): string {
+  const writes = o.writes !== false;
   const shell =
     o.shell === "none"
       ? 'There is no shell tool here ("Bash" doesn\'t exist), so you can\'t run git or any other command. When these instructions call for one, use a vault tool that does the job; if none does, give the user the exact command to run themselves.'
       : o.shell === "sandboxed"
         ? 'Your shell tool stands in for "Bash". It runs in a sandbox: commands can write only inside the vault and the repos folder, and the network is on. Ask the user before anything destructive.'
         : '"Bash" is your shell tool, and only git commands are allowed.';
+  const equivalents = writes
+    ? '"Read", "Edit", "Write", "Glob", "Grep", "WebSearch" and "WebFetch" are your equivalent tools.'
+    : '"Read", "Glob", "Grep", "WebSearch" and "WebFetch" are your equivalent tools.';
   return [
     `You are running on ${o.label} inside Skill Vault, not on Claude Code.`,
-    `- Tool names in these instructions are Claude Code's. \`mcp__vault__<tool>\` is the vault MCP server's <tool> (here: ${o.vaultToolSpelling}). "Read", "Edit", "Write", "Glob", "Grep", "WebSearch" and "WebFetch" are your equivalent tools.`,
+    `- Tool names in these instructions are Claude Code's. \`mcp__vault__<tool>\` is the vault MCP server's <tool> (here: ${o.vaultToolSpelling}). ${equivalents}`,
     `- ${shell}`,
+    ...(writes
+      ? []
+      : [
+          '- You can\'t edit or create files directly here ("Edit" and "Write" don\'t exist). Make every change through the vault tools; if none does the job, tell the user exactly what to change.',
+        ]),
     o.subagents
       ? "- Subagents work as described."
       : "- Subagents (the Task/Agent tool) aren't available here. When these instructions say to delegate to a specialist, do that work yourself, following the specialist's skill.",

@@ -49,7 +49,8 @@ export function defaultEngineDeps(find: (name: string, label: string) => SpawnTa
 export async function detectWithVersion(deps: EngineDeps, target: SpawnTarget | null, env: NodeJS.ProcessEnv): Promise<EngineDetect> {
   if (!target) return { installed: false, reason: "not found on this PC" };
   const r = await deps.run(target, ["--version"], { env, timeoutMs: 20_000 });
-  const line = r.stdout.trim().split(/\r?\n/)[0]?.trim();
+  // "GitHub Copilot CLI 1.0.105." → no trailing punctuation.
+  const line = r.stdout.trim().split(/\r?\n/)[0]?.trim().replace(/[.,;:!]+$/, "");
   if (r.code === 0 && line) return { installed: true, version: line };
   const why = r.stderr.trim().split(/\r?\n/).at(-1) || `${target.label} --version failed`;
   return { installed: false, reason: why.slice(0, 200) };

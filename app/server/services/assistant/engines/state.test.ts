@@ -69,3 +69,23 @@ test("ready: not installed / signed out / no key / unknown signed-in state", asy
   // "grok" is a real EngineId, but this registry doesn't hold it.
   assert.match(((await make({}).ready("grok")) as { reason: string }).reason, /isn't available/);
 });
+
+test("ready: a not-installed reason carries the engine's own explanation", async () => {
+  const states = createEngineStates({
+    registry: createRegistry([fakeEngine({ detect: async () => ({ installed: false, reason: "claude.exe not found next to the claude.cmd shim" }) })]),
+    readBlock: () => ({}),
+    env: {},
+  });
+  assert.equal(
+    ((await states.ready("codex")) as { reason: string }).reason,
+    "Fake Codex isn't installed (claude.exe not found next to the claude.cmd shim) — install it in Settings → AI assistant.",
+  );
+});
+
+test("ready: Claude only needs to be installed — its CLI reports its own sign-in errors", async () => {
+  const claude = (over: Partial<AssistantEngine>, block = {}) =>
+    createEngineStates({ registry: createRegistry([fakeEngine({ id: "claude", label: "Claude Code", ...over })]), readBlock: () => block, env: {} });
+  assert.deepEqual(await claude({ authStatus: async () => ({ signed_in: false, method: "login" }) }).ready("claude"), { ok: true });
+  assert.deepEqual(await claude({}, { auth: "api_key" }).ready("claude"), { ok: true });
+  assert.match(((await claude({ detect: async () => ({ installed: false }) }).ready("claude")) as { reason: string }).reason, /isn't installed/);
+});

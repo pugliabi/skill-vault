@@ -11,6 +11,7 @@ import {
   createKillTree,
   createRunner,
   createStreamRunner,
+  findClaudeExe,
   parseClaudeCmdShim,
   resetClaudeAvailableCache,
   runClaudeJson,
@@ -633,6 +634,20 @@ test("createStreamRunner: a turn aborted before it starts names the target's CLI
     /codex CLI call aborted/,
   );
   assert.equal(spawned, 0);
+});
+
+test("findClaudeExe: a claude.cmd shim that wraps no exe doesn't stop the search", () => {
+  const files: Record<string, string> = {
+    [path.join("C:\\npm", "claude.cmd")]: '@"%dp0%\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe" %*',
+    [path.join("C:\\Users\\me\\.local\\bin", "claude.exe")]: "",
+  };
+  const fsLike = { exists: (p: string) => p in files, read: (p: string) => files[p] ?? "" };
+  assert.equal(findClaudeExe(["C:\\npm", "C:\\Users\\me\\.local\\bin"], fsLike), path.join("C:\\Users\\me\\.local\\bin", "claude.exe"));
+  // The same shim, now with its exe present, wins over the later folder.
+  const wrapped = path.resolve("C:\\npm\\", "node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe");
+  files[wrapped] = "";
+  assert.equal(findClaudeExe(["C:\\npm", "C:\\Users\\me\\.local\\bin"], fsLike), wrapped);
+  assert.equal(findClaudeExe(["C:\\empty"], fsLike), null);
 });
 
 test("claudeExeSearchDirs: process PATH, then the registry PATH, then ~/.local/bin", () => {

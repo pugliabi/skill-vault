@@ -1,8 +1,9 @@
 /**
  * The Global Constraints, checked across every engine at once: no bypass /
  * yolo / allow-all flag in any turn (new or resumed chat, login or API key),
- * Copilot has no shell permission at all, Claude's and Grok's shell is
- * git-only, and Codex always runs in its workspace-write sandbox.
+ * Copilot has no shell permission at all, Grok has no shell and no file-write
+ * tool (fail-closed until its live check), Claude's shell is git-only, and
+ * Codex always runs in its workspace-write sandbox.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -69,10 +70,18 @@ test("no engine's turn carries a bypass, yolo or allow-all flag", () => {
   }
 });
 
-test("shell: none on Copilot, git-only on Claude and Grok, sandboxed on Codex", () => {
+test("shell: none on Copilot and Grok, git-only on Claude, sandboxed on Codex", () => {
   const byId = (id: string) => ENGINES.find((e) => e.id === id) as AssistantEngine;
   for (const args of turns(byId("copilot"))) assert.ok(!args.some((a) => a.includes("shell(")), "Copilot gets no shell permission");
-  for (const id of ["claude", "grok"]) {
+  // Grok is fail-closed until the live check (grok.ts GROK_TOOLS): no shell tool, no shell rule, no file-write tool.
+  for (const args of turns(byId("grok"))) {
+    const tools = (args[args.indexOf("--tools") + 1] ?? "").split(",");
+    assert.ok(tools.includes("read_file"), "the --tools allowlist is there");
+    for (const t of ["run_terminal_cmd", "write_file", "search_replace"]) assert.ok(!tools.includes(t), `Grok must not get ${t}`);
+    assert.ok(!args.includes("--allow"), "Grok gets no shell rule");
+    assert.ok(!args.some((a) => /Bash\(/.test(a)), "Grok gets no Bash(...) permission");
+  }
+  for (const id of ["claude"]) {
     for (const args of turns(byId(id))) {
       const shells = args.flatMap((a) => a.match(/Bash\([^)]*\)/g) ?? []);
       assert.ok(shells.length > 0, `${id} declares its shell rule`);

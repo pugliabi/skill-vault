@@ -58,8 +58,9 @@ export function createCodexEngine(deps: EngineDeps = defaultEngineDeps()): Assis
         // S5: exit 0 and "Logged in using ChatGPT" on stdout when signed in.
         const r = await deps.run(t, ["login", "status"], { env: engine.childEnv({ auth: "login" }, deps.env), timeoutMs: 20_000 });
         if (r.code === null) return { signed_in: null, method: "login" };
-        const line = `${r.stdout}\n${r.stderr}`.trim().split(/\r?\n/)[0]?.trim();
-        return r.code === 0 ? { signed_in: true, method: "login", account: line || undefined } : { signed_in: false, method: "login" };
+        if (r.code !== 0) return { signed_in: false, method: "login" };
+        // Never the raw line: an API-key login prints part of the key ("Logged in using an API key - sk-…").
+        return /\bChatGPT\b/i.test(`${r.stdout}\n${r.stderr}`) ? { signed_in: true, method: "login", account: "ChatGPT" } : { signed_in: true, method: "login" };
       } catch {
         return { signed_in: null, method: cfg.auth === "api_key" ? "api_key" : "login" };
       }

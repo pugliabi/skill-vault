@@ -117,7 +117,8 @@ export function canonicalTool(
   }
   const vault = name.match(VAULT_TOOL);
   if (vault) return { name: `mcp__vault__${vault[1]}`, input };
-  const to = aliases[name] ?? name;
+  // Own keys only: a model-chosen name like "constructor" must not find Object.prototype's members.
+  const to = Object.hasOwn(aliases, name) ? aliases[name] : name;
   const out: Record<string, unknown> = { ...input };
   const fill = (field: string, keys: string[]): void => {
     if (!out[field]) {

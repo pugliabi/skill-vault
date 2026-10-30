@@ -111,6 +111,24 @@ export function claudeExeSearchDirs(processPath: string, registryDirs: string[],
 }
 
 /**
+ * Pure over `fs`: the first claude.exe in `dirs`, directly or behind a
+ * claude.cmd shim. A shim whose exe is missing is skipped, so a later folder
+ * (the registry PATH, ~/.local/bin) can still supply a working install.
+ */
+export function findClaudeExe(dirs: string[], fs: { exists(p: string): boolean; read(p: string): string }): string | null {
+  for (const dir of dirs) {
+    const exeCandidate = path.join(dir, "claude.exe");
+    if (fs.exists(exeCandidate)) return exeCandidate;
+    const cmdCandidate = path.join(dir, "claude.cmd");
+    if (fs.exists(cmdCandidate)) {
+      const parsed = parseClaudeCmdShim(fs.read(cmdCandidate), dir);
+      if (parsed && fs.exists(parsed)) return parsed;
+    }
+  }
+  return null;
+}
+
+/**
  * Best-effort: find the `claude` command on PATH and, if it's a `.cmd`
  * shim, resolve it to the real executable via `parseClaudeCmdShim`. Cached
  * for the process lifetime — call `resetResolvedExeCache` in tests.
@@ -125,20 +143,7 @@ export function resolveClaudeExe(): string | null {
       process.platform === "win32" ? registryPathDirs() : [],
       os.homedir(),
     );
-    for (const dir of dirs) {
-      const exeCandidate = path.join(dir, "claude.exe");
-      if (fsSync.existsSync(exeCandidate)) {
-        result = exeCandidate;
-        break;
-      }
-      const cmdCandidate = path.join(dir, "claude.cmd");
-      if (fsSync.existsSync(cmdCandidate)) {
-        const content = fsSync.readFileSync(cmdCandidate, "utf-8");
-        const parsed = parseClaudeCmdShim(content, dir);
-        if (parsed && fsSync.existsSync(parsed)) result = parsed;
-        break;
-      }
-    }
+    result = findClaudeExe(dirs, { exists: (p) => fsSync.existsSync(p), read: (p) => fsSync.readFileSync(p, "utf-8") });
   } catch {
     result = null;
   }

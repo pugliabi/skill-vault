@@ -156,6 +156,26 @@ test("runTurn maps an abort to the quiet 'stopped' error and keeps partial text 
   assert.deepEqual(emitted.map((e) => e.type), ["text_delta", "error"]);
 });
 
+test("runTurn drops a line whose parser throws and still completes the turn", async () => {
+  const emitted: AssistantStreamEvent[] = [];
+  const result = await runTurn({
+    spec: { label: "grok CLI", args: [], stdin: "", cwd: "C:\\vault" },
+    parser: {
+      parse: (l) => {
+        if (l === "boom") throw new TypeError("name.match is not a function");
+        return l === "done" ? [{ type: "turn_end" }] : [{ type: "text_delta", text: l }];
+      },
+    },
+    authHint: (m) => m,
+    abort: new AbortController(),
+    emit: (ev) => emitted.push(ev),
+    streamRunner: scriptedRunner(["hello", "boom", "done"]),
+  });
+  assert.equal(result.errorMessage, undefined);
+  assert.deepEqual(emitted.map((e) => e.type), ["text_delta", "turn_end"]);
+  assert.deepEqual(result.events.map((e) => e.type), ["text_delta", "turn_end"]);
+});
+
 test("runTurn passes the target and env through, returns the engine's session id, and deletes temp files", async () => {
   const tmp = path.join(os.tmpdir(), `sv-turn-${Date.now()}.txt`);
   fs.writeFileSync(tmp, "prompt");

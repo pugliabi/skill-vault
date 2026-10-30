@@ -89,11 +89,20 @@ test("API-key mode passes the saved key as CODEX_API_KEY", () => {
 });
 
 test("authStatus: login status exit code decides; api key mode needs a key", async () => {
-  assert.deepEqual(await createCodexEngine(deps()).authStatus({ auth: "login" }), { signed_in: true, method: "login", account: "Logged in using ChatGPT" });
+  assert.deepEqual(await createCodexEngine(deps()).authStatus({ auth: "login" }), { signed_in: true, method: "login", account: "ChatGPT" });
   const out = createCodexEngine(deps({ run: async () => ({ code: 1, stdout: "Not logged in\n", stderr: "" }) }));
   assert.equal((await out.authStatus({ auth: "login" })).signed_in, false);
   assert.equal((await out.authStatus({ auth: "api_key" })).signed_in, false);
   assert.equal((await out.authStatus({ auth: "api_key", api_key: "k" })).signed_in, true);
+});
+
+test("authStatus: the account is a fixed word, never the status line (an API-key login shows part of the key)", async () => {
+  const withKey = createCodexEngine(deps({ run: async () => ({ code: 0, stdout: "Logged in using an API key - sk-proj-***ABCD\n", stderr: "" }) }));
+  const status = await withKey.authStatus({ auth: "login" });
+  assert.deepEqual(status, { signed_in: true, method: "login" });
+  assert.ok(!JSON.stringify(status).includes("sk-"));
+  const other = createCodexEngine(deps({ run: async () => ({ code: 0, stdout: "Logged in as someone@example.com\n", stderr: "" }) }));
+  assert.deepEqual(await other.authStatus({ auth: "login" }), { signed_in: true, method: "login" });
 });
 
 test("detect and authStatus never throw when the CLI can't be run", async () => {

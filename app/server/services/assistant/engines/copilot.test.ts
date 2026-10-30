@@ -97,6 +97,10 @@ test("authStatus reads the signed-in user from config.json (camelCase, S8)", asy
   assert.equal((await createCopilotEngine(deps({ readFile: () => "{" })).authStatus({ auth: "login" })).signed_in, null);
 });
 
+test("detect: the version line loses its trailing full stop", async () => {
+  assert.deepEqual(await createCopilotEngine(deps()).detect(), { installed: true, version: "GitHub Copilot CLI 1.0.105" });
+});
+
 test("detect and authStatus never throw", async () => {
   const boom = createCopilotEngine(deps({ run: async () => { throw new Error("spawn EPERM"); } }));
   const d = await boom.detect();
@@ -131,6 +135,15 @@ test("parser: deltas, tools (vault + a denied write), one end of turn", () => {
   assert.equal(events[3].type === "tool_result" && events[3].output_preview, "Permission denied");
   const failed = createCopilotParser((m) => m).parse(JSON.stringify({ type: "result", exitCode: 1 }));
   assert.deepEqual(failed.map((e) => e.type), ["error"]);
+});
+
+test("parser: a tool named like an Object.prototype member is just a tool name", () => {
+  const p = createCopilotParser((m) => m);
+  for (const toolName of ["toString", "__proto__", "constructor", "hasOwnProperty"]) {
+    const events = p.parse(JSON.stringify({ type: "tool.execution_start", data: { toolCallId: `c-${toolName}`, toolName, arguments: {} } }));
+    assert.equal(events.length, 1);
+    assert.ok(events[0].type === "tool_start" && events[0].name === toolName && events[0].label === toolName, toolName);
+  }
 });
 
 test("parser: the recorded Copilot turn (S9) — text, the vault call, the denied write, end of turn", () => {

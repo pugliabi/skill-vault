@@ -37,6 +37,17 @@ test("engineNote says whether subagents and a shell exist", () => {
   assert.match(copilot, /There is no shell tool here/);
   assert.match(copilot, /can't run git/);
   assert.doesNotMatch(copilot, /only git commands are allowed/);
+  assert.match(copilot, /"Read", "Edit", "Write"/, "file edits exist by default");
+  assert.doesNotMatch(copilot, /can't edit or create files/);
+});
+
+test("engineNote with writes: false says there are no file edits, only the vault tools", () => {
+  const grok = engineNote({ label: "Grok Build", vaultToolSpelling: "vault__<tool>", subagents: false, shell: "none", writes: false });
+  assert.match(grok, /can't edit or create files directly here/);
+  assert.match(grok, /through the vault tools/);
+  assert.match(grok, /"Read", "Glob", "Grep", "WebSearch" and "WebFetch" are your equivalent tools/);
+  assert.doesNotMatch(grok, /"Edit", "Write"/);
+  assert.match(grok, /There is no shell tool here/);
 });
 
 test("composeInstructions: lead body (frontmatter stripped) + note + skills; or note only", () => {

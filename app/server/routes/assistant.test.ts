@@ -82,6 +82,15 @@ test("stream: an engine that isn't ready gets a 409 JSON error before any NDJSON
   assert.match(((await res.json()) as { error: string }).error, /Fake Codex isn't installed/);
 });
 
+test("status: a provider that isn't installed reports its own reason", async () => {
+  const notInstalled = fakes.fakeEngine({ detect: async () => ({ installed: false, reason: "codex --version failed" }) });
+  const base = await serve(mod.assistantRouter({ mode: "development", appRoot: APP_ROOT, registry: reg.createRegistry([notInstalled]) }));
+  await fetch(`${base}/engine`, send("PUT", { engine: "codex" }));
+  const s = (await (await fetch(`${base}/status`)).json()) as { available: boolean; reason?: string };
+  assert.equal(s.available, false);
+  assert.match(s.reason ?? "", /Fake Codex isn't installed \(codex --version failed\)/);
+});
+
 test("writes from another site are refused", async () => {
   const base = await serve(mod.assistantRouter({ mode: "development", appRoot: APP_ROOT, registry: reg.createRegistry([fakes.fakeEngine()]) }));
   const res = await fetch(`${base}/engine`, { ...send("PUT", { engine: "codex" }), headers: { "content-type": "application/json", Origin: "http://evil.example" } });

@@ -50,7 +50,7 @@ test("config.toml: only the vault server, Claude/Cursor imports off", () => {
   assert.match(t, /\[compat\.cursor\]\nmcps = false/);
 });
 
-test("turn: prompt file, Claude-format stream, app-owned GROK_HOME, git-only shell", () => {
+test("turn: prompt file, Claude-format stream, app-owned GROK_HOME, no shell and no file writes (fail-closed)", () => {
   const written: Record<string, string> = {};
   const spec = createGrokEngine(deps(written)).buildTurn(INPUT);
   const a = spec.args;
@@ -58,12 +58,15 @@ test("turn: prompt file, Claude-format stream, app-owned GROK_HOME, git-only she
   const promptFile = after("--prompt-file");
   assert.ok(spec.tempFiles?.includes(promptFile));
   assert.match(written[promptFile], /^<skill-vault-instructions>/);
+  assert.match(written[promptFile], /There is no shell tool here/);
+  assert.match(written[promptFile], /can't edit or create files directly here/);
   assert.equal(after("--output-format"), "streaming-messages-json");
   assert.ok(a.includes("--include-partial-messages"));
   assert.equal(after("-s"), INPUT.sessionId);
   assert.equal(after("--cwd"), "C:\\vault");
   assert.equal(after("--tools"), GROK_TOOLS);
-  assert.equal(after("--allow"), "Bash(git *)");
+  assert.deepEqual(GROK_TOOLS.split(","), ["read_file", "grep", "list_dir", "web_search", "web_fetch"]);
+  assert.ok(!a.includes("--allow"), "no shell rule: there is no shell tool to allow");
   for (const bad of [...FORBIDDEN_FLAGS, "--always-approve"]) assert.ok(!a.some((x) => x.includes(bad)), `must not pass ${bad}`);
   assert.equal(spec.env?.GROK_HOME, grokHome("C:\\Users\\me", "login"));
   assert.equal(spec.env?.XAI_API_KEY, undefined);
@@ -114,4 +117,17 @@ test("parser: the hand-written Grok fixture maps tools to the shared vocabulary"
   }
   const end = events.at(-1);
   assert.ok(end?.type === "turn_end" && end.cost_usd === 0.0042, "cost comes from the result record");
+});
+
+test("parser: a model-chosen tool name like constructor or __proto__ never throws", () => {
+  const p = createGrokEngine(deps({})).createParser();
+  for (const [i, name] of ["constructor", "__proto__", "toString"].entries()) {
+    const viaUseTool = { type: "tool_use", id: `u${i}`, name: "use_tool", input: { name, arguments: {} } };
+    const direct = { type: "tool_use", id: `d${i}`, name, input: {} };
+    const events = p.parse(JSON.stringify({ type: "assistant", message: { content: [viaUseTool, direct] } }));
+    assert.deepEqual(
+      events.map((e) => (e.type === "tool_start" ? `${e.name}|${e.label}` : e.type)),
+      [`${name}|${name}`, `${name}|${name}`],
+    );
+  }
 });

@@ -141,7 +141,14 @@ export async function runTurn(opts: {
         hardTimeoutMs: HARD_TIMEOUT_MS,
         signal: opts.abort.signal,
         onLine: (line) => {
-          for (const ev of opts.parser.parse(line)) handle(ev);
+          // This runs inside the child's stdout handler: a throw here would take the whole server down.
+          let events: AssistantStreamEvent[];
+          try {
+            events = opts.parser.parse(line);
+          } catch {
+            events = [];
+          }
+          for (const ev of events) handle(ev);
         },
       });
       if (!sawTerminal) {
