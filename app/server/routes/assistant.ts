@@ -1,7 +1,8 @@
 /**
  * Assistant chat endpoints.
  *
- *   GET    /api/assistant/status         — claude CLI availability + plugin dir + vault check
+ *   GET    /api/assistant/status         — selected engine readiness + plugin dir + vault check
+ *   GET    /api/assistant/engines[/:id]  — engine views; PUT /engine selects, PUT /engines/:id/auth saves auth
  *   GET    /api/assistant/auth           — sign-in mode (Claude login / API key); never the key itself
  *   PUT    /api/assistant/auth           — {auth?, api_key?, workspace_id?}; "" clears a field
  *   GET    /api/assistant/sessions       — recent chats (newest first)
@@ -21,14 +22,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { Router } from "express";
 import { readAppConfig, readAssistantBlock, writeAssistantBlock } from "../services/appConfig.ts";
-import { applyClaudeAuthPatch, claudeAuthStatus, type ClaudeAuthPatch } from "../services/claude/auth.ts";
-import { claudeAvailable, type ClaudeStreamRunner } from "../services/claude/cli.ts";
+import { applyClaudeAuthPatch, claudeAuthStatus, type ClaudeAuthConfig, type ClaudeAuthPatch } from "../services/claude/auth.ts";
+import type { ClaudeStreamRunner } from "../services/claude/cli.ts";
 import { getServerPort } from "../services/runtime.ts";
 import { buildMcpConfig } from "../services/assistant/mcpConfig.ts";
 import { buildTurnContext, gatherTurnContext, pickLeadAgent, resolveReposDir } from "../services/assistant/context.ts";
 import { runTurn } from "../services/assistant/turn.ts";
 import { defaultRegistry, engineWorkDir, type EngineRegistry } from "../services/assistant/engines/registry.ts";
-import { engineAuth, selectedEngine } from "../services/assistant/engines/config.ts";
+import { applyEngineAuthPatch, engineAuth, isEngineId, selectedEngine, withSelectedEngine } from "../services/assistant/engines/config.ts";
+import { createEngineStates, type EngineStates } from "../services/assistant/engines/state.ts";
 import type { TurnInput, TurnSpec } from "../services/assistant/engines/types.ts";
 import {
   anyTurnCapacity,
@@ -47,6 +49,7 @@ import { composeSuggestions, gatherSuggestionInputs } from "../services/assistan
 import { addDismissal, readDismissals, readSweepCache, removeDismissal } from "../services/assistant/suggestionStore.ts";
 import type { UpdateSweeper } from "../services/assistant/updateSweep.ts";
 import { broadcastSse } from "./events.ts";
+import { refuseCrossSiteWrites } from "./sameOrigin.ts";
 import type { AssistantStreamEvent } from "../services/assistant/streamEvents.ts";
 
 export interface AssistantRouterOpts {
@@ -56,6 +59,7 @@ export interface AssistantRouterOpts {
   /** The background update sweeper — lets /suggestions report + trigger it. */
   sweeper?: Pick<UpdateSweeper, "runNow" | "isRunning">;
   registry?: EngineRegistry;
+  states?: EngineStates;
   /** Tests replace the CLI spawn. */
   streamRunner?: ClaudeStreamRunner;
 }
@@ -85,32 +89,100 @@ function sanitizeChips(raw: unknown): ChatContextChip[] {
   return chips;
 }
 
+/**
+ * The body of PUT /auth and PUT /engines/:id/auth: every field that's present must be a string
+ * (an omitted field is kept, "" clears it). Returns the patch, or the error to answer 400 with.
+ */
+function parseAuthPatch(body: unknown): ClaudeAuthPatch | string {
+  const b = (body ?? {}) as Record<string, unknown>;
+  const patch: ClaudeAuthPatch = {};
+  for (const k of ["auth", "api_key", "workspace_id"] as const) {
+    if (b[k] === undefined) continue;
+    if (typeof b[k] !== "string") return `${k} must be a string`;
+    (patch as Record<string, string>)[k] = b[k] as string;
+  }
+  return patch;
+}
+
 export function assistantRouter(opts: AssistantRouterOpts): Router {
   const router = Router();
+  router.use(refuseCrossSiteWrites);
   const registry = opts.registry ?? defaultRegistry();
+  const states = opts.states ?? createEngineStates({ registry, readBlock: readAssistantBlock });
+
+  /** Claude's fields, for PUT /auth and PUT /engines/claude/auth alike. Throws on a bad auth value. */
+  const saveClaudeAuth = (patch: ClaudeAuthPatch): ClaudeAuthConfig => {
+    const next = applyClaudeAuthPatch(readAssistantBlock(), patch);
+    writeAssistantBlock(next);
+    states.invalidate("claude");
+    return next;
+  };
   const pluginDir = path.join(opts.appRoot, "assistant-plugin");
 
   router.get("/status", async (req, res) => {
-    const refresh = req.query.refresh === "1" || req.query.refresh === "true";
-    if (refresh) {
-      const { resetClaudeAvailableCache } = await import("../services/claude/cli.ts");
-      resetClaudeAvailableCache();
-    }
     const cfg = readAppConfig();
-    const claude = await claudeAvailable();
+    const id = selectedEngine(readAssistantBlock());
+    const view = await states.view(id, { refresh: req.query.refresh === "1" || req.query.refresh === "true" });
     const plugin = fs.existsSync(path.join(pluginDir, ".claude-plugin", "plugin.json"));
-    const available = claude.available && plugin && Boolean(cfg.vault_path);
-    res.json({
-      available,
-      version: claude.version,
-      reason: !cfg.vault_path
-        ? "vault not configured"
-        : !claude.available
-          ? claude.reason
-          : !plugin
-            ? "assistant plugin bundle missing"
-            : undefined,
-    });
+    const ready = await states.ready(id);
+    const reason = !cfg.vault_path
+      ? "vault not configured"
+      : !plugin
+        ? "assistant plugin bundle missing"
+        : ready.ok
+          ? undefined
+          : ready.reason;
+    res.json({ available: !reason, engine: id, label: view?.label ?? id, version: view?.version ?? undefined, reason });
+  });
+
+  router.get("/engines", async (req, res) => {
+    res.json({ engines: await states.views({ refresh: req.query.refresh === "1" }) });
+  });
+
+  router.get("/engines/:id", async (req, res) => {
+    const id = req.params.id;
+    const mode = req.query.mode === "login" || req.query.mode === "api_key" ? req.query.mode : undefined;
+    const view = isEngineId(id) ? await states.view(id, { refresh: req.query.refresh === "1", mode }) : null;
+    if (!view) {
+      res.status(404).json({ error: "unknown provider" });
+      return;
+    }
+    res.json(view);
+  });
+
+  router.put("/engine", (req, res) => {
+    const id = (req.body ?? {}).engine;
+    if (!isEngineId(id) || !registry.get(id)) {
+      res.status(400).json({ error: "unknown provider" });
+      return;
+    }
+    writeAssistantBlock(withSelectedEngine(readAssistantBlock(), id));
+    res.json({ engine: id });
+  });
+
+  router.put("/engines/:id/auth", async (req, res) => {
+    const id = req.params.id;
+    if (!isEngineId(id) || !registry.get(id)) {
+      res.status(404).json({ error: "unknown provider" });
+      return;
+    }
+    const patch = parseAuthPatch(req.body);
+    if (typeof patch === "string") {
+      res.status(400).json({ error: patch });
+      return;
+    }
+    try {
+      if (id === "claude") {
+        saveClaudeAuth(patch); // the same path as PUT /auth
+      } else {
+        writeAssistantBlock(applyEngineAuthPatch(readAssistantBlock(), id, { auth: patch.auth, api_key: patch.api_key }));
+        states.invalidate(id);
+      }
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+      return;
+    }
+    res.json(await states.view(id));
   });
 
   router.get("/auth", (_req, res) => {
@@ -118,24 +190,18 @@ export function assistantRouter(opts: AssistantRouterOpts): Router {
   });
 
   router.put("/auth", (req, res) => {
-    const body = (req.body ?? {}) as Record<string, unknown>;
-    const patch: ClaudeAuthPatch = {};
-    for (const k of ["auth", "api_key", "workspace_id"] as const) {
-      if (body[k] === undefined) continue;
-      if (typeof body[k] !== "string") {
-        res.status(400).json({ error: `${k} must be a string` });
-        return;
-      }
-      (patch as Record<string, string>)[k] = body[k] as string;
+    const patch = parseAuthPatch(req.body);
+    if (typeof patch === "string") {
+      res.status(400).json({ error: patch });
+      return;
     }
-    let next;
+    let next: ClaudeAuthConfig;
     try {
-      next = applyClaudeAuthPatch(readAssistantBlock(), patch);
+      next = saveClaudeAuth(patch);
     } catch (err) {
       res.status(400).json({ error: (err as Error).message });
       return;
     }
-    writeAssistantBlock(next);
     res.json(claudeAuthStatus(next));
   });
 
@@ -288,6 +354,11 @@ export function assistantRouter(opts: AssistantRouterOpts): Router {
     const engine = registry.get(engineId);
     if (!engine) {
       res.status(409).json({ error: "That assistant provider isn't available in this version of Skill Vault." });
+      return;
+    }
+    const ready = await states.ready(engineId);
+    if (!ready.ok) {
+      res.status(409).json({ error: ready.reason });
       return;
     }
 
