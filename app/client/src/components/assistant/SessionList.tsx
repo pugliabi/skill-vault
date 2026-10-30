@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { assistantApi, type SessionSummary } from "../../lib/assistant";
+import { useQuery } from "@tanstack/react-query";
+import { ENGINE_SHORT, assistantApi, type SessionSummary } from "../../lib/assistant";
 import { timeAgo } from "../../lib/status";
 import { Icon } from "../ui/icons";
 
@@ -24,6 +25,8 @@ export function SessionList({
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
   const [error, setError] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const { data: eng } = useQuery({ queryKey: ["assistant-engines"], queryFn: () => assistantApi.engines() });
+  const current = eng?.engines.find((e) => e.selected)?.id ?? "claude";
 
   useEffect(() => {
     let alive = true;
@@ -145,6 +148,7 @@ export function SessionList({
               <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--ink-4)" }}>
                 {s.running ? "running…" : timeAgo(s.last_at)}
                 {s.total_cost_usd > 0 ? ` · $${s.total_cost_usd.toFixed(2)}` : ""}
+                {s.engine && s.engine !== current ? ` · ${ENGINE_SHORT[s.engine]}` : ""}
               </div>
             </div>
             <button
