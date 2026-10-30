@@ -2,10 +2,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import path from "node:path";
+import type { SpawnOptions } from "node:child_process";
 import {
   ClaudeError,
   buildWindowsShellInvocation,
   claudeAvailable,
+  claudeExeSearchDirs,
   createKillTree,
   createRunner,
   createStreamRunner,
@@ -579,4 +581,65 @@ test("createStreamRunner enforces the hard cap even while lines keep flowing", a
     clearInterval(feeder);
   }
   assert.deepEqual(killCalls, [child]);
+});
+
+test("createStreamRunner with a target spawns it directly, with its prefix args and env, and names it in errors", async () => {
+  const child = makeFakeChild(601);
+  const seen: Array<{ command: string; args: string[]; options: SpawnOptions }> = [];
+  const runner = createStreamRunner(
+    (command, args, options) => {
+      seen.push({ command, args, options });
+      return child;
+    },
+    () => {},
+    {
+      resolveExe: () => {
+        throw new Error("the claude resolver must not run for a target");
+      },
+      platform: "win32",
+      env: () => ({ CLAUDE_ONLY: "1" }),
+    },
+  );
+  const p = runner(["exec", "--json"], "line one\nline two", {
+    cwd: "C:\vault",
+    target: { command: "C:\node\node.exe", prefixArgs: ["C:\npm\codex.js"], label: "codex CLI" },
+    env: { ONLY: "this" },
+    idleTimeoutMs: 20,
+    hardTimeoutMs: 10_000,
+    onLine: () => {},
+  });
+  await assert.rejects(p, /codex CLI produced no output/);
+  assert.equal(seen[0].command, "C:\node\node.exe");
+  assert.deepEqual(seen[0].args, ["C:\npm\codex.js", "exec", "--json"]);
+  assert.deepEqual(seen[0].options.env, { ONLY: "this" });
+  assert.equal(seen[0].options.shell, undefined);
+  assert.equal(child.writtenStdin, "line one\nline two");
+});
+
+test("createStreamRunner: a turn aborted before it starts names the target's CLI and spawns nothing", async () => {
+  let spawned = 0;
+  const runner = createStreamRunner(() => (spawned++, makeFakeChild()), () => {}, { platform: "win32" });
+  const abort = new AbortController();
+  abort.abort();
+  await assert.rejects(
+    runner([], "", {
+      cwd: "C:\vault",
+      target: { command: "C:\codex.exe", prefixArgs: [], label: "codex CLI" },
+      signal: abort.signal,
+      idleTimeoutMs: 1000,
+      hardTimeoutMs: 1000,
+      onLine: () => {},
+    }),
+    /codex CLI call aborted/,
+  );
+  assert.equal(spawned, 0);
+});
+
+test("claudeExeSearchDirs: process PATH, then the registry PATH, then ~/.local/bin", () => {
+  assert.deepEqual(claudeExeSearchDirs(`C:\a${path.delimiter}C:\b`, ["C:\reg"], "C:\Users\me"), [
+    "C:\a",
+    "C:\b",
+    "C:\reg",
+    path.join("C:\Users\me", ".local", "bin"),
+  ]);
 });
