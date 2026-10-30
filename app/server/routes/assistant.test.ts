@@ -131,17 +131,32 @@ test("install: a throwing installer still ends the stream with one done line", a
   assert.deepEqual(lines, [{ type: "done", ok: false, message: "spawn exploded" }]);
 });
 
-/** A sign-in manager whose window is recorded instead of opened. */
+/** A sign-in manager whose window is recorded instead of opened; exit(code) is the login command ending. */
 async function signInHarness(over: { openWindow?: () => { close(): void; isOpen(): boolean } | { error: string } } = {}) {
   const { createSignInManager } = await import("../services/assistant/engines/signIn.ts");
   const { createEngineJobs } = await import("../services/assistant/engines/jobs.ts");
-  const win = { opened: 0, closed: 0 };
+  const win = { opened: 0, closed: 0, open: false, code: null as number | null };
   const signIn = createSignInManager({
     platform: "win32",
-    openWindow: over.openWindow ?? (() => (win.opened++, { isOpen: () => true, close: () => void win.closed++ })),
+    openWindow:
+      over.openWindow ??
+      (() => {
+        win.opened++;
+        win.open = true;
+        win.code = null;
+        return {
+          isOpen: () => win.open,
+          close: () => void (win.open = false, win.closed++),
+          exitCode: () => (win.open ? null : win.code),
+        };
+      }),
     setTimer: () => ({ cancel: () => {} }),
   });
-  return { win, jobs: createEngineJobs({ signIn }) };
+  const exit = (code: number) => {
+    win.open = false;
+    win.code = code;
+  };
+  return { win, exit, jobs: createEngineJobs({ signIn }) };
 }
 
 test("login: opens the window, and the window closes once the engine reports signed in", async () => {
@@ -149,13 +164,36 @@ test("login: opens the window, and the window closes once the engine reports sig
   const { win, jobs } = await signInHarness();
   const engine = fakes.fakeEngine({ authStatus: async () => ({ signed_in: signedIn, method: "login" }) });
   const base = await serve(mod.assistantRouter({ mode: "development", appRoot: APP_ROOT, registry: reg.createRegistry([engine]), jobs }));
-  assert.deepEqual(await (await fetch(`${base}/engines/codex/login`, send("POST", {}))).json(), { started: true, hint: "Do the thing." });
+  assert.deepEqual(await (await fetch(`${base}/engines/codex/login`, send("POST", {}))).json(), {
+    started: true,
+    hint: "Do the thing.",
+    already_signed_in: false,
+  });
   assert.equal(win.opened, 1);
-  await fetch(`${base}/engines/codex?refresh=1`);
+  const waiting = (await (await fetch(`${base}/engines/codex?refresh=1`)).json()) as { sign_in: unknown };
+  assert.deepEqual(waiting.sign_in, { open: true, exit_code: null, already_signed_in: false });
   assert.equal(win.closed, 0);
   signedIn = true;
   await fetch(`${base}/engines/codex?refresh=1&mode=login`);
   assert.equal(win.closed, 1);
+});
+
+test("login when already signed in (Sign in again): signed_in never closes the window; its exit code decides", async () => {
+  const { win, exit, jobs } = await signInHarness();
+  const engine = fakes.fakeEngine({ authStatus: async () => ({ signed_in: true, method: "login", account: "me" }) });
+  const base = await serve(mod.assistantRouter({ mode: "development", appRoot: APP_ROOT, registry: reg.createRegistry([engine]), jobs }));
+  const started = (await (await fetch(`${base}/engines/codex/login`, send("POST", {}))).json()) as { already_signed_in: boolean };
+  assert.equal(started.already_signed_in, true);
+  const poll = async () => ((await (await fetch(`${base}/engines/codex?refresh=1&mode=login`)).json()) as { sign_in: unknown }).sign_in;
+  assert.deepEqual(await poll(), { open: true, exit_code: null, already_signed_in: true });
+  assert.equal(win.closed, 0, "a signed-in reading doesn't close the window mid-login");
+  exit(0);
+  assert.deepEqual(await poll(), { open: false, exit_code: 0, already_signed_in: true }, "exit 0: finished");
+  assert.equal(win.closed, 0);
+
+  await fetch(`${base}/engines/codex/login`, send("POST", {}));
+  exit(1);
+  assert.deepEqual(await poll(), { open: false, exit_code: 1, already_signed_in: true }, "exit 1: reported as failed");
 });
 
 test("login/cancel closes the window", async () => {
@@ -166,6 +204,17 @@ test("login/cancel closes the window", async () => {
   assert.deepEqual(await (await fetch(`${base}/engines/codex/login/cancel`, send("POST", {}))).json(), { ok: true });
   assert.equal(win.closed, 1);
   assert.equal(jobs.signIn.pending(), false);
+});
+
+test("login/cancel for another provider leaves the open window alone", async () => {
+  const { win, jobs } = await signInHarness();
+  const registry = reg.createRegistry([fakes.fakeEngine(), fakes.fakeEngine({ id: "copilot", label: "Fake Copilot" })]);
+  const base = await serve(mod.assistantRouter({ mode: "development", appRoot: APP_ROOT, registry, jobs }));
+  await fetch(`${base}/engines/codex/login`, send("POST", {}));
+  assert.deepEqual(await (await fetch(`${base}/engines/copilot/login/cancel`, send("POST", {}))).json(), { ok: true });
+  assert.equal(win.closed, 0);
+  assert.equal(jobs.signIn.current(), "codex");
+  assert.equal((await fetch(`${base}/engines/bard/login/cancel`, send("POST", {}))).status, 404);
 });
 
 test("login: a request whose Host isn't this PC gets 403 and no window", async () => {

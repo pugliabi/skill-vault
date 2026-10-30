@@ -151,8 +151,13 @@ export function assistantRouter(opts: AssistantRouterOpts): Router {
       res.status(404).json({ error: "unknown provider" });
       return;
     }
-    if (view.auth.mode === "login" && view.auth.signed_in === true && jobs.signIn.current() === view.id) jobs.signIn.finish(view.id);
-    res.json(view);
+    // The sign-in window for this provider, if any. One started already signed in proves itself only by
+    // exiting 0, so signed_in never closes it.
+    const signIn = jobs.signIn.state(view.id);
+    if (signIn?.open && !signIn.already_signed_in && view.auth.mode === "login" && view.auth.signed_in === true) {
+      jobs.signIn.finish(view.id);
+    }
+    res.json({ ...view, sign_in: jobs.signIn.state(view.id) });
   });
 
   router.put("/engine", (req, res) => {
@@ -230,7 +235,7 @@ export function assistantRouter(opts: AssistantRouterOpts): Router {
     res.end();
   });
 
-  router.post("/engines/:id/login", (req, res) => {
+  router.post("/engines/:id/login", async (req, res) => {
     const id = req.params.id;
     const engine = isEngineId(id) ? registry.get(id) : undefined;
     if (!engine) {
@@ -241,18 +246,27 @@ export function assistantRouter(opts: AssistantRouterOpts): Router {
       res.status(403).json({ error: "sign-in can only be started from this PC" });
       return;
     }
+    // "Sign in again": when the login already reads as signed in, only the window's exit code can say it worked.
+    const before = await states.view(engine.id, { mode: "login" });
+    const alreadySignedIn = before?.auth.signed_in === true;
     const env = { ...engine.childEnv({ auth: "login" }, process.env), ...engine.loginEnv() };
-    const r = jobs.signIn.start(engine, env);
+    const r = jobs.signIn.start(engine, env, { alreadySignedIn });
     if ("error" in r) {
       res.status(r.reason === "spawn_failed" ? 500 : 409).json({ error: r.error });
       return;
     }
     states.invalidate(engine.id);
-    res.json({ started: true, hint: engine.loginHint });
+    res.json({ started: true, hint: engine.loginHint, already_signed_in: alreadySignedIn });
   });
 
-  router.post("/engines/:id/login/cancel", (_req, res) => {
-    jobs.signIn.cancel();
+  router.post("/engines/:id/login/cancel", (req, res) => {
+    const id = req.params.id;
+    if (!isEngineId(id) || !registry.get(id)) {
+      res.status(404).json({ error: "unknown provider" });
+      return;
+    }
+    // Only this provider's window: another provider's sign-in may be the one open now.
+    if (jobs.signIn.current() === id) jobs.signIn.cancel();
     res.json({ ok: true });
   });
 
