@@ -43,7 +43,7 @@ The first time Skill Vault opens, a short guide walks you through:
 2. **Tools**: Claude Code, Cursor, Copilot and the other known tools are detected. Tick the ones you use; "default" tools also get every new skill.
 3. **Skills** (optional): adopt skills found in your tools into the vault, and push vault skills out to your default tools. Each list has checkboxes. If you come back to this step, your picks are restored exactly (Skip means nothing moves); skills that turn up later start unticked.
 4. **Notion** (optional): connect and pick your Skills database.
-5. **Assistant** (optional): sign in with your Claude account or use an API key.
+5. **Assistant** (optional): pick the tool the assistant runs on (Claude Code, OpenAI Codex, GitHub Copilot CLI or Grok Build). Skill Vault can install it; then sign in with your account or use an API key.
 6. **Finish**: a list of exactly what will happen, then live progress.
 
 Nothing is saved until you press **Finish**. If you close the window halfway, the guide offers to resume. Run it again any time from **Settings → Run setup guide…** or the command bar ("Setup guide"); it opens with your current settings filled in.

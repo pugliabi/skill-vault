@@ -47,7 +47,7 @@ All JSON under `/api`. The notable groups:
 | History | `GET /api/history/...` (versions, restore, deleted skills) |
 | Assistant | `GET /api/assistant/status` · `GET/PUT /api/assistant/auth` (sign-in mode; never returns the saved key) · `POST /api/assistant/stream` (NDJSON chat turn) · sessions CRUD + stop · `GET /api/assistant/suggestions`, `POST …/suggestions/{dismiss,restore,sweep}` · `POST /api/assistant/install-skills` · provider routes below |
 | App | `GET /api/health` (pid, port, version, mode) · `GET /api/app/update` · `POST /api/app/update/check` · `POST /api/app/update` (NDJSON progress; cross-site POSTs refused) |
-| Setup guide | `/api/setup/*`: capabilities, draft, pick-folder, inspect, targets, clone-preview, plan, assistant, apply (see [Setup guide](#setup-guide)); `POST /api/notion/connect` also takes `return_to` |
+| Setup guide | `/api/setup/*`: capabilities, draft, pick-folder, inspect, targets, clone-preview, plan, apply (see [Setup guide](#setup-guide)); `POST /api/notion/connect` also takes `return_to` |
 | Events | `GET /api/events` (SSE) |
 
 Assistant provider routes (`/api/assistant`):
@@ -55,12 +55,13 @@ Assistant provider routes (`/api/assistant`):
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/assistant/engines` | Every provider: installed, version, signed in, install commands (`?refresh=1`) |
-| GET | `/api/assistant/engines/:id` | One provider (`?refresh=1`; `?mode=login` reports the login status whatever mode is saved); closes its sign-in window once signed in |
+| GET | `/api/assistant/engines/:id` | One provider (`?refresh=1`; `?mode=login` reports the login status whatever mode is saved), plus `sign_in` `{open, exit_code, already_signed_in}` for its latest sign-in window; closes that window once signed in, unless it was already signed in at start |
 | PUT | `/api/assistant/engine` | `{engine}` — provider for new chats |
 | PUT | `/api/assistant/engines/:id/auth` | `{auth?, api_key?, workspace_id?}`; key never echoed |
-| POST | `/api/assistant/engines/:id/install` | NDJSON install job (409 while one runs) |
-| POST | `/api/assistant/engines/:id/login` | Opens the provider's login window (this PC only) |
-| POST | `/api/assistant/engines/:id/login/cancel` | Closes it |
+| POST | `/api/assistant/engines/:id/install` | NDJSON install job (409 while one runs; no stdin; a step is stopped after 10 minutes) |
+| POST | `/api/assistant/engines/:id/install/cancel` | Stops the running install (its stream ends with `done` ok:false); ok when none runs |
+| POST | `/api/assistant/engines/:id/login` | Opens the provider's login window (this PC only); `already_signed_in` true means only the window's exit code 0 counts as success |
+| POST | `/api/assistant/engines/:id/login/cancel` | Closes that provider's window (another provider's is left open) |
 
 ## Install, launch, and self-update
 
@@ -160,7 +161,6 @@ the API client in `client/src/lib/setup.ts`.
 | `GET /targets` | `targets.ts` | the six known tools as found / installed / not found, plus configured providers |
 | `POST /clone-preview` `{ url }` | `clonePreview.ts` | `{ candidates }`: where a vault lives in the repo and its skill names; 400 with a plain message on failure |
 | `POST /plan` `{ draft }` | `plan.ts` | adopt and push candidates, with "differs" entries that can't be picked |
-| `GET /assistant` | none | the `claude` CLI (installed, version), its sign-in, and the saved sign-in mode; `?refresh=1` re-checks |
 | `POST /apply` `{ draft, api_key? }` | `apply.ts` | the Finish job, streamed as NDJSON `{ step, state, item?, message? }`; 409 while one runs |
 | `POST /apply/retry` | `apply.ts` | re-runs only the items that failed, same stream |
 | `GET /apply/status` | `apply.ts` | the last job: `running`, `ok`, `events`, `failed`; lets a dropped stream recover |

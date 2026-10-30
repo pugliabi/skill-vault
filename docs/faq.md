@@ -76,6 +76,11 @@ Grok Build reads MCP servers from your other tools' configs (Claude, Cursor). Sk
 own home folder that holds only the vault tools, so your other servers can't join a chat — and that folder
 is expected to have its own sign-in. (Grok support hasn't been checked against the real Grok CLI yet.)
 
+### Why can't the assistant run commands or edit files on Grok?
+Nobody has yet seen headless Grok refuse a non-git command or a write outside the vault, so Skill Vault
+doesn't give it a shell or file-edit tools until that's been checked. On Grok the assistant reads files
+and the web and makes changes only through the vault tools; for anything else it tells you what to do.
+
 ### Why can Codex run commands other than git?
 Codex can't limit its shell to particular commands. Skill Vault runs it in Codex's workspace-write
 sandbox instead: commands run, but can only write inside the vault and repos folders.

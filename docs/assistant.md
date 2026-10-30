@@ -24,15 +24,17 @@ except the model calls that tool makes.
 
 ## Requirements
 
-The [Claude Code](https://claude.com/claude-code) CLI (`claude`) must be installed
-and signed in on the machine running the app. The panel checks availability and
-shows the reason when it can't run (CLI missing, vault not configured). Chat turns
-bill to your Claude subscription; each reply shows its cost. Expect roughly
-$0.05–0.20 for a plain answer or a single check, and $1–1.50 for a
+The assistant's command-line tool must be installed and signed in on the machine
+running the app: [Claude Code](https://claude.com/claude-code) (`claude`) by default,
+or one of the others under [Providers](#providers). Skill Vault can install it and
+start its sign-in for you. The panel checks availability and shows the reason when
+it can't run (tool missing or signed out, vault not configured). Chat turns bill to
+that tool's subscription or API key. On Claude Code each reply shows its cost: expect
+roughly $0.05–0.20 for a plain answer or a single check, and $1–1.50 for a
 research-heavy turn that delegates to a specialist (a GitHub discovery sweep, a
 multi-skill repair).
 
-**Signing in.** By default the assistant uses your Claude Code login, even if
+**Signing in (Claude Code).** By default the assistant uses your Claude Code login, even if
 `ANTHROPIC_API_KEY` is set in your environment. To bill an API account
 instead, open **Settings → AI assistant → Sign in with**, choose **API key**,
 paste a key (or leave it blank to use the environment's), and add a workspace
@@ -51,20 +53,26 @@ The assistant can run on any of four command-line tools. Pick one in **Settings 
 | GitHub Copilot CLI | `npm install -g @github/copilot` | GitHub (Copilot plan), one-time code | Fine-grained token with *Copilot Requests* |
 | Grok Build | `irm https://x.ai/cli/install.ps1 \| iex` | grok.com account (a separate sign-in just for Skill Vault) | xAI API key |
 
-**Grok Build support is new.** Its install folder, sign-in check, tool names and git-only shell come from
-xAI's documentation and haven't been checked against the real Grok CLI yet. If install, sign-in or the
-git-only shell behave differently from what's described here, treat this page as the expected behaviour
-and tell us.
+**Grok Build support is new, and runs locked down for now.** Its install folder, sign-in check and tool
+names come from xAI's documentation and haven't been checked against the real Grok CLI yet. Until they
+are, Grok runs **without a shell and without direct file edits**: it reads files and the web, and can
+change only what the vault tools change. If install or sign-in behave differently from what's described
+here, treat this page as the expected behaviour and tell us.
 
-**Install** shows the exact command before it runs and streams the output. **Sign in** opens a window
-running the tool's own login; Skill Vault notices when you're signed in and closes it.
+**Install** shows the exact command before it runs and streams the output; **Cancel install** stops it,
+and a step still running after 10 minutes is stopped for you. **Sign in** opens a window running the
+tool's own login; Skill Vault notices when you're signed in and closes it. **Sign in again** (the tool
+already reads as signed in) waits for that window's login to finish instead, and says so if it fails.
 
 **What differs by provider**
 - *Subagents*: Claude and Copilot use the five specialist subagents; on Codex and Grok the lead does
   that work itself with the same skills.
-- *Shell*: git only on Claude and Grok. Copilot has no shell at all (it can't be limited to git), so it
-  can't run git; it uses the vault tools and tells you any command to run yourself. Codex can run any
-  command inside its sandbox, with writes limited to the vault and repos folders.
+- *Shell*: git only on Claude. Copilot has no shell at all (it can't be limited to git), and Grok runs
+  without one until its limits are verified; on both, the assistant uses the vault tools and tells you
+  any command to run yourself. Codex can run any command inside its sandbox, with writes limited to the
+  vault and repos folders.
+- *File edits*: Claude, Codex and Copilot edit files in the vault and repos folders directly. Grok can't
+  edit files directly yet; it can make only the changes the vault tools offer.
 - *Cost*: shown for Claude and Grok; the others don't report it.
 - AI tagging and merge-on-update always use Claude Code.
 
@@ -229,13 +237,21 @@ mutation goes through the app's own API: it lands in the Activity feed, updates
 the UI live, and version history keeps the prior state restorable. Its reach is
 deliberately bounded:
 
-- **Can:** read/edit skill files in the vault, run `git` (clones, history),
-  search the web, check/apply updates, repair origins (or clear one whose
-  source you have confirmed is dead), adopt, push/pull to providers, Notion
-  push/pull, repair audit findings.
-- **Cannot (by design):** delete skills, force-overwrite Notion, connect
-  Notion OAuth, run arbitrary shell commands, or touch files outside the vault
-  and your clones folder. Those stay in the UI, with you.
+- **Can:** read skill files in the vault, search the web, check/apply
+  updates, repair origins (or clear one whose source you have confirmed is
+  dead), adopt, push/pull to providers, Notion push/pull, repair audit
+  findings. Depending on the [provider](#providers), it can also edit skill
+  files directly (not on Grok yet) and run `git` for clones and history
+  (Claude; Codex inside its sandbox; not on Copilot or Grok).
+- **Cannot (by design):** delete skills, force-overwrite Notion or connect
+  Notion OAuth through its vault tools; those stay in the UI, with you. How
+  far its shell and file edits reach depends on the provider: on Claude the
+  shell runs git only; Copilot and Grok have no shell; **Codex can run any
+  command** inside its sandbox, which keeps writes to the vault and your
+  clones folder — so on Codex a command could still change or delete files
+  in the vault. File edits stay inside the vault and your clones folder
+  (Copilot can also write the system temp folder). See "What differs by
+  provider" under [Providers](#providers).
 
 ## Install the assistant's skills into your vault
 
@@ -251,11 +267,13 @@ by hand — the installer never removes files.
 
 ## How it works
 
-Each chat turn spawns the `claude` CLI headlessly with: session resume (the
+On Claude Code, each chat turn spawns the `claude` CLI headlessly with: session resume (the
 conversation is remembered across turns and app restarts), a plugin bundle
 providing the agents and skills above, and an MCP bridge that exposes vault
 operations as tools by calling the app's own HTTP API — which is why every
 agent action shows up in Activity and history like your own clicks. Tool access
 is allowlisted (`git` is the only shell command; file edits are scoped to the
-vault and clones folder). Technical details: [tech reference](tech_reference.md)
-and the app's `server/services/assistant/` source.
+vault and clones folder). The other providers get the same instructions, skills
+and vault tools, with the shell and file limits listed under [Providers](#providers).
+Technical details: [tech reference](tech_reference.md) and the app's
+`server/services/assistant/` source.
