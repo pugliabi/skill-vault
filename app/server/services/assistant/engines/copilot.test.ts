@@ -40,6 +40,14 @@ const INPUT: TurnInput = {
   baseEnv: { GH_TOKEN: "ghp_stray", PATH: "C:\\bin" },
 };
 
+function assertSafeArgs(a: string[]): void {
+  const tools = a.indexOf("--available-tools");
+  assert.deepEqual(a.slice(tools + 1, tools + 11), ["view", "create", "edit", "grep", "glob", "web_fetch", "skill", "task", "update_todo", "vault"]);
+  assert.ok(a[tools + 11].startsWith("--"), "the allowlist ends at the next flag");
+  assert.ok(!a.some((x) => x.includes("shell(")), "no shell permission anywhere");
+  for (const bad of FORBIDDEN_FLAGS) assert.ok(!a.some((x) => x.includes(bad)), `must not pass ${bad}`);
+}
+
 test("turn: -p prompt, JSON output, same session id, plugin agent, no shell tool at all", () => {
   const spec = createCopilotEngine(deps()).buildTurn(INPUT);
   const a = spec.args;
@@ -55,22 +63,24 @@ test("turn: -p prompt, JSON output, same session id, plugin agent, no shell tool
   assert.ok(a[tools + 11].startsWith("--"), "the allowlist ends at the next flag");
   const allowed = a.flatMap((x, i) => (x === "--allow-tool" ? [a[i + 1]] : []));
   assert.deepEqual(allowed, ["write", "vault"]);
-  assert.ok(!a.some((x) => x.includes("shell(")), "no shell permission anywhere");
-  for (const bad of FORBIDDEN_FLAGS) assert.ok(!a.some((x) => x.includes(bad)), `must not pass ${bad}`);
   assert.ok(!a.includes("--no-remote"), "Copilot has no --no-remote flag");
-  for (const flag of ["--disallow-temp-dir", "--disable-builtin-mcps", "--no-ask-user", "--no-auto-update"]) assert.ok(a.includes(flag), `missing ${flag}`);
+  assert.ok(!a.includes("--disallow-temp-dir"), "Copilot reads its own large tool output from temp");
+  for (const flag of ["--disable-builtin-mcps", "--no-ask-user", "--no-auto-update"]) assert.ok(a.includes(flag), `missing ${flag}`);
   assert.match(after("-p"), /running on GitHub Copilot CLI/);
   assert.match(after("-p"), /There is no shell tool here/);
   assert.ok(after("-p").endsWith("hi"));
   assert.equal(spec.env?.GH_TOKEN, undefined, "a stray gh token must not override the login");
   const later = createCopilotEngine(deps()).buildTurn({ ...INPUT, isFirstTurn: false });
   assert.ok(!later.args[later.args.indexOf("-p") + 1].includes("<skill-vault-instructions>"));
+  assertSafeArgs(a);
+  assertSafeArgs(later.args);
   assert.equal(later.args[later.args.indexOf("--session-id") + 1], INPUT.sessionId, "the same flag resumes");
 });
 
 test("API-key mode passes the token as COPILOT_GITHUB_TOKEN", () => {
   const spec = createCopilotEngine(deps()).buildTurn({ ...INPUT, auth: { auth: "api_key", api_key: "github_pat_x" } });
   assert.equal(spec.env?.COPILOT_GITHUB_TOKEN, "github_pat_x");
+  assertSafeArgs(spec.args);
 });
 
 test("authStatus reads the signed-in user from config.json (camelCase, S8)", async () => {
@@ -80,6 +90,10 @@ test("authStatus reads the signed-in user from config.json (camelCase, S8)", asy
   const snake = deps({ readFile: () => JSON.stringify({ logged_in_users: [{ login: "octo" }] }) });
   assert.equal((await createCopilotEngine(snake).authStatus({ auth: "login" })).signed_in, false);
   assert.equal((await createCopilotEngine(deps({ exists: () => false })).authStatus({ auth: "login" })).signed_in, false);
+  const numeric = deps({ readFile: () => JSON.stringify({ lastLoggedInUser: { login: 123 } }) });
+  const n = await createCopilotEngine(numeric).authStatus({ auth: "login" });
+  assert.equal(n.signed_in, false);
+  assert.equal(n.account, undefined);
   assert.equal((await createCopilotEngine(deps({ readFile: () => "{" })).authStatus({ auth: "login" })).signed_in, null);
 });
 

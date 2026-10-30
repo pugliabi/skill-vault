@@ -10,7 +10,8 @@
  * be enforced. --available-tools is an allowlist of everything else the
  * assistant needs ("vault" = every tool of the vault MCP server); it also
  * drops Copilot's built-in computer-use, sql, workflow and shell-session
- * tools. --disallow-temp-dir keeps writes out of the system temp folder.
+ * tools. The system temp folder stays allowed: Copilot saves large tool output (e.g. a big
+ * list_skills) there and reads it back.
  * COPILOT_GITHUB_TOKEN / GH_TOKEN / GITHUB_TOKEN outrank the stored login, so
  * login mode strips all three.
  */
@@ -74,7 +75,8 @@ export function createCopilotEngine(deps: EngineDeps = defaultEngineDeps()): Ass
         if (!deps.exists(file)) return { signed_in: false, method: "login" };
         // S8: camelCase — lastLoggedInUser / loggedInUsers carry { host, login }.
         const j = JSON.parse(deps.readFile(file)) as { lastLoggedInUser?: { login?: string }; loggedInUsers?: Array<{ login?: string }> };
-        const login = j.lastLoggedInUser?.login ?? j.loggedInUsers?.[0]?.login;
+        const raw = j.lastLoggedInUser?.login ?? j.loggedInUsers?.[0]?.login;
+        const login = typeof raw === "string" && raw ? raw : null;
         return login ? { signed_in: true, method: "login", account: login } : { signed_in: false, method: "login" };
       } catch {
         return { signed_in: null, method: cfg.auth === "api_key" ? "api_key" : "login" };
@@ -113,7 +115,6 @@ export function createCopilotEngine(deps: EngineDeps = defaultEngineDeps()): Ass
           "--available-tools", ...COPILOT_TOOLS,
           "--allow-tool", "write",
           "--allow-tool", "vault",
-          "--disallow-temp-dir",
           "--no-ask-user",
           "--no-auto-update",
         ],
