@@ -1177,7 +1177,7 @@ git commit -m "engines: the engine contract; one tool vocabulary for every CLI's
 - Consumes: `frontmatterDescription`, `stripFrontmatter` (`server/services/skillText.ts`);
   `listPluginSkills` (`server/services/assistant/installer.ts`).
 - Produces:
-  - `interface EngineNoteOpts { label: string; vaultToolSpelling: string; subagents: boolean; shell: "git" | "none" }`
+  - `interface EngineNoteOpts { label: string; vaultToolSpelling: string; subagents: boolean; shell: "git" | "none" | "sandboxed" }`
     (`"none"` is Copilot's: it has no shell tool, so the note tells the model it can't run git)
   - `engineNote(o): string`
   - `skillsIndex(pluginDir): string`
@@ -1216,10 +1216,13 @@ test("skillsIndex lists each skill with its description and absolute SKILL.md pa
 });
 
 test("engineNote says whether subagents and a shell exist", () => {
-  const codex = engineNote({ label: "OpenAI Codex", vaultToolSpelling: "vault.<tool>", subagents: false, shell: "git" });
+  const codex = engineNote({ label: "OpenAI Codex", vaultToolSpelling: "vault.<tool>", subagents: false, shell: "sandboxed" });
   assert.match(codex, /running on OpenAI Codex/);
   assert.match(codex, /aren't available here/);
-  assert.match(codex, /only git commands are allowed/);
+  assert.match(codex, /runs in a sandbox/);
+  assert.doesNotMatch(codex, /only git commands are allowed/);
+  const grok = engineNote({ label: "Grok Build", vaultToolSpelling: "vault__<tool>", subagents: false, shell: "git" });
+  assert.match(grok, /only git commands are allowed/);
   const copilot = engineNote({ label: "GitHub Copilot CLI", vaultToolSpelling: "vault-<tool>", subagents: true, shell: "none" });
   assert.match(copilot, /Subagents work as described/);
   assert.match(copilot, /There is no shell tool here/);
@@ -1278,14 +1281,16 @@ export interface EngineNoteOpts {
   vaultToolSpelling: string;
   subagents: boolean;
   /** "git": the shell tool runs git commands only. "none": this engine has no shell tool at all (Copilot). */
-  shell: "git" | "none";
+  shell: "git" | "none" | "sandboxed";
 }
 
 export function engineNote(o: EngineNoteOpts): string {
   const shell =
     o.shell === "none"
       ? 'There is no shell tool here ("Bash" doesn\'t exist), so you can\'t run git or any other command. When these instructions call for one, use a vault tool that does the job; if none does, give the user the exact command to run themselves.'
-      : '"Bash" is your shell tool, and only git commands are allowed.';
+      : o.shell === "sandboxed"
+        ? 'Your shell tool stands in for "Bash". It runs in a sandbox: commands can write only inside the vault and the repos folder, and the network is on. Ask the user before anything destructive.'
+        : '"Bash" is your shell tool, and only git commands are allowed.';
   return [
     `You are running on ${o.label} inside Skill Vault, not on Claude Code.`,
     `- Tool names in these instructions are Claude Code's. \`mcp__vault__<tool>\` is the vault MCP server's <tool> (here: ${o.vaultToolSpelling}). "Read", "Edit", "Write", "Glob", "Grep", "WebSearch" and "WebFetch" are your equivalent tools.`,
@@ -2834,7 +2839,7 @@ export function createCodexEngine(deps: EngineDeps = defaultEngineDeps()): Assis
         ? composeInstructions({
             pluginDir: input.pluginDir,
             lead: input.leadAgent,
-            note: { label: LABEL, vaultToolSpelling: "the `vault` MCP server's tools", subagents: false, shell: "git" },
+            note: { label: LABEL, vaultToolSpelling: "the `vault` MCP server's tools", subagents: false, shell: "sandboxed" },
             includeLead: true,
           })
         : undefined;
