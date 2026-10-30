@@ -30,6 +30,7 @@ import path from "node:path";
 import os from "node:os";
 import type { AppConfig, Provider } from "../types/vault.ts";
 import { applyClaudeAuthPatch, type ClaudeAuthConfig, type ClaudeAuthPatch } from "./claude/auth.ts";
+import type { AssistantBlock } from "./assistant/engines/config.ts";
 import type { SetupBase } from "./setup/types.ts";
 
 const CLI_CONFIG_DIR = path.join(os.homedir(), ".skill-vault");
@@ -234,17 +235,17 @@ export function setClaudeDesktopStage(stagePath: string): AppConfig {
  * services/claude/auth.ts). Holds the saved API key — never return it to
  * the client. Missing or unreadable config → {} (Claude login).
  */
-export function readAssistantBlock(): ClaudeAuthConfig {
+export function readAssistantBlock(): AssistantBlock {
   try {
     const block = readRaw().assistant;
-    return block && typeof block === "object" ? (block as ClaudeAuthConfig) : {};
+    return block && typeof block === "object" ? (block as AssistantBlock) : {};
   } catch {
     return {};
   }
 }
 
 /** Replace the `assistant` block, preserving all other config keys. */
-export function writeAssistantBlock(block: ClaudeAuthConfig): void {
+export function writeAssistantBlock(block: AssistantBlock): void {
   const raw = readRaw();
   raw.assistant = block;
   writeRaw(raw);
