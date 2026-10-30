@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { ApiError } from "../../../lib/api";
 import { assistantApi, type EngineId, type EngineView } from "../../../lib/assistant";
 import { Button } from "../../../components/ui/primitives";
 import { EngineInstallDialog } from "../../../components/assistant/EngineInstallDialog";
@@ -15,16 +17,16 @@ const BLURB: Record<EngineId, string> = {
 };
 
 export function AssistantStep({ draft, commit, goTo, apiKey, setApiKey }: StepProps) {
-  const { data, refetch, isFetching } = useQuery({ queryKey: ["assistant-engines"], queryFn: () => assistantApi.engines() });
+  const { data, error, refetch, isFetching } = useQuery({ queryKey: ["assistant-engines"], queryFn: () => assistantApi.engines() });
   // Claude's saved workspace ID: the engine views don't carry it.
-  const claudeAuth = useQuery({ queryKey: ["assistant-auth"], queryFn: () => assistantApi.auth(), enabled: !draft.assistant });
+  const claudeAuth = useQuery({ queryKey: ["assistant-auth"], queryFn: () => assistantApi.auth(), enabled: draft.assistant?.engine !== "claude" });
   const engines = data?.engines ?? [];
   const [engineId, setEngineId] = useState<EngineId | null>(draft.assistant?.engine ?? null);
   const current = engines.find((e) => e.id === (engineId ?? engines.find((x) => x.selected)?.id)) ?? null;
   // null until the user picks: then the draft's choice, else what's saved, so Next without a click changes nothing.
   const [auth, setAuth] = useState<"login" | "api_key" | null>(draft.assistant?.auth ?? null);
   const mode = auth ?? current?.auth.mode ?? "login";
-  const [workspace, setWorkspace] = useState<string | null>(draft.assistant ? (draft.assistant.workspace_id ?? "") : null);
+  const [workspace, setWorkspace] = useState<string | null>(draft.assistant?.engine === "claude" ? (draft.assistant.workspace_id ?? "") : null);
   const ws = workspace ?? claudeAuth.data?.workspace_id ?? "";
   const [dialog, setDialog] = useState<"install" | "signin" | null>(null);
   // A sign-in finished in this step (the views report the saved mode, which may still be the API key).
@@ -48,8 +50,8 @@ export function AssistantStep({ draft, commit, goTo, apiKey, setApiKey }: StepPr
     try {
       await assistantApi.engines(true);
       await refetch();
-    } catch {
-      /* the list keeps its last state; Check again can be pressed again */
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Couldn't check the providers");
     }
   };
 
@@ -59,6 +61,7 @@ export function AssistantStep({ draft, commit, goTo, apiKey, setApiKey }: StepPr
         The assistant runs on an AI command-line tool on this PC. Pick one; Skill Vault can install it and help you sign in.
       </StepHeader>
 
+      {error && <Hint tone="warn">{error instanceof Error ? error.message : "Couldn't load the providers."}</Hint>}
       <div style={{ display: "flex", flexDirection: "column", gap: 8, margin: "18px 0" }}>
         {engines.map((v) => (
           <ChoiceCard
@@ -92,7 +95,7 @@ export function AssistantStep({ draft, commit, goTo, apiKey, setApiKey }: StepPr
             <Hint tone="good">Signed in{loginView.auth.account ? ` as ${loginView.auth.account}` : ""}.</Hint>
           ) : (
             <>
-              <Hint tone="warn">{loginView ? "Not signed in yet." : `Sign in to use your ${current.label} account.`}</Hint>
+              <Hint tone="warn">{loginView ? (loginView.auth.signed_in === null ? "Couldn't check the sign-in." : "Not signed in yet.") : `Sign in to use your ${current.label} account.`}</Hint>
               <Button kind="primary" size="sm" onClick={() => setDialog("signin")}>Sign in to {current.label}</Button>
             </>
           )}
@@ -147,7 +150,7 @@ export function AssistantStep({ draft, commit, goTo, apiKey, setApiKey }: StepPr
         onBack={() => goTo("notion")}
         onSkip={() => commit({ assistant: null }, "review")}
         onNext={next}
-        nextDisabled={!current || (mode === "api_key" && !keyAvailable)}
+        nextDisabled={!current || claudeAuth.isLoading || (mode === "api_key" && !keyAvailable)}
       />
     </div>
   );

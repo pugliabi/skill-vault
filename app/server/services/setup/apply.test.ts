@@ -280,7 +280,7 @@ test("a new vault folder holding only an empty skeleton can be re-run; anything 
 });
 
 test("configPatch: a non-Claude engine writes engine + engines.<id> auth, never Claude's fields", () => {
-  const vault = { mode: "new" as const, path: "C:\v" };
+  const vault = { mode: "new" as const, path: "C:\\v" };
   const codex = configPatch(draftWith({ vault, assistant: { engine: "codex", auth: "api_key" } }), [], " sk-o ");
   assert.deepEqual(codex.assistant, { engine: "codex", engine_auth: { auth: "api_key", api_key: "sk-o" } });
   const claude = configPatch(draftWith({ vault, assistant: { engine: "claude", auth: "login" } }), []);
