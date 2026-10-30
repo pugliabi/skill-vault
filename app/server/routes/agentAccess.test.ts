@@ -293,6 +293,7 @@ test("add leaves a default target's own skill-vault folder alone and reports it"
   assert.deepEqual(body.pushed, []);
   assert.deepEqual(body.failed.map((f) => f.provider_id), ["claude"]);
   assert.match(body.failed[0].error, /isn't from your vault/);
+  assert.match(body.failed[0].error, /rename or remove it first/);
   assert.equal(fs.readFileSync(path.join(theirs, "SKILL.md"), "utf-8"), "mine");
   assert.deepEqual(manifestSkills()["skill-vault"].targets, []);
 

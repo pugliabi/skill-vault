@@ -1,11 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import type { BridgeHttp } from "./bridge.ts";
-import { defaultClient, listTools, parseBridgeArgs, readStdinWithin, runCommand } from "./cli.ts";
+import { defaultClient, listTools, missingTool, parseBridgeArgs, readStdinWithin, runCommand } from "./cli.ts";
 
 const noSleep = async (): Promise<void> => {};
 const httpReturning = (json: unknown, status = 200): BridgeHttp & { calls: unknown[] } => {
@@ -24,6 +25,42 @@ test("parseBridgeArgs reads --client, --file and the first positional", () => {
   assert.deepEqual(parseBridgeArgs(["--client=command", "list_skills", "extra"], "agent"), { client: "command", command: "list_skills", file: null });
   assert.deepEqual(parseBridgeArgs(["save_skill", "--file", "args.json"], "agent"), { client: "agent", command: "save_skill", file: "args.json" });
   assert.deepEqual(parseBridgeArgs(["--file=a b.json", "save_skill"], "agent"), { client: "agent", command: "save_skill", file: "a b.json" });
+});
+
+/** Run the real bridge with stdin held open, so one that falls into MCP mode hangs instead of exiting. */
+function runBridge(argv: string[]): Promise<{ code: number | null; stdout: string; hung: boolean }> {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, ["--import", "tsx", "server/assistant-mcp/main.ts", ...argv], {
+      env: { ...process.env, SKILL_VAULT_URL: "http://127.0.0.1:9" },
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+    let stdout = "";
+    let hung = false;
+    child.stdout.on("data", (d) => (stdout += d));
+    const timer = setTimeout(() => {
+      hung = true;
+      child.kill();
+    }, 8_000);
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({ code, stdout, hung });
+    });
+  });
+}
+
+for (const argv of [["--file", "args.json"], ["--client", "command"]]) {
+  test(`${argv.join(" ")} with no tool prints usage instead of waiting as an MCP server`, async () => {
+    const r = await runBridge(argv);
+    assert.equal(r.hung, false);
+    assert.equal(r.code, 1);
+    assert.match((JSON.parse(r.stdout) as { error: string }).error, /usage: skill-vault/);
+  });
+}
+
+test("a real MCP client (any --client but command, no --file) still gets MCP mode", () => {
+  assert.equal(missingTool(parseBridgeArgs(["--client", "claude-desktop"], "agent")), false);
+  assert.equal(missingTool(parseBridgeArgs([], "agent")), false);
+  assert.equal(missingTool(parseBridgeArgs(["--client", "command", "tools"], "agent")), false);
 });
 
 test("without --client the bridge is the assistant only when SKILL_VAULT_URL is set", () => {

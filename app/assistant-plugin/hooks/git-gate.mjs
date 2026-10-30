@@ -81,7 +81,9 @@ const insideRoots = (dir, roots) =>
     return !rel.startsWith("..") && !path.isAbsolute(rel);
   });
 
-const isUrl = (arg) => /^[a-z][a-z0-9+.-]*:\/\//i.test(arg) || /^[^/\\\s]+@[^/\\\s]+:/.test(arg);
+// A `..` makes it a path that only looks like a URL: `a://../../x` is a relative folder outside Windows.
+const isUrl = (arg) =>
+  !arg.split(/[\\/]/).includes("..") && (/^[a-z][a-z0-9+.-]*:\/\//i.test(arg) || /^[^/\\\s]+@[^/\\\s]+:/.test(arg));
 
 /** Why this Bash command can't run, or null if it can. `roots`: the folders git may change. */
 export function gitCommandRefusal(command, { cwd, roots }) {
@@ -112,6 +114,10 @@ export function gitCommandRefusal(command, { cwd, roots }) {
   if (banned) return `The git option ${banned} isn't allowed here: it can run another program or write outside the vault.`;
 
   if (WRITES.has(subcommand)) {
+    // After these two, git takes a word starting with "-" as the target, and the check below skips those words.
+    if (subcommand === "clone" && rest.some((arg) => arg === "--" || arg === "--end-of-options")) {
+      return "git clone takes no -- here: put the URL and the target folder after the options.";
+    }
     // Clone's words are a mix of the URL, the target and option values; relative ones land in `dir`.
     const paths = subcommand === "clone" ? rest.filter((arg) => !arg.startsWith("-") && !isUrl(arg)) : [];
     const targets = [dir, ...paths.map((arg) => path.resolve(dir, nativePath(arg)))];

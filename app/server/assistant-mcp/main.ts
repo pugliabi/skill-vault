@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createHttp, registerTools } from "./bridge.ts";
-import { defaultClient, parseBridgeArgs, readStdinWithin, runCommand, type CommandInput } from "./cli.ts";
+import { USAGE, defaultClient, missingTool, parseBridgeArgs, readStdinWithin, runCommand, type CommandInput } from "./cli.ts";
 import { createResolvingFetch, findOrStartServer, realServerDeps } from "./server.ts";
 
 const args = parseBridgeArgs(process.argv.slice(2), defaultClient(process.env));
@@ -29,7 +29,10 @@ const http = process.env.SKILL_VAULT_URL
   ? createHttp(process.env.SKILL_VAULT_URL, fetch, args.client)
   : createHttp("", createResolvingFetch(() => findOrStartServer(realServerDeps(appDir))), args.client);
 
-if (args.command) {
+if (missingTool(args)) {
+  process.stdout.write(JSON.stringify({ error: USAGE }, null, 2) + "\n");
+  process.exitCode = 1;
+} else if (args.command) {
   // With --file, stdin is never read (or waited on).
   const input: CommandInput =
     args.file !== null

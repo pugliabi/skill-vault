@@ -72,6 +72,22 @@ const REFUSED: Array<[string, string[]]> = [
     `git -C ${q(OUTSIDE)} tag x`,
     "git -C ../outside fetch",
   ]],
+  // After -- or --end-of-options, git takes a word starting with "-" as the target folder.
+  ["clone targets hidden behind an option marker", [
+    "git clone https://github.com/o/r -- -/../../outside/x",
+    "git clone -- https://github.com/o/r -/../../outside/x",
+    "git clone --end-of-options https://github.com/o/r -/../../elsewhere/x",
+    "git clone --depth 1 https://github.com/o/r -- -/../../elsewhere/x",
+    `git -C ${q(path.join(REPOS, "a"))} clone https://github.com/o/r -- -/../../../elsewhere/x`,
+    `git clone https://github.com/o/r -- ${q(path.join(REPOS, "r"))}`,
+  ]],
+  // On macOS and Linux these are ordinary relative folders.
+  ["clone targets dressed up as URLs", [
+    "git clone https://github.com/o/r 'a://../../outside/x'",
+    "git clone https://github.com/o/r 'x@y:/../../outside/x'",
+    "git clone https://github.com/o/r 'x@y:../../../outside/x'",
+    "git clone ./local 'a://../../outside/x'",
+  ]],
 ];
 
 for (const [what, commands] of REFUSED) {
@@ -81,6 +97,10 @@ for (const [what, commands] of REFUSED) {
     }
   });
 }
+
+test("a clone refused for -- says how to write it", () => {
+  assert.match(gitCommandRefusal("git clone https://github.com/o/r -- d", ctx) ?? "", /URL and the target folder/);
+});
 
 test("a refusal tells the model what to do instead", () => {
   assert.match(gitCommandRefusal("git log | head -3", ctx) ?? "", /git -C/);

@@ -216,7 +216,7 @@ export function agentAccessRouter(opts: AgentAccessOptions): Router {
         // copy is known to be ours; anything else may be the user's own skill.
         const dest = path.join(provider.path, BUNDLED_SKILL_NAME);
         if ((fs.existsSync(dest) || isLink(dest)) && !linksTo(dest, vaultCopy)) {
-          const error = `a ${BUNDLED_SKILL_NAME} folder that isn't from your vault is already there (${dest}) — adopt or remove it first`;
+          const error = `a ${BUNDLED_SKILL_NAME} folder that isn't from your vault is already there (${dest}) — rename or remove it first`;
           failed.push({ provider_id: id, error });
           recordActivity({ kind: "push", skill: BUNDLED_SKILL_NAME, provider_id: id, ok: false, message: error });
           continue;

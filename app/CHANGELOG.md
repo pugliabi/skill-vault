@@ -13,6 +13,32 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
   a Bash hook (`assistant-plugin/hooks/git-gate.mjs`) that lets through one
   plain git command for history or clones, and `safe.bareRepository=explicit`.
   The assistant can no longer `git push`, `commit` or `config`.
+- The git gate let `git clone <url> -- -/../../x` and the same with
+  `--end-of-options` write outside the vault and repos folder: after either one,
+  git takes a word starting with `-` as the target, and the gate skipped those.
+  Clone now refuses both, and a URL-shaped word with `..` in it counts as a path
+  (`a://../../x` is a relative folder on macOS and Linux).
+- The file editor's save (`PUT /api/skills/:name/files/*`) only checked for
+  traversal, so it could overwrite a skill's `.git/config`, also as `.GIT` or
+  `GIT~1`. It now has `save_skill`'s path rules: ignored folders, Windows short
+  names, trailing dots and spaces, streams, device names and control characters.
+- `read_skill_files` results now fit what Claude Code passes to the model whole
+  (50,000 characters, measured on 2.1.293). The 256 KB budget meant a skill over
+  about 48 KB reached the model as a 2 KB preview with no error. The budget is now
+  about 44,000 characters of JSON and the `skipped` list has a cap
+  (`skipped_unlisted` counts the rest). A single file over the limit still comes
+  back as a preview.
+- `read_skill_files` matches ignored folders without case, as `save_skill` does,
+  and `paths` can't read them (reported as `ignored` in `skipped`).
+- `skill-vault --file args.json` and bare `skill-vault` print usage. They used to
+  start the MCP server and wait on stdin.
+- `launch.ps1 -Headless` keeps the folder of the node running it, which may be on
+  the caller's PATH only. Nothing else from that PATH comes back.
+- Agent access card: cmd and PowerShell get a line each, because PowerShell needs
+  `&`. The message for a target's own `skill-vault` folder says rename, not adopt.
+- The `skill-vault` skill lists OpenClaw as a push target again (a local
+  `~/.openclaw`), and no longer says never to quote JSON right above an example
+  that does.
 
 ## [0.2.0] - 2026-10-30
 

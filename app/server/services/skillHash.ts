@@ -29,6 +29,11 @@ export const IGNORE_NAMES = new Set([
   ".turbo",
 ]);
 
+const IGNORED_LOWER = new Set([...IGNORE_NAMES].map((n) => n.toLowerCase()));
+
+/** One path segment against IGNORE_NAMES without case: Windows and macOS match names that way. */
+export const isIgnoredName = (seg: string): boolean => IGNORED_LOWER.has(seg.toLowerCase());
+
 function shouldIgnore(name: string): boolean {
   return IGNORE_NAMES.has(name) || name.endsWith(".log");
 }

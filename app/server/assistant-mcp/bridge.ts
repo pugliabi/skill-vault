@@ -20,7 +20,7 @@
 
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { IGNORE_NAMES } from "../services/skillHash.ts";
+import { isIgnoredName } from "../services/skillHash.ts";
 
 /** Minimal HTTP seam: method + path (+ optional JSON body) → status + parsed JSON. */
 export type BridgeHttp = (
@@ -118,8 +118,17 @@ function trimSkill(s: Record<string, unknown>): TrimmedSkill {
   };
 }
 
-/** read_skill_files stops adding files once their sizes pass this total. */
-export const READ_BUDGET_BYTES = 256 * 1024;
+/**
+ * read_skill_files stops adding files once the result would pass this many
+ * characters of JSON. Claude Code passes an MCP result to the model whole up
+ * to 50,000 characters (measured on 2.1.293); past that the model gets a 2 KB
+ * preview and no error, so these two caps stay under it together.
+ */
+export const READ_BUDGET_CHARS = 44_000;
+/** The `skipped` list's share; entries past it are only counted, in `skipped_unlisted`. */
+const SKIPPED_BUDGET_CHARS = 4_000;
+const FILE_ENTRY_CHARS = 110;
+const SKIPPED_ENTRY_CHARS = 40;
 
 interface TreeNode {
   path: string;
@@ -141,7 +150,11 @@ interface FileRead {
   content: string | null;
 }
 
-/** SKILL.md first, then the rest by path; binaries and files past the budget are listed in `skipped`. */
+const inIgnoredFolder = (p: string): boolean => p.split("/").some(isIgnoredName);
+
+type SkipReason = "binary" | "too_large" | "over_budget" | "ignored";
+
+/** SKILL.md first, then the rest by path; binaries, ignored paths and files past the budget are listed in `skipped`. */
 async function readSkillFiles(http: BridgeHttp, name: string, only?: string[]): Promise<unknown> {
   const enc = encodeURIComponent(name);
   let wanted: Array<{ path: string; size: number }>;
@@ -150,35 +163,48 @@ async function readSkillFiles(http: BridgeHttp, name: string, only?: string[]): 
   } else {
     const detail = expectOk(await http("GET", `/api/skills/${enc}`), "read_skill_files") as { files?: TreeNode };
     // Ignored folders (.git, node_modules...) are listed by the tree but save_skill refuses their paths.
-    wanted = (detail.files ? treeFiles(detail.files) : []).filter((w) => !w.path.split("/").some((seg) => IGNORE_NAMES.has(seg)));
+    wanted = (detail.files ? treeFiles(detail.files) : []).filter((w) => !inIgnoredFolder(w.path));
     wanted.sort((a, b) => (a.path === "SKILL.md" ? -1 : b.path === "SKILL.md" ? 1 : a.path.localeCompare(b.path)));
   }
   const files: Array<{ path: string; content: string; sha256: string | null; size: number }> = [];
-  const skipped: Array<{ path: string; reason: "binary" | "too_large" | "over_budget" }> = [];
+  const skipped: Array<{ path: string; reason: SkipReason }> = [];
+  let skippedChars = 0;
+  let unlisted = 0;
+  const skip = (path: string, reason: SkipReason): void => {
+    skippedChars += path.length + SKIPPED_ENTRY_CHARS;
+    if (skippedChars > SKIPPED_BUDGET_CHARS) unlisted++;
+    else skipped.push({ path, reason });
+  };
   let total = 0;
   for (const w of wanted) {
-    if (files.length > 0 && total + w.size > READ_BUDGET_BYTES) {
-      skipped.push({ path: w.path, reason: "over_budget" });
+    if (inIgnoredFolder(w.path)) {
+      skip(w.path, "ignored");
+      continue;
+    }
+    if (files.length > 0 && total + w.size > READ_BUDGET_CHARS) {
+      skip(w.path, "over_budget");
       continue;
     }
     const urlPath = w.path.split("/").map(encodeURIComponent).join("/");
     const f = expectOk(await http("GET", `/api/skills/${enc}/files/${urlPath}`), `read_skill_files ${w.path}`) as FileRead;
     if (f.binary) {
-      skipped.push({ path: w.path, reason: "binary" });
+      skip(w.path, "binary");
       continue;
     }
     if (f.too_large || f.content === null) {
-      skipped.push({ path: w.path, reason: "too_large" });
+      skip(w.path, "too_large");
       continue;
     }
-    if (files.length > 0 && total + f.size > READ_BUDGET_BYTES) {
-      skipped.push({ path: w.path, reason: "over_budget" });
+    // What the file adds to the result: newlines and quotes grow when escaped.
+    const chars = JSON.stringify(f.content).length + w.path.length + FILE_ENTRY_CHARS;
+    if (files.length > 0 && total + chars > READ_BUDGET_CHARS) {
+      skip(w.path, "over_budget");
       continue;
     }
-    total += f.size;
+    total += chars;
     files.push({ path: w.path, content: f.content, sha256: f.sha256, size: f.size });
   }
-  return { files, skipped };
+  return { files, skipped, ...(unlisted > 0 ? { skipped_unlisted: unlisted } : {}) };
 }
 
 export interface ToolDef {
@@ -291,7 +317,7 @@ export const TOOLS: Record<string, ToolDef> = {
   },
   read_skill_files: {
     description:
-      "Read a vault skill's text files, SKILL.md first, with each file's sha256. Use it to follow a vault skill in this chat, and before save_skill mode:update. Files past the ~256 KB total come back in `skipped` as over_budget; ask for them by `paths`.",
+      "Read a vault skill's text files, SKILL.md first, with each file's sha256. Use it to follow a vault skill in this chat, and before save_skill mode:update. A result stops at about 44,000 characters, so a large skill takes several calls: later files come back in `skipped` as over_budget (any past the list's limit are counted in `skipped_unlisted`); ask for a few at a time by `paths`.",
     schema: {
       name: z.string(),
       paths: z.array(z.string()).optional().describe('Only these files: relative, "/"-separated paths'),

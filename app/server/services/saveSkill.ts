@@ -12,7 +12,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { IGNORE_NAMES } from "./skillHash.ts";
+import { isIgnoredName } from "./skillHash.ts";
 import { frontmatterValueOf } from "./skillNames.ts";
 import { validateSkillName } from "./skillName.ts";
 import { readSkillFile, resolveSkillFilePath, skillDir, upsertManifestSkill } from "./vault.ts";
@@ -79,8 +79,6 @@ export function parseSaveRequest(body: unknown): SaveRequest {
   return { mode: b.mode, files };
 }
 
-const IGNORED_LOWER = new Set([...IGNORE_NAMES].map((n) => n.toLowerCase()));
-
 /**
  * Why one segment isn't safe, or null. Windows and macOS match names without
  * case, and Windows also opens `.git` as `GIT~1`, `a.md` as `a.md.` or
@@ -88,7 +86,7 @@ const IGNORED_LOWER = new Set([...IGNORE_NAMES].map((n) => n.toLowerCase()));
  */
 function segmentProblem(seg: string): string | null {
   if (seg === "" || seg === "." || seg === "..") return 'empty, "." and ".." segments aren\'t allowed';
-  if (IGNORED_LOWER.has(seg.toLowerCase())) return `"${seg}" is an ignored folder`;
+  if (isIgnoredName(seg)) return `"${seg}" is an ignored folder`;
   if (/[\x00-\x1f<>:"|?*]/.test(seg)) return `"${seg}" has a character Windows doesn't allow`;
   if (/[. ]$/.test(seg)) return `"${seg}" ends in a dot or a space`;
   if (/~\d/.test(seg)) return `"${seg}" looks like a Windows short name`;
@@ -97,7 +95,7 @@ function segmentProblem(seg: string): string | null {
 }
 
 /** Why `p` isn't a relative, "/"-separated path with safe segments, or null. */
-function pathProblem(p: string): string | null {
+export function pathProblem(p: string): string | null {
   if (p.includes("\\") || p.startsWith("/") || /^[A-Za-z]:/.test(p)) return 'use a relative path with "/"';
   for (const seg of p.split("/")) {
     const why = segmentProblem(seg);

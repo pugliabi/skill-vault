@@ -18,7 +18,7 @@ import {
 } from "../services/vault.ts";
 import { validateSkillName } from "../services/skillName.ts";
 import { withHistory, recordVersion } from "../services/history.ts";
-import { SaveError, parseSaveRequest, saveSkill, type SaveRequest } from "../services/saveSkill.ts";
+import { SaveError, parseSaveRequest, pathProblem, saveSkill, type SaveRequest } from "../services/saveSkill.ts";
 import { AGENT_CLIENT_HEADER, clientLabel } from "../services/agentActivity.ts";
 import { refuseCrossSiteWrites } from "./sameOrigin.ts";
 import { SkillOpError, deleteVaultSkill, renameVaultSkill } from "../services/skillLifecycle.ts";
@@ -410,9 +410,11 @@ export function skillsRouter(opts: { isBusy?: () => boolean } = {}): Router {
     }
     const raw = (req.params as unknown as Record<string, string | string[]>).filepath;
     const requested = Array.isArray(raw) ? raw.join("/") : (raw ?? "");
-    const abs = resolveSkillFilePath(cfg.vault_path, req.params.name, requested);
+    // The same rules as save_skill: without them .git/config is an ordinary file here.
+    const problem = pathProblem(requested);
+    const abs = problem ? null : resolveSkillFilePath(cfg.vault_path, req.params.name, requested);
     if (!abs) {
-      res.status(400).json({ error: "invalid file path" });
+      res.status(400).json({ error: `invalid file path${problem ? ` (${problem})` : ""}` });
       return;
     }
     const body = req.body as { content?: unknown; expected_sha256?: unknown };

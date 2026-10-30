@@ -163,7 +163,10 @@ export function AgentAccessCard() {
         <Row title="Other agents" status="Agents with a shell can run the vault tools from the command line.">
           <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--ink-2)", lineHeight: 1.5 }}>
             <div>
-              cmd / PowerShell: <code style={MONO}>{s?.command.windows ?? "…"}</code>
+              cmd: <code style={MONO}>"{s?.command.windows ?? "…"}"</code>
+            </div>
+            <div>
+              PowerShell: <code style={MONO}>{'& "$env:USERPROFILE\\.skill-vault\\bin\\skill-vault.cmd"'}</code>
             </div>
             <div>
               sh / Git Bash / macOS / Linux: <code style={MONO}>{s?.command.posix ?? "~/.skill-vault/bin/skill-vault"}</code>
