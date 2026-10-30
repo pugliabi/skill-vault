@@ -24,9 +24,9 @@ merged first-run setup guide (d778d08).
    signed in, then says so. An **API key** is the alternative for each provider.
 4. The chat works the same on every provider: vault tools through the MCP bridge, the lead agent's
    instructions, the ten skills, the per-turn context, the activity timeline, Stop, and resume.
-5. Safety stays deny-by-default on every provider. The shell is git-only on Claude and Grok, Copilot has
-   no shell at all, and Codex runs sandboxed (see Safety). Other changes to the app go only through the
-   audited bridge.
+5. Safety stays deny-by-default on every provider. The shell is git-only on Claude, Copilot has no shell
+   at all, Grok has no shell and no file-write tools until its limits are checked live (fail-closed), and
+   Codex runs sandboxed (see Safety). Other changes to the app go only through the audited bridge.
 6. The setup guide's Assistant step becomes **pick provider → install → sign in**.
 
 ## Non-goals
@@ -197,7 +197,11 @@ Every POST and PUT above goes through the existing cross-site guard, like the ot
 
 `POST /stream` picks the engine (the session's, or config's for a new chat). If that engine isn't ready
 it answers **409 with a JSON error before streaming starts**. Otherwise it builds the `TurnInput`, calls
-`engine.buildTurn`, and runs the turn as today.
+`engine.buildTurn`, and runs the turn as today. Claude only needs to be installed to be ready (final-review
+ruling): its `claude auth status` can't see Bedrock, Vertex or token sign-ins, so a `signed_in: false`
+never blocks a turn and the CLI reports its own sign-in error, as before providers. The other engines
+also need a sign-in (or a key in API-key mode). An "isn't installed" reason carries the engine's own
+detail, e.g. "(claude.exe not found next to the claude.cmd shim)".
 
 ## Engines
 
@@ -216,7 +220,8 @@ docs, checked live in the plan's last task.
 
 - **Install:** `npm install -g @openai/codex` (npmjs.com).
 - **Sign in:** `codex login` opens a browser for the ChatGPT account. Status: `codex login status` exits 0
-  and prints "Logged in using ChatGPT" when signed in (S5).
+  and prints "Logged in using ChatGPT" when signed in (S5). The account shown is the fixed word "ChatGPT"
+  (or nothing), never the raw line: an API-key login prints part of the key.
 - **API key:** the saved key goes in as `CODEX_API_KEY` in the turn's environment, so the user's own
   terminal login isn't overwritten (S6: unverified, documented default). Login mode strips
   `OPENAI_API_KEY` and `CODEX_API_KEY`.
@@ -303,18 +308,25 @@ docs, checked live in the plan's last task.
   with a second app home, `~/.skill-vault/engines/grok-apikey/`, where no login is ever written.
   Switching modes never deletes the login.
 - **Turn:** `grok --prompt-file <tmp> --output-format streaming-messages-json --include-partial-messages
-  (-s <uuid> | -r <uuid>) --cwd <vault> --tools <allowlist> --allow 'Bash(git *)' --no-auto-update`.
-  Headless Grok doesn't read stdin, so the prompt goes through a temp file. That file is deleted after
-  the turn.
+  (-s <uuid> | -r <uuid>) --cwd <vault> --tools read_file,grep,list_dir,web_search,web_fetch
+  --no-auto-update`. Headless Grok doesn't read stdin, so the prompt goes through a temp file. That file
+  is deleted after the turn.
+- **Fail-closed until verified (final-review ruling).** The allowlist has no shell tool
+  (`run_terminal_cmd`) and no file-write tools (`write_file`, `search_replace`), and the turn passes no
+  `--allow 'Bash(git *)'` rule. The engine note says there is no shell and no direct file edits, so the
+  model works through the vault tools. Once the live check shows headless Grok refuses a non-git command
+  and a write outside `--cwd`, those three tools, the `--allow` pair and the git-only note come back
+  (`grok.ts` says exactly what to restore).
 - **Events:** the output is Claude's stream-json wire format, so the parser is `parseStreamJsonLine` plus
   a Grok tool-name map: `run_terminal_cmd` → `Bash`, `read_file` → `Read`, `search_replace` → `Edit`,
   `write_file` → `Write`, `grep` → `Grep`, `list_dir` → `Glob`, `web_search` / `web_fetch`, and
   `use_tool {name: "vault__x"}` → `mcp__vault__x`. Cost comes from the `result` record, as with Claude.
   `fixtures/grok-turn.jsonl` is **hand-written** from these docs, not recorded.
 - **Safety (unverified):** the plan's last task checks two things live. First, that headless Grok with
-  these flags refuses a non-git command and a write outside the vault (if not, Grok loses its shell
-  rather than keeping an unrestricted one). Second, whether it also honors `~/.claude/settings.json`
-  permission rules; if it does, the app home's config turns that compat off.
+  the git-only rule restored refuses a non-git command and a write outside the vault (until then it ships
+  without a shell or file writes, above; if the check fails, it stays that way). Second, whether it also
+  honors `~/.claude/settings.json` permission rules; if it does, the app home's config turns that compat
+  off.
 
 ### Shared by the non-Claude engines
 
@@ -322,9 +334,11 @@ docs, checked live in the plan's last task.
 
 1. The body of the lead agent (`assistant-plugin/agents/<LEAD_AGENT>.md`, frontmatter stripped).
 2. An **engine note**: "You are running on <label> inside Skill Vault." It explains how tool names map
-   (the vault tools as this engine names them). Its shell line depends on the engine: "Bash" is your
-   shell tool, git only (Codex, Grok), or — on Copilot — there is no shell tool, so you can't run git;
-   use a vault tool, or give the user the exact command. It also says subagents aren't available on
+   (the vault tools as this engine names them). Its shell line depends on the engine: your shell tool
+   runs in a sandbox (Codex), or — on Copilot and, for now, Grok — there is no shell tool, so you can't
+   run git; use a vault tool, or give the user the exact command. With `writes: false` (Grok for now) it
+   also says there are no file edit/write tools, so every change goes through the vault tools. It also
+   says subagents aren't available on
    this engine, so when the instructions say to delegate, do that work yourself using the matching
    skill. Copilot is the exception: it loads the plugin's agents (verified).
 3. A **skills index**: one line per plugin skill with its name, its `description`, and the absolute
@@ -355,7 +369,7 @@ cost otherwise.
 | Claude | `Bash(git:*)` | Edit/Write (cwd + add-dirs) | `mcp__vault__*` | `--strict-mcp-config`, `--setting-sources ""` (today) |
 | Codex | any command, **sandboxed** (`workspace-write`, `windows.sandbox="unelevated"`) | vault + repos only (sandbox), network on | vault MCP (tools auto-approved) | `--ignore-user-config` |
 | Copilot | **none** (`--available-tools` lists no shell tool) | `create`/`edit` + `--allow-tool write` (cwd + add-dirs + system temp, where Copilot saves large tool output) | `vault` | `--disable-builtin-mcps`; `--available-tools` drops every tool not listed, including the computer-use plugin |
-| Grok | `Bash(git *)` (unverified) | `--tools` allowlist (unverified) | vault MCP | app-owned `GROK_HOME`, compat off |
+| Grok | **none** for now (no `run_terminal_cmd`, no `--allow`); `Bash(git *)` after the live check | **none** for now (no `write_file` / `search_replace` in `--tools`); restored after the live check | vault MCP | app-owned `GROK_HOME`, compat off |
 
 - Every engine registers **one** MCP server, `vault`, built by the existing `buildMcpConfig` and
   allowed as a whole server. Tools added to `assistant-mcp/bridge.ts` later reach all four engines with
@@ -366,11 +380,12 @@ cost otherwise.
   `--dangerously-skip-permissions` or `--dangerously-bypass-approvals-and-sandbox`. One unit test
   (`engines/safety.test.ts`) asserts that for every registered engine's `buildTurn` (new and resumed
   chat, login and API key), matching `--flag=value` forms too, plus: no Copilot argument contains
-  `shell(`, Claude's and Grok's shell rules are git-only, and Codex always passes
-  `sandbox_mode="workspace-write"`.
+  `shell(`, Grok gets no shell tool, no `--allow` rule and no file-write tool, Claude's shell rule is
+  git-only, and Codex always passes `sandbox_mode="workspace-write"`.
 - The live check in the plan runs a refused action on each engine (a non-git command, and a write
   outside the vault) and confirms it was refused. For Codex, the refused action is only the write
-  outside the vault. For Copilot, the command can't even be attempted (no shell tool).
+  outside the vault. For Copilot, the command can't even be attempted (no shell tool). For Grok, the
+  check runs with its shell and write tools restored, before they ship.
 
 ## Install flow
 
@@ -382,6 +397,11 @@ cost otherwise.
    - PowerShell steps run `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "<installer>"`.
      These are the vendors' documented one-liners, and the bypass is for that one process.
    - The commands come from the engine module and never from the request.
+   - Steps run with stdin closed, so a vendor script that prompts fails instead of waiting. A step still
+     running after 10 minutes is killed and the install fails with that message.
+   - While it runs, Escape and the backdrop don't close the dialog, but **Cancel install** calls
+     `POST /engines/:id/install/cancel`, which kills the step; the stream then ends with `done` ok:false
+     "The install was stopped."
 3. On success the server re-detects with refresh (which clears the remembered exe). The dialog shows
    "Installed v…" and, when the provider signs in with an account and isn't signed in yet, moves
    straight on to **Sign in**.
@@ -392,9 +412,10 @@ cost otherwise.
 
 ## Sign-in flow
 
-1. **Sign in** starts `POST /engines/:id/login`. The server spawns `powershell.exe -NoProfile -NoExit
-   -Command "& '<exe>' <login args>"` in a **new visible console window** (`detached: true`,
-   `windowsHide: false`).
+1. **Sign in** starts `POST /engines/:id/login`. The server spawns `powershell.exe -NoProfile -Command
+   "& '<exe>' <login args>; …; exit $code"` in a **new visible console window** (`detached: true`,
+   `windowsHide: false`). The window exits with the login command's exit code; on a failure it first
+   waits for Enter so the error stays readable.
    - The window's title is "Sign in to <Provider>".
    - It uses the engine's login-mode env (stray tokens stripped; `GROK_HOME` for Grok).
    - The command is built only from the resolved exe path and the engine's fixed args.
@@ -406,8 +427,15 @@ cost otherwise.
    `GET /engines/:id?refresh=1&mode=login` every 2 s for up to 10 minutes.
 3. Once that view shows a login (`auth.mode` login) with `signed_in` true, the dialog shows "Signed in as
    <account>" and the server closes the window. A status for the other mode never closes it.
-4. **Cancel** calls `/login/cancel`, which kills the window's process tree. A timeout does the same and
-   says "Didn't see a sign-in — try again".
+   - **Already signed in at start ("Sign in again").** Stored state (Copilot's config, Grok's
+     `auth.json`, `codex login status`) can read as signed in with an expired token, so `signed_in` proves
+     nothing. The start response says `already_signed_in: true`; the server never closes that window
+     early, and the dialog finishes only when `GET /engines/:id`'s `sign_in` reports the window exited
+     with code 0.
+   - A window that exits with any other code is reported as failed ("The sign-in didn't finish (exit
+     code N)") with **Try again**.
+4. **Cancel** calls `/login/cancel`, which kills the window's process tree — only when the open window
+   belongs to that provider. A timeout does the same and says "Didn't see a sign-in — try again".
 5. While a sign-in is pending, `isBusy` reports busy (like `notionSignInPending`).
 
 **API key mode.** A radio button switches **Account login / API key** for the selected provider. The key
