@@ -66,16 +66,20 @@ already reads as signed in) waits for that window's login to finish instead, and
 **What differs by provider**
 - *Subagents*: Claude and Copilot use the five specialist subagents; on Codex and Grok the lead does
   that work itself with the same skills.
-- *Shell*: git only on Claude (recent Claude Code versions also run a few read-only commands, such as
-  `hostname`, on their own). Codex, Copilot and Grok have **no shell**, because none of them can be
-  limited to git: Copilot and Grok run "read-only" commands without asking, and on Windows Codex's
-  sandbox can't keep a command off the network, so a command could reach the app's own local API. On
-  those three the assistant checks updates, adopts and clones through the vault tools, which run in the
-  app, and tells you any other command to run yourself.
-- *File edits*: Claude, Codex and Copilot edit files directly. Codex's and Copilot's edits stay in the
-  vault and repos folders (Copilot can also write the system temp folder); Claude Code's file tools
-  aren't limited to those folders. Grok can't edit files directly; it makes only the changes the vault
-  tools offer.
+- *Shell*: git only on Claude, for history and clones, one plain command at a time. It can't run
+  `hostname` or `ls`, chain or pipe commands, or use `git push`, `commit` or `config`. Claude Code runs
+  read-only commands on its own whatever a tool list says, so Skill Vault checks every shell command
+  with a hook and removes Claude Code's PowerShell and Monitor tools. (On Windows that leaves Git Bash,
+  which comes with Git for Windows, as the only way to run git.) This limits what the assistant runs,
+  but git isn't a sandbox: it still follows the config and hooks of a repository it trusts. Codex,
+  Copilot and Grok have **no shell**, because none of them can be limited to git: Copilot and Grok run
+  "read-only" commands without asking, and on Windows Codex's sandbox can't keep a command off the
+  network, so a command could reach the app's own local API. On those three the assistant checks
+  updates, adopts and clones through the vault tools, which run in the app, and tells you any other
+  command to run yourself.
+- *File edits*: Claude, Codex and Copilot edit files directly, and their edits stay in the vault and
+  repos folders (Copilot can also write the system temp folder). Claude can still read files elsewhere.
+  Grok can't edit files directly; it makes only the changes the vault tools offer.
 - *Cost*: shown for Claude and Grok; the others don't report it.
 - AI tagging and merge-on-update always use Claude Code.
 
@@ -249,11 +253,10 @@ deliberately bounded:
 - **Cannot (by design):** delete skills, force-overwrite Notion or connect
   Notion OAuth through its vault tools; those stay in the UI, with you. How
   far its shell and file edits reach depends on the provider: on Claude the
-  shell runs git only; Codex, Copilot and Grok have no shell. On Codex and
-  Copilot file edits stay inside the vault and your clones folder (Copilot
-  can also write the system temp folder); Claude Code's file tools are not
-  limited to those folders. See "What differs by provider" under
-  [Providers](#providers).
+  shell runs git only, for history and clones; Codex, Copilot and Grok have
+  no shell. On Claude, Codex and Copilot file edits stay inside the vault and
+  your clones folder (Copilot can also write the system temp folder). See
+  "What differs by provider" under [Providers](#providers).
 
 ## Install the assistant's skills into your vault
 
@@ -274,8 +277,8 @@ conversation is remembered across turns and app restarts), a plugin bundle
 providing the agents and skills above, and an MCP bridge that exposes vault
 operations as tools by calling the app's own HTTP API — which is why every
 agent action shows up in Activity and history like your own clicks. Tool access
-is allowlisted (`git` is the only shell command it's given; see
-[Providers](#providers) for what recent Claude Code versions do beyond that). The
+is allowlisted: anything not listed is denied, file edits are limited to the vault
+and clones folder, and a hook lets the shell run plain `git` commands only. The
 other providers get the same instructions, skills and vault tools, with the shell
 and file limits listed under [Providers](#providers).
 Technical details: [tech reference](tech_reference.md) and the app's

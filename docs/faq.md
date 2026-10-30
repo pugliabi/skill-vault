@@ -54,7 +54,7 @@ Chat turns run through your local Claude Code CLI on your existing Claude subscr
 Your Claude login by default — even if `ANTHROPIC_API_KEY` is set in your environment for some other tool. To bill an API account instead, choose **API key** under **Settings → AI assistant → Sign in with**, paste a key (or use the environment's), and add a workspace ID if the key isn't scoped to one. A saved key is stored in plain text in `~/.skill-vault/config.json`.
 
 **Can the assistant break my vault?**
-It edits through the same audited API the UI uses, so every change appears in Activity and is restorable from version history. Deleting skills, force-overwriting Notion, arbitrary shell commands, and anything outside the vault/clones folders are excluded from its toolset by design — those remain manual, in the UI.
+It edits through the same audited API the UI uses, so every change appears in Activity and is restorable from version history. Deleting skills, force-overwriting Notion, arbitrary shell commands, and edits outside the vault/clones folders are excluded from its toolset by design — those remain manual, in the UI.
 
 **Why doesn't the mic button show in the assistant?**
 Voice input uses the browser's built-in speech recognition (Chrome and Edge ship it; Firefox doesn't). The button hides itself where the API is unavailable, and the first use asks for microphone permission.

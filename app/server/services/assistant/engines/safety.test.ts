@@ -3,7 +3,7 @@
  * yolo / allow-all flag in any turn (new or resumed chat, login or API key),
  * Copilot has no shell permission at all, Grok has no shell and no file-write
  * tool, Codex has no shell and runs its edits in the workspace-write sandbox,
- * and Claude's shell is git-only.
+ * and Claude's shell is git-only with its edits limited to the vault and repos.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -86,6 +86,13 @@ test("shell: none on Codex, Copilot and Grok; git-only on Claude", () => {
       const shells = args.flatMap((a) => a.match(/Bash\([^)]*\)/g) ?? []);
       assert.ok(shells.length > 0, `${id} declares its shell rule`);
       for (const s of shells) assert.match(s, /^Bash\(git[ :]\*\)$/, `${id}: ${s} isn't git-only`);
+      // Claude Code runs its read-only commands whatever the allow rules say; these close that.
+      assert.equal(args[args.indexOf("--permission-mode") + 1], "dontAsk", "nothing unlisted runs, in any start mode");
+      assert.deepEqual(args[args.indexOf("--disallowedTools") + 1].split(","), ["PowerShell", "Monitor"]);
+      assert.equal(JSON.parse(args[args.indexOf("--settings") + 1]).hooks.PreToolUse[0].matcher, "Bash", "Bash goes through the git gate");
+      const allowed = args[args.indexOf("--allowedTools") + 1].split(",");
+      assert.ok(!allowed.includes("Edit") && !allowed.includes("Write"), "file edits are limited by path");
+      assert.ok(allowed.includes("Edit(//c/vault/**)") && allowed.includes("Edit(//c/repos/**)"));
     }
   }
   for (const args of turns(byId("codex"))) {

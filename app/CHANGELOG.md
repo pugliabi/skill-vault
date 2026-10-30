@@ -45,6 +45,12 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
 - Finish: a new-vault folder that only holds the empty skeleton from an earlier
   failed Finish counts as empty, so pressing Finish again works; a failed
   watcher restart after the settings were saved no longer stops Finish.
+- Claude assistant limits now match the docs. `--permission-mode dontAsk` (a
+  `-p` run could start in auto mode), `Edit(path)` rules for the vault and repos
+  folder instead of bare `Edit`/`Write`, `--disallowedTools PowerShell,Monitor`,
+  a Bash hook (`assistant-plugin/hooks/git-gate.mjs`) that lets through one
+  plain git command for history or clones, and `safe.bareRepository=explicit`.
+  The assistant can no longer `git push`, `commit` or `config`.
 
 ### Changed
 - Push and Notion database selection now share services with the setup guide.

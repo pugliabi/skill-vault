@@ -24,6 +24,10 @@ semver; the project is pre-1.0, so minor versions carry feature batches.
 ### Fixed
 - Notion sign-in returns to the page that started it, and a slow Notion
   sign-in no longer lets the installed app stop itself.
+- **The Claude assistant now keeps to its documented limits.** Its file edits stay in the vault and repos
+  folders, and its shell runs plain `git` for history and clones and nothing else. Before, it could write
+  anywhere and run read-only commands such as `hostname`. It can no longer `git push`, `commit` or
+  `config`, or chain and pipe commands.
 
 ### Changed
 - Push and Notion database selection share services with the setup guide.

@@ -269,8 +269,32 @@ One chat turn = one headless `claude -p` spawn (Claude Code CLI) with:
 - `--mcp-config` launching `server/assistant-mcp/` — a stdio MCP server whose
   tools call back into the app's own HTTP API (hence auditing/history for
   free). ~19 tools; deliberately no delete, no Notion force, no OAuth;
-- an allowlist as the safety boundary: file tools scoped to the vault,
-  `Bash(git:*)` only, web search/fetch, `mcp__vault__*`.
+- a fixed set of limits as the safety boundary, because `-p` has no prompt
+  channel (checked with Claude Code 2.1.293):
+  - `--permission-mode dontAsk`, so anything unlisted is denied. Left unset,
+    `claude -p` can start in auto mode, for example with `DISABLE_TELEMETRY`;
+  - `--allowedTools` with one `Edit(//<path>/**)` rule per folder (vault and
+    repos, each as configured and as resolved, so a junction still matches)
+    instead of bare `Edit` and `Write`. An `Edit` rule also covers the Write
+    tool, and a `Write(path)` rule never matches. Writes to a `--plugin-dir`
+    are refused whatever the rules say, so the bundle stays read-only. Web
+    search/fetch and `mcp__vault__*` are listed as before;
+  - `--disallowedTools PowerShell,Monitor`: both run read-only commands with no
+    allow rule;
+  - a `PreToolUse` hook on Bash (`assistant-plugin/hooks/git-gate.mjs`), passed
+    in inline `--settings` because `--setting-sources ""` loads no settings
+    file. `Bash(git:*)` alone isn't git-only: Claude Code runs its read-only
+    commands (`hostname`, `ls`, `whoami`) anyway, and the rule also passes
+    `git -c alias.x=!cmd x`. The hook lets through one plain git command from
+    its list of history and clone subcommands, refuses options that run a
+    program or write elsewhere, and keeps clone targets and commands that
+    change a repository in the vault or repos folder. It only ever refuses, so
+    Claude Code's own checks still apply to what it lets through. If the script
+    can't run, the call goes ahead on Claude Code before 2.1.295 and is blocked
+    from then on (`onFailure: "block"`);
+  - `safe.bareRepository=explicit` for those git commands (`env` in the same
+    settings), so a bare repository planted in a folder or shipped inside a
+    clone can't run commands from its config.
 
 Proactive suggestions are deterministic: `services/assistant/suggestions.ts`
 composes ranked cards from live signals (statuses, audit, activity, Notion

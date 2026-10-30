@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ALLOWED_TOOLS, HARD_TIMEOUT_MS, IDLE_TIMEOUT_MS, buildTurnArgs, runTurn } from "./turn.ts";
+import { ALLOWED_TOOLS, HARD_TIMEOUT_MS, IDLE_TIMEOUT_MS, buildTurnArgs, editRule, runTurn } from "./turn.ts";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -15,9 +15,24 @@ const BASE_ARGS = {
   leadAgent: "vault-assistant",
   contextBlock: "# ctx\nline two",
   mcpConfigJson: '{"mcpServers":{}}',
+  vaultPath: "C:\\Github\\vault",
   pluginDir: "C:\\app\\assistant-plugin",
   reposDir: "C:\\Github\\skills-repos",
 };
+
+function flag(args: string[], name: string): string {
+  const i = args.indexOf(name);
+  assert.ok(i >= 0, `${name} is passed`);
+  return args[i + 1];
+}
+
+function gitGate(args: string[]) {
+  const settings = JSON.parse(flag(args, "--settings"));
+  assert.deepEqual(Object.keys(settings).sort(), ["env", "hooks"]);
+  assert.deepEqual(Object.keys(settings.hooks), ["PreToolUse"]);
+  assert.equal(settings.hooks.PreToolUse.length, 1);
+  return settings.hooks.PreToolUse[0];
+}
 
 test("buildTurnArgs: first turn uses --session-id, later turns --resume; flag set is exact", () => {
   const first = buildTurnArgs({ ...BASE_ARGS, isFirstTurn: true });
@@ -38,8 +53,31 @@ test("buildTurnArgs: first turn uses --session-id, later turns --resume; flag se
     "C:\\app\\assistant-plugin",
     "--agent",
     "vault-assistant",
+    "--permission-mode",
+    "dontAsk",
     "--allowedTools",
-    ALLOWED_TOOLS,
+    `${ALLOWED_TOOLS},Edit(//c/Github/vault/**),Edit(//c/Github/skills-repos/**)`,
+    "--disallowedTools",
+    "PowerShell,Monitor",
+    "--settings",
+    JSON.stringify({
+      env: { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "safe.bareRepository", GIT_CONFIG_VALUE_0: "explicit" },
+      hooks: {
+        PreToolUse: [
+          {
+            matcher: "Bash",
+            hooks: [
+              {
+                type: "command",
+                command: process.execPath,
+                args: [path.join("C:\\app\\assistant-plugin", "hooks", "git-gate.mjs"), "--hook", "C:\\Github\\vault", "C:\\Github\\skills-repos"],
+                onFailure: "block",
+              },
+            ],
+          },
+        ],
+      },
+    }),
     "--add-dir",
     "C:\\Github\\skills-repos",
     "--add-dir",
@@ -59,6 +97,94 @@ test("buildTurnArgs: first turn uses --session-id, later turns --resume; flag se
   assert.match(ALLOWED_TOOLS, /mcp__vault__\*/);
   assert.ok(/(^|,)Task(,|$)/.test(ALLOWED_TOOLS), "Task stays — the lead delegates to the bundled subagents");
   assert.ok(!/(^|,)Bash(,|$)/.test(ALLOWED_TOOLS), "unrestricted Bash must never be allowed");
+});
+
+test("buildTurnArgs: a resumed turn keeps every limit", () => {
+  const first = buildTurnArgs({ ...BASE_ARGS, isFirstTurn: true });
+  const resumed = buildTurnArgs({ ...BASE_ARGS, isFirstTurn: false });
+  for (const name of ["--permission-mode", "--allowedTools", "--disallowedTools", "--settings"]) {
+    assert.equal(flag(resumed, name), flag(first, name), name);
+  }
+});
+
+test("buildTurnArgs: file edits are limited by path, never a bare Edit or Write", () => {
+  const args = buildTurnArgs({ ...BASE_ARGS, isFirstTurn: true });
+  const allowed = flag(args, "--allowedTools").split(",");
+  assert.ok(!allowed.includes("Edit"), "a bare Edit reaches any file");
+  assert.ok(!allowed.includes("Write"), "a bare Write reaches any file");
+  assert.ok(!allowed.some((rule) => rule.startsWith("Write(")), "Claude Code never matches a Write(path) rule");
+  assert.deepEqual(allowed.filter((rule) => rule.startsWith("Edit(")), ["Edit(//c/Github/vault/**)", "Edit(//c/Github/skills-repos/**)"]);
+});
+
+test("buildTurnArgs: the plugin bundle stays readable but gets no edit rule", () => {
+  const args = buildTurnArgs({ ...BASE_ARGS, isFirstTurn: true });
+  assert.ok(!flag(args, "--allowedTools").includes("assistant-plugin"), "Claude Code refuses writes to a --plugin-dir anyway");
+  assert.equal(args.filter((a) => a === "C:\\app\\assistant-plugin").length, 2, "--plugin-dir and --add-dir");
+});
+
+test("buildTurnArgs: no shell tool but Bash, and Bash goes through the git gate", () => {
+  const args = buildTurnArgs({ ...BASE_ARGS, isFirstTurn: true });
+  assert.deepEqual(flag(args, "--disallowedTools").split(","), ["PowerShell", "Monitor"]);
+  assert.equal(flag(args, "--permission-mode"), "dontAsk");
+
+  const gate = gitGate(args);
+  assert.equal(gate.matcher, "Bash");
+  const hook = gate.hooks[0];
+  assert.equal(hook.command, process.execPath, "the running node, never node from PATH");
+  assert.equal(hook.onFailure, "block");
+  assert.equal(path.basename(hook.args[0]), "git-gate.mjs");
+  assert.deepEqual(hook.args.slice(1), ["--hook", "C:\\Github\\vault", "C:\\Github\\skills-repos"]);
+});
+
+test("buildTurnArgs: git won't use a bare repository it merely finds in a folder", () => {
+  const { env } = JSON.parse(flag(buildTurnArgs({ ...BASE_ARGS, isFirstTurn: true }), "--settings"));
+  assert.deepEqual(env, { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "safe.bareRepository", GIT_CONFIG_VALUE_0: "explicit" });
+});
+
+test("the git gate script ships inside the plugin bundle", () => {
+  const plugin = path.resolve(import.meta.dirname, "..", "..", "..", "assistant-plugin");
+  const args = buildTurnArgs({ ...BASE_ARGS, pluginDir: plugin, isFirstTurn: true });
+  assert.ok(fs.existsSync(gitGate(args).hooks[0].args[0]));
+});
+
+test("buildTurnArgs: --setting-sources stays empty and the hook comes from --settings alone", () => {
+  const args = buildTurnArgs({ ...BASE_ARGS, isFirstTurn: true });
+  assert.equal(flag(args, "--setting-sources"), "");
+  assert.ok(args.includes("--strict-mcp-config"));
+});
+
+test("editRule writes each path the way Claude Code matches it", () => {
+  assert.equal(editRule("C:\\Github\\vault"), "Edit(//c/Github/vault/**)");
+  assert.equal(editRule("C:\\Github\\vault\\"), "Edit(//c/Github/vault/**)");
+  assert.equal(editRule("D:/My Skills/vault"), "Edit(//d/My Skills/vault/**)");
+  assert.equal(editRule("C:\\Github\\a\\..\\vault"), "Edit(//c/Github/vault/**)");
+  assert.equal(editRule("C:\\"), "Edit(//c/**)");
+  assert.equal(editRule("/home/me/vault"), "Edit(//home/me/vault/**)");
+  assert.equal(editRule("/home/me/vault/"), "Edit(//home/me/vault/**)");
+});
+
+test("editRule escapes gitignore pattern characters, or the rule would match nothing", () => {
+  assert.equal(editRule("C:\\[work]\\vault"), "Edit(//c/\\[work\\]/vault/**)");
+  assert.equal(editRule("/home/me/a*b?c"), "Edit(//home/me/a\\*b\\?c/**)");
+});
+
+test("buildTurnArgs: a folder behind a junction or symlink gets a rule for both paths", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sv-turn-args-"));
+  try {
+    const real = path.join(base, "real-vault");
+    const link = path.join(base, "linked-vault");
+    fs.mkdirSync(real);
+    fs.symlinkSync(real, link, "junction");
+    const args = buildTurnArgs({ ...BASE_ARGS, vaultPath: link, isFirstTurn: true });
+
+    const realPath = fs.realpathSync(real);
+    const allowed = flag(args, "--allowedTools");
+    assert.ok(allowed.includes(editRule(link)), "the path as configured");
+    assert.ok(allowed.includes(editRule(realPath)), "the path it resolves to");
+    assert.deepEqual(gitGate(args).hooks[0].args.slice(2), [link, realPath, "C:\\Github\\skills-repos"]);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
 });
 
 function scriptedRunner(lines: string[]): ClaudeStreamRunner & { calls: Array<{ args: string[]; stdin: string; cwd: string; idle: number; hard: number }> } {
