@@ -97,7 +97,7 @@ function segmentProblem(seg: string): string | null {
 }
 
 /** Why `p` isn't a relative, "/"-separated path with safe segments, or null. */
-function pathProblem(p: string): string | null {
+export function pathProblem(p: string): string | null {
   if (p.includes("\\") || p.startsWith("/") || /^[A-Za-z]:/.test(p)) return 'use a relative path with "/"';
   for (const seg of p.split("/")) {
     const why = segmentProblem(seg);
