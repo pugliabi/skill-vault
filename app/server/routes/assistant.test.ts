@@ -121,3 +121,72 @@ test("install: a throwing installer still ends the stream with one done line", a
   const lines = (await (await fetch(`${base}/engines/codex/install`, send("POST", {}))).text()).trim().split("\n").map((l) => JSON.parse(l));
   assert.deepEqual(lines, [{ type: "done", ok: false, message: "spawn exploded" }]);
 });
+
+/** A sign-in manager whose window is recorded instead of opened. */
+async function signInHarness(over: { openWindow?: () => { close(): void } | { error: string } } = {}) {
+  const { createSignInManager } = await import("../services/assistant/engines/signIn.ts");
+  const { createEngineJobs } = await import("../services/assistant/engines/jobs.ts");
+  const win = { opened: 0, closed: 0 };
+  const signIn = createSignInManager({
+    platform: "win32",
+    openWindow: over.openWindow ?? (() => (win.opened++, { close: () => void win.closed++ })),
+    setTimer: () => ({ cancel: () => {} }),
+  });
+  return { win, jobs: createEngineJobs({ signIn }) };
+}
+
+test("login: opens the window, and the window closes once the engine reports signed in", async () => {
+  let signedIn = false;
+  const { win, jobs } = await signInHarness();
+  const engine = fakes.fakeEngine({ authStatus: async () => ({ signed_in: signedIn, method: "login" }) });
+  const base = await serve(mod.assistantRouter({ mode: "development", appRoot: APP_ROOT, registry: reg.createRegistry([engine]), jobs }));
+  assert.deepEqual(await (await fetch(`${base}/engines/codex/login`, send("POST", {}))).json(), { started: true, hint: "Do the thing." });
+  assert.equal(win.opened, 1);
+  await fetch(`${base}/engines/codex?refresh=1`);
+  assert.equal(win.closed, 0);
+  signedIn = true;
+  await fetch(`${base}/engines/codex?refresh=1&mode=login`);
+  assert.equal(win.closed, 1);
+});
+
+test("login/cancel closes the window", async () => {
+  const { win, jobs } = await signInHarness();
+  const base = await serve(mod.assistantRouter({ mode: "development", appRoot: APP_ROOT, registry: reg.createRegistry([fakes.fakeEngine()]), jobs }));
+  await fetch(`${base}/engines/codex/login`, send("POST", {}));
+  assert.equal(jobs.signIn.pending(), true);
+  assert.deepEqual(await (await fetch(`${base}/engines/codex/login/cancel`, send("POST", {}))).json(), { ok: true });
+  assert.equal(win.closed, 1);
+  assert.equal(jobs.signIn.pending(), false);
+});
+
+test("login: a request whose Host isn't this PC gets 403 and no window", async () => {
+  const { win, jobs } = await signInHarness();
+  const base = await serve(mod.assistantRouter({ mode: "development", appRoot: APP_ROOT, registry: reg.createRegistry([fakes.fakeEngine()]), jobs }));
+  // fetch can't set Host; a raw request can.
+  const http = (await import("node:http")).default;
+  const u = new URL(`${base}/engines/codex/login`);
+  const res = await new Promise<{ status: number; body: { error?: string } }>((resolve, reject) => {
+    const req = http.request(
+      { host: u.hostname, port: u.port, path: u.pathname, method: "POST", headers: { Host: "evil.example", "content-type": "application/json" } },
+      (r) => {
+        let data = "";
+        r.on("data", (d) => (data += d));
+        r.on("end", () => resolve({ status: r.statusCode ?? 0, body: JSON.parse(data || "{}") }));
+      },
+    );
+    req.on("error", reject);
+    req.end("{}");
+  });
+  assert.equal(res.status, 403);
+  assert.match(res.body.error ?? "", /only be started from this PC/);
+  assert.equal(win.opened, 0);
+});
+
+test("login: a window that fails to open answers 500 with the reason", async () => {
+  const { jobs } = await signInHarness({ openWindow: () => ({ error: "Couldn't open the sign-in window: powershell.exe didn't start." }) });
+  const base = await serve(mod.assistantRouter({ mode: "development", appRoot: APP_ROOT, registry: reg.createRegistry([fakes.fakeEngine()]), jobs }));
+  const res = await fetch(`${base}/engines/codex/login`, send("POST", {}));
+  assert.equal(res.status, 500);
+  assert.match(((await res.json()) as { error: string }).error, /powershell\.exe didn't start/);
+  assert.equal(jobs.signIn.pending(), false);
+});

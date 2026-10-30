@@ -51,7 +51,7 @@ import { composeSuggestions, gatherSuggestionInputs } from "../services/assistan
 import { addDismissal, readDismissals, readSweepCache, removeDismissal } from "../services/assistant/suggestionStore.ts";
 import type { UpdateSweeper } from "../services/assistant/updateSweep.ts";
 import { broadcastSse } from "./events.ts";
-import { refuseCrossSiteWrites } from "./sameOrigin.ts";
+import { isLoopbackRequest, refuseCrossSiteWrites } from "./sameOrigin.ts";
 import type { AssistantStreamEvent } from "../services/assistant/streamEvents.ts";
 
 export interface AssistantRouterOpts {
@@ -151,6 +151,7 @@ export function assistantRouter(opts: AssistantRouterOpts): Router {
       res.status(404).json({ error: "unknown provider" });
       return;
     }
+    if (view.auth.mode === "login" && view.auth.signed_in === true && jobs.signIn.current() === view.id) jobs.signIn.finish(view.id);
     res.json(view);
   });
 
@@ -227,6 +228,32 @@ export function assistantRouter(opts: AssistantRouterOpts): Router {
       if (!doneWritten) write({ type: "done", ok: false, message: (err as Error).message || "The install failed unexpectedly." });
     }
     res.end();
+  });
+
+  router.post("/engines/:id/login", (req, res) => {
+    const id = req.params.id;
+    const engine = isEngineId(id) ? registry.get(id) : undefined;
+    if (!engine) {
+      res.status(404).json({ error: "unknown provider" });
+      return;
+    }
+    if (!isLoopbackRequest(req)) {
+      res.status(403).json({ error: "sign-in can only be started from this PC" });
+      return;
+    }
+    const env = { ...engine.childEnv({ auth: "login" }, process.env), ...engine.loginEnv() };
+    const r = jobs.signIn.start(engine, env);
+    if ("error" in r) {
+      res.status(r.reason === "spawn_failed" ? 500 : 409).json({ error: r.error });
+      return;
+    }
+    states.invalidate(engine.id);
+    res.json({ started: true, hint: engine.loginHint });
+  });
+
+  router.post("/engines/:id/login/cancel", (_req, res) => {
+    jobs.signIn.cancel();
+    res.json({ ok: true });
   });
 
   router.get("/auth", (_req, res) => {
