@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { createClaudeEngine } from "./claude.ts";
 import { createCodexEngine } from "./codex.ts";
+import { createCopilotEngine } from "./copilot.ts";
 import type { AssistantEngine, EngineId } from "./types.ts";
 
 export interface EngineRegistry {
@@ -19,7 +20,7 @@ let shared: EngineRegistry | null = null;
 
 /** The app's engines, in the order Settings lists them. */
 export function defaultRegistry(): EngineRegistry {
-  shared ??= createRegistry([createClaudeEngine(), createCodexEngine()]);
+  shared ??= createRegistry([createClaudeEngine(), createCodexEngine(), createCopilotEngine()]);
   return shared;
 }
 
