@@ -117,6 +117,33 @@ test("paths must be relative, /-separated, unique and not ignored", () => {
   refused(() => create("demo", [{ path: "SKILL.md", content: md("demo") }, { path: "A.md", content: "x" }, { path: "a.md", content: "y" }]), 400, /duplicate/);
 });
 
+test("path segments Windows or macOS would write somewhere else are refused and write nothing", () => {
+  const cases: Array<[string, string]> = [
+    [".GIT/config", "ignored name in another casing"],
+    ["GIT~1/config", "8.3 short name"],
+    ["SKILL.md.", "trailing dot"],
+    ["a.md ", "trailing space"],
+    ["a.md:x", "NTFS stream"],
+    ["con.md", "device name with an extension"],
+    ["NUL", "device name"],
+    ["a?.md", "reserved character"],
+    ["a\x01.md", "control character"],
+  ];
+  for (const [bad, rule] of cases) {
+    refused(() => create("demo", [{ path: "SKILL.md", content: md("demo") }, { path: bad, content: "x" }]), 400, /invalid file path/);
+    assert.equal(fs.existsSync(path.join(vault, "skills", "demo")), false, `${rule}: ${JSON.stringify(bad)} wrote the skill`);
+  }
+});
+
+test("an update can't reach an existing .git folder through its short name", () => {
+  create("demo");
+  fs.mkdirSync(path.join(vault, "skills", "demo", ".git"));
+  const before = fs.readdirSync(path.join(vault, "skills", "demo")).sort();
+  refused(() => saveSkill(vault, "demo", { mode: "update", files: [{ path: "GIT~1/config", content: "x" }] }, "x"), 400, /invalid file path/);
+  assert.equal(fs.existsSync(path.join(vault, "skills", "demo", ".git", "config")), false);
+  assert.deepEqual(fs.readdirSync(path.join(vault, "skills", "demo")).sort(), before);
+});
+
 test("binary content and size limits are refused", () => {
   refused(() => create("demo", [{ path: "SKILL.md", content: md("demo") }, { path: "b.bin", content: "a\0b" }]), 400, /binary/);
   const big = "x".repeat(1_048_577);

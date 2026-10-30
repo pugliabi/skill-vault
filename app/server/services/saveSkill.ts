@@ -79,12 +79,31 @@ export function parseSaveRequest(body: unknown): SaveRequest {
   return { mode: b.mode, files };
 }
 
-/** "/"-separated and relative, with no empty, ".", ".." or ignored segments; null otherwise. */
-function cleanRelPath(p: string): string | null {
-  if (p.includes("\\") || p.startsWith("/") || /^[A-Za-z]:/.test(p)) return null;
-  const segs = p.split("/");
-  if (segs.some((s) => s === "" || s === "." || s === ".." || IGNORE_NAMES.has(s))) return null;
-  return segs.join("/");
+const IGNORED_LOWER = new Set([...IGNORE_NAMES].map((n) => n.toLowerCase()));
+
+/**
+ * Why one segment isn't safe, or null. Windows and macOS match names without
+ * case, and Windows also opens `.git` as `GIT~1`, `a.md` as `a.md.` or
+ * `a.md `, a stream for `a.md:x`, and a device for CON/NUL/COM1...
+ */
+function segmentProblem(seg: string): string | null {
+  if (seg === "" || seg === "." || seg === "..") return 'empty, "." and ".." segments aren\'t allowed';
+  if (IGNORED_LOWER.has(seg.toLowerCase())) return `"${seg}" is an ignored folder`;
+  if (/[\x00-\x1f<>:"|?*]/.test(seg)) return `"${seg}" has a character Windows doesn't allow`;
+  if (/[. ]$/.test(seg)) return `"${seg}" ends in a dot or a space`;
+  if (/~\d/.test(seg)) return `"${seg}" looks like a Windows short name`;
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(seg)) return `"${seg}" is a reserved Windows name`;
+  return null;
+}
+
+/** Why `p` isn't a relative, "/"-separated path with safe segments, or null. */
+function pathProblem(p: string): string | null {
+  if (p.includes("\\") || p.startsWith("/") || /^[A-Za-z]:/.test(p)) return 'use a relative path with "/"';
+  for (const seg of p.split("/")) {
+    const why = segmentProblem(seg);
+    if (why) return why;
+  }
+  return null;
 }
 
 interface PlannedWrite {
@@ -100,9 +119,10 @@ export function saveSkill(vaultPath: string, name: string, req: SaveRequest, sou
   const seen = new Set<string>();
   const plan: PlannedWrite[] = [];
   for (const f of req.files) {
-    const rel = cleanRelPath(f.path);
-    const abs = rel ? resolveSkillFilePath(vaultPath, name, rel) : null;
-    if (!rel || !abs) throw new SaveError(400, `invalid file path: ${f.path}`);
+    const problem = pathProblem(f.path);
+    const rel = f.path;
+    const abs = problem ? null : resolveSkillFilePath(vaultPath, name, rel);
+    if (!abs) throw new SaveError(400, `invalid file path: ${f.path}${problem ? ` (${problem})` : ""}`);
     if (rel.toLowerCase() === "skill.md" && rel !== "SKILL.md") {
       throw new SaveError(400, `Use the exact name SKILL.md (got "${rel}")`);
     }
