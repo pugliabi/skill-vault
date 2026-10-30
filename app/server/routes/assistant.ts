@@ -22,11 +22,14 @@ import path from "node:path";
 import { Router } from "express";
 import { readAppConfig, readAssistantBlock, writeAssistantBlock } from "../services/appConfig.ts";
 import { applyClaudeAuthPatch, claudeAuthStatus, type ClaudeAuthPatch } from "../services/claude/auth.ts";
-import { claudeAvailable } from "../services/claude/cli.ts";
+import { claudeAvailable, type ClaudeStreamRunner } from "../services/claude/cli.ts";
 import { getServerPort } from "../services/runtime.ts";
-import { mcpConfigArg } from "../services/assistant/mcpConfig.ts";
+import { buildMcpConfig } from "../services/assistant/mcpConfig.ts";
 import { buildTurnContext, gatherTurnContext, pickLeadAgent, resolveReposDir } from "../services/assistant/context.ts";
-import { buildTurnArgs, runTurn } from "../services/assistant/turn.ts";
+import { runTurn } from "../services/assistant/turn.ts";
+import { defaultRegistry, engineWorkDir, type EngineRegistry } from "../services/assistant/engines/registry.ts";
+import { engineAuth, selectedEngine } from "../services/assistant/engines/config.ts";
+import type { TurnInput, TurnSpec } from "../services/assistant/engines/types.ts";
 import {
   anyTurnCapacity,
   beginTurn,
@@ -52,6 +55,9 @@ export interface AssistantRouterOpts {
   appRoot: string;
   /** The background update sweeper — lets /suggestions report + trigger it. */
   sweeper?: Pick<UpdateSweeper, "runNow" | "isRunning">;
+  registry?: EngineRegistry;
+  /** Tests replace the CLI spawn. */
+  streamRunner?: ClaudeStreamRunner;
 }
 
 const VALID_CHIP_KINDS = new Set(["skill", "skills", "filter", "failure", "notion", "page", "suggestion"]);
@@ -81,6 +87,7 @@ function sanitizeChips(raw: unknown): ChatContextChip[] {
 
 export function assistantRouter(opts: AssistantRouterOpts): Router {
   const router = Router();
+  const registry = opts.registry ?? defaultRegistry();
   const pluginDir = path.join(opts.appRoot, "assistant-plugin");
 
   router.get("/status", async (req, res) => {
@@ -148,6 +155,7 @@ export function assistantRouter(opts: AssistantRouterOpts): Router {
         title: s.title || "(new chat)",
         agent: s.agent,
         skill: s.skill,
+        engine: s.engine,
         chips: s.chips,
         running: s.running,
         total_cost_usd: s.totalCostUsd,
@@ -275,7 +283,15 @@ export function assistantRouter(opts: AssistantRouterOpts): Router {
       return;
     }
 
-    let session = body.session_id ? getSession(body.session_id) : undefined;
+    const existing = body.session_id ? getSession(body.session_id) : undefined;
+    const engineId = existing?.engine ?? selectedEngine(readAssistantBlock());
+    const engine = registry.get(engineId);
+    if (!engine) {
+      res.status(409).json({ error: "That assistant provider isn't available in this version of Skill Vault." });
+      return;
+    }
+
+    let session = existing;
     if (body.session_id && !session) {
       res.status(404).json({ error: "session not found" });
       return;
@@ -286,6 +302,7 @@ export function assistantRouter(opts: AssistantRouterOpts): Router {
         agent,
         skill: agent === "skill" ? body.skill : undefined,
         chips: sanitizeChips(body.context),
+        engine: engineId,
       });
     }
 
@@ -312,7 +329,7 @@ export function assistantRouter(opts: AssistantRouterOpts): Router {
     const emit = (ev: AssistantStreamEvent): void => {
       if (!res.writableEnded) res.write(`${JSON.stringify(ev)}\n`);
     };
-    emit({ type: "session", session_id: session.id });
+    emit({ type: "session", session_id: session.id, engine: session.engine });
 
     // A dropped connection (tab closed, Stop without the POST) kills the
     // turn. NOTE: this must hang off `res`, not `req` — IncomingMessage
@@ -322,32 +339,39 @@ export function assistantRouter(opts: AssistantRouterOpts): Router {
       if (!res.writableEnded) abort.abort();
     });
 
-    const isFirstTurn = session.turns.length === 0;
     const contextBlock = buildTurnContext(
       gatherTurnContext({ agent: session.agent, skill: session.skill, chips: session.chips }),
     );
-    const args = buildTurnArgs({
+    const input: TurnInput = {
       sessionId: session.id,
-      isFirstTurn,
+      engineSessionId: session.engine_session_id,
+      isFirstTurn: session.turns.length === 0,
+      message,
       leadAgent: pickLeadAgent(session.agent),
       contextBlock,
-      mcpConfigJson: mcpConfigArg({ mode: opts.mode, appRoot: opts.appRoot, port }),
-      pluginDir,
+      mcp: buildMcpConfig({ mode: opts.mode, appRoot: opts.appRoot, port }).mcpServers.vault,
+      vaultPath: cfg.vault_path,
       reposDir: resolveReposDir(cfg as unknown as Record<string, unknown>),
-    });
+      pluginDir,
+      workDir: engineWorkDir(engine.id),
+      auth: engineAuth(readAssistantBlock(), engine.id),
+      baseEnv: process.env,
+    };
 
     try {
+      fs.mkdirSync(input.workDir, { recursive: true });
+      const spec: TurnSpec = engine.buildTurn(input);
       const result = await runTurn({
-        session,
-        message,
-        args,
-        cwd: cfg.vault_path,
+        spec,
+        parser: engine.createParser(),
+        authHint: (m) => engine.authHint(m),
         abort,
         emit,
+        streamRunner: opts.streamRunner,
       });
-      endTurn(session, { user: message, events: result.events, costUsd: result.costUsd });
+      endTurn(session, { user: message, events: result.events, costUsd: result.costUsd, engineSessionId: result.engineSessionId });
     } catch (err) {
-      // runTurn contains its own failures; this is a belt-and-braces guard.
+      // buildTurn refusals (not installed) land here too.
       endTurn(session, {
         user: message,
         events: [{ type: "error", message: (err as Error).message }],

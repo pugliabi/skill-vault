@@ -18,6 +18,7 @@ import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 import type { AssistantStreamEvent } from "./streamEvents.ts";
+import type { EngineId } from "./engines/types.ts";
 
 export type AgentKind = "vault" | "skill";
 
@@ -40,6 +41,9 @@ export interface AssistantSession {
   title: string;
   agent: AgentKind;
   skill?: string;
+  engine: EngineId;
+  /** Engine-assigned session id (Codex threads). */
+  engine_session_id?: string;
   chips: ChatContextChip[];
   turns: StoredTurn[];
   running: boolean;
@@ -54,6 +58,7 @@ export interface SessionSummary {
   title: string;
   agent: AgentKind;
   skill?: string;
+  engine: EngineId;
   turn_count: number;
   total_cost_usd: number;
   running: boolean;
@@ -82,7 +87,7 @@ function loadOnce(): void {
     const parsed = JSON.parse(raw) as { sessions?: PersistedSession[] };
     for (const p of parsed.sessions ?? []) {
       if (!p?.id) continue;
-      sessions.set(p.id, { ...p, chips: p.chips ?? [], turns: p.turns ?? [], running: false, totalCostUsd: p.totalCostUsd ?? 0 });
+      sessions.set(p.id, { ...p, engine: p.engine ?? "claude", chips: p.chips ?? [], turns: p.turns ?? [], running: false, totalCostUsd: p.totalCostUsd ?? 0 });
     }
   } catch {
     /* missing/corrupt store = start empty; never crash the app for chat history */
@@ -105,7 +110,7 @@ function persist(): void {
   }
 }
 
-export function createSession(opts: { agent: AgentKind; skill?: string; chips?: ChatContextChip[] }): AssistantSession {
+export function createSession(opts: { agent: AgentKind; skill?: string; chips?: ChatContextChip[]; engine?: EngineId }): AssistantSession {
   loadOnce();
   const now = new Date().toISOString();
   const session: AssistantSession = {
@@ -113,6 +118,7 @@ export function createSession(opts: { agent: AgentKind; skill?: string; chips?: 
     title: "", // set from the first user message
     agent: opts.agent,
     skill: opts.skill,
+    engine: opts.engine ?? "claude",
     chips: opts.chips ?? [],
     turns: [],
     running: false,
@@ -139,6 +145,7 @@ export function listSessions(): SessionSummary[] {
       title: s.title || "(new chat)",
       agent: s.agent,
       skill: s.skill,
+      engine: s.engine,
       turn_count: s.turns.length,
       total_cost_usd: s.totalCostUsd,
       running: s.running,
@@ -174,7 +181,7 @@ export function beginTurn(session: AssistantSession, abort: AbortController): bo
 
 export function endTurn(
   session: AssistantSession,
-  turn: { user: string; events: AssistantStreamEvent[]; costUsd?: number },
+  turn: { user: string; events: AssistantStreamEvent[]; costUsd?: number; engineSessionId?: string },
 ): void {
   session.running = false;
   session.abort = undefined;
@@ -184,6 +191,7 @@ export function endTurn(
     session.title = t.length > 60 ? `${t.slice(0, 59)}…` : t;
   }
   if (typeof turn.costUsd === "number") session.totalCostUsd += turn.costUsd;
+  if (turn.engineSessionId) session.engine_session_id = turn.engineSessionId;
   session.turns.push({ at: session.last_at, user: turn.user, events: turn.events });
   if (session.turns.length > MAX_TURNS_PER_SESSION) {
     session.turns.splice(0, session.turns.length - MAX_TURNS_PER_SESSION);

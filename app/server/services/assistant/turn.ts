@@ -1,5 +1,6 @@
 /**
- * One assistant chat turn = one headless `claude -p` spawn.
+ * One assistant chat turn = one headless CLI spawn (an engine's TurnSpec).
+ * The notes below describe the Claude spawn.
  *
  * Deliberate deltas from runClaudeJson (merge/tagging): session persistence
  * stays ON (`--session-id` / `--resume` give the CLI the conversation
@@ -11,10 +12,10 @@
  * can only happen through the audited bridge. Never add bypassPermissions.
  */
 
-import { withAuthHint } from "../claude/auth.ts";
+import fs from "node:fs";
 import { ClaudeError, defaultStreamRunner, type ClaudeStreamRunner } from "../claude/cli.ts";
-import { parseStreamJsonLine, type AssistantStreamEvent } from "./streamEvents.ts";
-import type { AssistantSession } from "./session.ts";
+import type { AssistantStreamEvent } from "./streamEvents.ts";
+import type { TurnParser, TurnSpec } from "./engines/types.ts";
 
 export const IDLE_TIMEOUT_MS = 300_000; // agentic turns idle between tools, not forever
 export const HARD_TIMEOUT_MS = 30 * 60_000;
@@ -68,6 +69,8 @@ export interface RunTurnResult {
   costUsd?: number;
   /** Set when the turn ended abnormally (error/abort) — already emitted to the client. */
   errorMessage?: string;
+  /** An id the engine assigned this turn (Codex thread), to resume with next time. */
+  engineSessionId?: string;
 }
 
 /**
@@ -77,10 +80,10 @@ export interface RunTurnResult {
  * (an abort reads as "stopped"). The caller owns the session lock.
  */
 export async function runTurn(opts: {
-  session: AssistantSession;
-  message: string;
-  args: string[];
-  cwd: string;
+  spec: TurnSpec;
+  parser: TurnParser;
+  /** The engine's sign-in hint for errors that mean "signed out". */
+  authHint: (message: string) => string;
   abort: AbortController;
   emit: (ev: AssistantStreamEvent) => void;
   streamRunner?: ClaudeStreamRunner;
@@ -129,39 +132,45 @@ export async function runTurn(opts: {
   };
 
   try {
-    const { code, stderr } = await runner(opts.args, opts.message, {
-      cwd: opts.cwd,
-      idleTimeoutMs: IDLE_TIMEOUT_MS,
-      hardTimeoutMs: HARD_TIMEOUT_MS,
-      signal: opts.abort.signal,
-      onLine: (line) => {
-        for (const ev of parseStreamJsonLine(line)) handle(ev);
-      },
-    });
-    if (!sawTerminal) {
-      // CLI exited without a result record — surface whatever it said on stderr.
-      const detail = stderr.trim().split("\n").slice(-3).join(" ").slice(0, 300);
-      const message = withAuthHint(`claude CLI exited (code ${code}) without a result${detail ? `: ${detail}` : ""}`);
+    try {
+      const { code, stderr } = await runner(opts.spec.args, opts.spec.stdin, {
+        cwd: opts.spec.cwd,
+        target: opts.spec.target,
+        env: opts.spec.env,
+        idleTimeoutMs: IDLE_TIMEOUT_MS,
+        hardTimeoutMs: HARD_TIMEOUT_MS,
+        signal: opts.abort.signal,
+        onLine: (line) => {
+          for (const ev of opts.parser.parse(line)) handle(ev);
+        },
+      });
+      if (!sawTerminal) {
+        // CLI exited without a result record — surface whatever it said on stderr.
+        const detail = stderr.trim().split("\n").slice(-3).join(" ").slice(0, 300);
+        const message = opts.authHint(`${opts.spec.label} exited (code ${code}) without a result${detail ? `: ${detail}` : ""}`);
+        errorMessage = message;
+        flushText();
+        const ev: AssistantStreamEvent = { type: "error", message };
+        compact.push(ev);
+        opts.emit(ev);
+      }
+    } catch (err) {
+      const aborted = opts.abort.signal.aborted;
+      const message = aborted
+        ? "stopped"
+        : err instanceof ClaudeError
+          ? err.message
+          : `assistant turn failed: ${(err as Error).message}`;
       errorMessage = message;
       flushText();
       const ev: AssistantStreamEvent = { type: "error", message };
       compact.push(ev);
       opts.emit(ev);
     }
-  } catch (err) {
-    const aborted = opts.abort.signal.aborted;
-    const message = aborted
-      ? "stopped"
-      : err instanceof ClaudeError
-        ? err.message
-        : `assistant turn failed: ${(err as Error).message}`;
-    errorMessage = message;
-    flushText();
-    const ev: AssistantStreamEvent = { type: "error", message };
-    compact.push(ev);
-    opts.emit(ev);
+  } finally {
+    for (const f of opts.spec.tempFiles ?? []) fs.rmSync(f, { force: true });
   }
 
   flushText();
-  return { events: compact, costUsd, errorMessage };
+  return { events: compact, costUsd, errorMessage, engineSessionId: opts.parser.engineSessionId?.() };
 }

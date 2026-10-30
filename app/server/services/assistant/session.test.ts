@@ -85,3 +85,18 @@ test("deleteSession aborts a running turn and removes the record", () => {
   assert.equal(getSession(s.id), undefined);
   assert.equal(deleteSession(s.id), false);
 });
+
+test("sessions remember their engine; old stored chats read as claude; Codex thread ids persist", () => {
+  const s = createSession({ agent: "vault", engine: "codex" });
+  endTurn(s, { user: "hi", events: [], engineSessionId: "thread-1" });
+  assert.equal(getSession(s.id)?.engine, "codex");
+  assert.equal(getSession(s.id)?.engine_session_id, "thread-1");
+  assert.equal(listSessions()[0].engine, "codex");
+
+  const legacy = { id: "legacy-1", title: "old", agent: "vault", chips: [], turns: [], totalCostUsd: 0, created_at: "2026-01-01T00:00:00Z", last_at: "2026-01-01T00:00:00Z" };
+  const file = path.join(os.homedir(), ".skill-vault", "assistant-sessions.json");
+  fs.writeFileSync(file, JSON.stringify({ sessions: [legacy] }));
+  __resetSessionsForTests();
+  assert.equal(getSession("legacy-1")?.engine, "claude");
+  assert.equal(createSession({ agent: "vault" }).engine, "claude");
+});
