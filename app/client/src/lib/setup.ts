@@ -2,7 +2,7 @@
  * Setup guide API (server: routes/setup.ts). Finish and Retry stream NDJSON
  * progress events, like the in-app update (lib/appUpdate.ts).
  */
-import { ApiError } from "./api";
+import { ApiError, readNdjson } from "./api";
 
 export type SetupStep = "welcome" | "vault" | "targets" | "skills" | "notion" | "assistant" | "review";
 
@@ -127,20 +127,7 @@ async function stream(url: string, body: unknown, onEvent: (e: SetupEvent) => vo
     const data = await res.json().catch(() => null);
     throw new ApiError((data as { error?: string } | null)?.error ?? `Setup failed to start (${res.status})`, res.status, data);
   }
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let nl: number;
-    while ((nl = buf.indexOf("\n")) >= 0) {
-      const line = buf.slice(0, nl).trim();
-      buf = buf.slice(nl + 1);
-      if (line) onEvent(JSON.parse(line) as SetupEvent);
-    }
-  }
+  await readNdjson<SetupEvent>(res, onEvent);
 }
 
 export const setupApi = {

@@ -4,7 +4,7 @@
  * over to a new process, so the client waits for /api/health to answer
  * with a new pid and then reloads.
  */
-import { ApiError } from "./api";
+import { ApiError, readNdjson } from "./api";
 
 export interface AppUpdateStatus {
   supported: boolean;
@@ -61,20 +61,7 @@ export const appUpdateApi = {
   async apply(onEvent: (e: ApplyEvent) => void): Promise<void> {
     const res = await fetch("/api/app/update", { method: "POST" });
     if (!res.ok || !res.body) throw new Error(`Update failed to start (${res.status})`);
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = "";
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      let nl: number;
-      while ((nl = buf.indexOf("\n")) >= 0) {
-        const line = buf.slice(0, nl).trim();
-        buf = buf.slice(nl + 1);
-        if (line) onEvent(JSON.parse(line) as ApplyEvent);
-      }
-    }
+    await readNdjson<ApplyEvent>(res, onEvent);
   },
 };
 
