@@ -576,3 +576,12 @@ export interface SkillNameMismatch {
   folder_is_valid: boolean;
   notion_title?: string;
 }
+
+export type AgentEntryState = "not_connected" | "connected" | "broken" | "name_taken";
+export interface AgentAccessStatus {
+  bridge_built: boolean;
+  skill: { state: "no_vault" | "not_in_vault" | "in_vault" | "update_available" | "name_taken"; targets: string[] };
+  claude_desktop: { state: AgentEntryState | "not_installed" | "unreadable"; config_path: string | null; error?: string };
+  claude_code: { state: AgentEntryState | "cli_missing"; reason?: string };
+  command: { windows: string; posix: string };
+}

@@ -4,7 +4,19 @@ All notable changes to the Skill Vault App are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com); versions use semver
 (the app package is `0.x` — minor bumps carry user-facing feature batches).
 
-## [Unreleased] - 2026-10-28
+## [Unreleased]
+
+### Fixed
+- Claude assistant limits now match the docs. `--permission-mode dontAsk` (a
+  `-p` run could start in auto mode), `Edit(path)` rules for the vault and repos
+  folder instead of bare `Edit`/`Write`, `--disallowedTools PowerShell,Monitor`,
+  a Bash hook (`assistant-plugin/hooks/git-gate.mjs`) that lets through one
+  plain git command for history or clones, and `safe.bareRepository=explicit`.
+  The assistant can no longer `git push`, `commit` or `config`.
+
+## [0.2.0] - 2026-10-30
+
+The app now installs with `setup.cmd` and opens from the Start Menu, a setup guide walks you through first use, and Notion connection errors say why. Two features are in beta testing and have only been tested on Windows so far: **agent access** and **assistant providers**.
 
 ### Added
 - **First-run setup guide** replaces the single-box Setup page. Six steps
@@ -29,7 +41,7 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
   `POST /pick-folder`, `POST /inspect`, `GET /targets`, `POST /clone-preview`,
   `POST /plan`, `POST /apply`, `POST /apply/retry`,
   `GET /apply/status`.
-- **Assistant providers.** The assistant can run on OpenAI Codex, GitHub Copilot CLI or Grok Build as
+- **Assistant providers (beta).** The assistant can run on OpenAI Codex, GitHub Copilot CLI or Grok Build as
   well as Claude Code (Settings → AI assistant → Provider, or the setup guide). Skill Vault installs the
   chosen tool (showing the command first; **Cancel install** stops it, and a step is stopped after 10
   minutes) and opens its own sign-in in a window (**Sign in again** waits for that login to finish), or
@@ -37,61 +49,30 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
   and Grok get no shell (none can be limited to git, and on Windows Codex's sandbox reached the app's
   own API with its network off); Grok also gets no direct file edits. Checked live with Codex 0.144.4,
   Copilot CLI 1.0.105 and Grok 1.0.70. AI tagging and merge-on-update still use Claude Code.
+- **Agent access (beta)** (Settings → Agent access): Claude Desktop, Claude Code and any
+  agent with a shell can now work with the vault: save a skill from a chat, load a
+  vault skill, push skills to your other tools, build a Claude Desktop zip, and run
+  Notion syncs.
+  - **Claude Desktop**: **Connect** adds a `skill-vault` MCP server to
+    `claude_desktop_config.json` (backed up first; other servers untouched).
+  - **Claude Code**: **Connect** runs `claude mcp add --scope user skill-vault`;
+    status is read from `~/.claude.json`.
+  - **Other agents**: `~/.skill-vault/bin/skill-vault <tool> --file args.json`
+    (JSON arguments from a UTF-8 file or stdin, JSON out);
+    `%USERPROFILE%\.skill-vault\bin\skill-vault.cmd` for cmd and PowerShell.
+  - **The `skill-vault` skill** ships with the app. **Add to vault** adopts it and
+    pushes it to your default targets (a target that already has a `skill-vault`
+    folder of its own is left alone); install it in Claude Desktop with the zip or
+    the copy-paste prompt. **Update** appears only while your vault copy is untouched;
+    if you edited it, updates go through the Updates page and your edits are never
+    overwritten by the card.
+  - Vault tools start the app in the background when it isn't open (Windows); it
+    stops again about 10 minutes after the last call.
+  - New bridge tools: `read_skill_files`, `save_skill`, `package_for_desktop`.
+    `save_skill` refuses a `SKILL.md` path in any casing other than exactly
+    `SKILL.md`, and `read_skill_files` leaves out files under ignored folders
+    (`.git`, `node_modules`, etc.).
 
-### Fixed
-- Notion sign-in returns to the page that started it (`POST /api/notion/connect`
-  takes `return_to`), and a slow Notion sign-in no longer lets the installed
-  app stop itself while the window is on notion.com (10-minute cap).
-- Finish: a new-vault folder that only holds the empty skeleton from an earlier
-  failed Finish counts as empty, so pressing Finish again works; a failed
-  watcher restart after the settings were saved no longer stops Finish.
-- Claude assistant limits now match the docs. `--permission-mode dontAsk` (a
-  `-p` run could start in auto mode), `Edit(path)` rules for the vault and repos
-  folder instead of bare `Edit`/`Write`, `--disallowedTools PowerShell,Monitor`,
-  a Bash hook (`assistant-plugin/hooks/git-gate.mjs`) that lets through one
-  plain git command for history or clones, and `safe.bareRepository=explicit`.
-  The assistant can no longer `git push`, `commit` or `config`.
-
-### Changed
-- Push and Notion database selection now share services with the setup guide.
-
-## [Unreleased] - 2026-10-27
-
-### Fixed
-- Connecting Notion when the server can't reach `mcp.notion.com` now says why
-  (DNS, timeout, or an HTTPS certificate from a proxy or antivirus) instead of
-  a bare "fetch failed"; sign-in callback failures are logged to `server.log`.
-- The sidebar shows the app's real version (from `app/package.json`) instead
-  of a hard-coded one.
-- Notion push/pull of single-file skills: Notion now returns these as inline
-  text instead of an archive link, which failed with "returned no archive".
-- The assistant failing with "API key is not scoped to a workspace": choose
-  Claude login or an API key (with workspace ID) in Settings → AI assistant.
-- Rendered markdown lists (assistant replies, file preview) show their bullets,
-  numbers, and indentation again; the CSS reset had stripped them.
-- Assistant timeline labels on newer Claude Code CLIs: `agent: <name> — <task>`
-  for delegations (tool named `Agent`, namespaced agent names) and
-  `Loading skill: <name>` for skill loads.
-- Wide tables in assistant replies scroll sideways instead of overflowing
-  the pane.
-
-### Changed
-- The app starts from a production build: about 0.4 s to listening instead of
-  5–12 s in development mode, and the client ships as one bundle.
-- The startup history scan no longer blocks the first page load.
-- `npm run build` is now `node scripts/build.mjs` (writes `dist/.build-stamp`).
-- **Assistant bundle v2.0.0** - one comprehensive `vault-assistant` lead
-  (context doctrine, skill routing, delegation + latency rules) + five thin
-  skill-backed subagents (repo-hunter, update-fixer, new skill-scout,
-  read-only error-triager, notion-doctor) + ten skills (five deepened with
-  references: tool I/O, manifest spec, GitHub search recipes, Notion states;
-  five new: triaging-errors, analyzing-suggestions, navigating-app-features
-  + feature catalog, authoring-skills + review checklist, discovering-skills
-  + search recipes). Plugin references/ readable at runtime (second
-  --add-dir); briefing routes through analyzing-suggestions; discovery
-  prompt in the empty state.
-
-### Added
 - `setup.cmd` installs the app on Windows (checks Node 20+ and git, installs,
   builds) and adds a **Skill Vault** Start Menu folder; `-Uninstall` removes it.
 - The Start Menu shortcut opens the built app in its own Edge window with no
@@ -228,15 +209,31 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
     `POST /api/tags/bulk` accepts `prune_known: false` to keep removed
     tags in `known_tags`.
 
-### Changed
-- Keyword auto-tag rules: new `fabric` tag (lakehouse, warehouse, OneLake,
-  dataflows, eventhouse/eventstream, Spark, medallion, Databricks/Synapse
-  migrations), no longer lumped into `powerbi`; `cli` is only suggested for
-  skills that are about a command-line tool, not ones that merely use one;
-  `sqldb-*` skills and "… in Fabric" descriptions get `fabric`; at most 5
-  suggestions per skill.
-
 ### Fixed
+- Notion sign-in returns to the page that started it (`POST /api/notion/connect`
+  takes `return_to`), and a slow Notion sign-in no longer lets the installed
+  app stop itself while the window is on notion.com (10-minute cap).
+- Finish: a new-vault folder that only holds the empty skeleton from an earlier
+  failed Finish counts as empty, so pressing Finish again works; a failed
+  watcher restart after the settings were saved no longer stops Finish.
+
+- Connecting Notion when the server can't reach `mcp.notion.com` now says why
+  (DNS, timeout, or an HTTPS certificate from a proxy or antivirus) instead of
+  a bare "fetch failed"; sign-in callback failures are logged to `server.log`.
+- The sidebar shows the app's real version (from `app/package.json`) instead
+  of a hard-coded one.
+- Notion push/pull of single-file skills: Notion now returns these as inline
+  text instead of an archive link, which failed with "returned no archive".
+- The assistant failing with "API key is not scoped to a workspace": choose
+  Claude login or an API key (with workspace ID) in Settings → AI assistant.
+- Rendered markdown lists (assistant replies, file preview) show their bullets,
+  numbers, and indentation again; the CSS reset had stripped them.
+- Assistant timeline labels on newer Claude Code CLIs: `agent: <name> — <task>`
+  for delegations (tool named `Agent`, namespaced agent names) and
+  `Loading skill: <name>` for skill loads.
+- Wide tables in assistant replies scroll sideways instead of overflowing
+  the pane.
+
 - **EISDIR on skills with a folder where `SKILL.md` belongs** — on
   case-insensitive disks a folder named `skill.md/` answered to `SKILL.md`,
   so reads crashed with "EISDIR: illegal operation on a directory". Every
@@ -260,7 +257,33 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
 - Skill descriptions written as YAML block scalars (`description: >`)
   showed as `>` in the skill list; they are now read in full.
 
-## [0.2.0] — 2026-07-02
+### Changed
+- Push and Notion database selection now share services with the setup guide.
+
+
+- The app starts from a production build: about 0.4 s to listening instead of
+  5–12 s in development mode, and the client ships as one bundle.
+- The startup history scan no longer blocks the first page load.
+- `npm run build` is now `node scripts/build.mjs` (writes `dist/.build-stamp`).
+- **Assistant bundle v2.0.0** - one comprehensive `vault-assistant` lead
+  (context doctrine, skill routing, delegation + latency rules) + five thin
+  skill-backed subagents (repo-hunter, update-fixer, new skill-scout,
+  read-only error-triager, notion-doctor) + ten skills (five deepened with
+  references: tool I/O, manifest spec, GitHub search recipes, Notion states;
+  five new: triaging-errors, analyzing-suggestions, navigating-app-features
+  + feature catalog, authoring-skills + review checklist, discovering-skills
+  + search recipes). Plugin references/ readable at runtime (second
+  --add-dir); briefing routes through analyzing-suggestions; discovery
+  prompt in the empty state.
+
+- Keyword auto-tag rules: new `fabric` tag (lakehouse, warehouse, OneLake,
+  dataflows, eventhouse/eventstream, Spark, medallion, Databricks/Synapse
+  migrations), no longer lumped into `powerbi`; `cli` is only suggested for
+  skills that are about a command-line tool, not ones that merely use one;
+  `sqldb-*` skills and "… in Fabric" descriptions get `fabric`; at most 5
+  suggestions per skill.
+
+## July 2026 feature batch (released as 0.1.0)
 
 A large feature batch centered on making skill→provider coverage visible and
 actionable, curating the library, and adding an OpenClaw export path.

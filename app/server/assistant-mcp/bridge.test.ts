@@ -238,3 +238,145 @@ test("set_origin clear:true PATCHes origin:null; origin-less call without clear 
   assert.deepEqual(out, { entry: {}, cleared: true });
   await assert.rejects(TOOLS.set_origin.handler({ name: "x" }, fakeHttp([]), noSleep), /provide origin, or clear:true/);
 });
+
+test("createHttp names the client on every call when given one", async () => {
+  const seen: Array<RequestInit | undefined> = [];
+  const fetchFn = (async (_url: string | URL | Request, init?: RequestInit) => {
+    seen.push(init);
+    return { status: 200, json: async () => ({}) };
+  }) as unknown as typeof fetch;
+  const http = createHttp("http://127.0.0.1:1", fetchFn, "claude-desktop");
+  await http("GET", "/api/skills");
+  await http("POST", "/api/push", { skill: "x" });
+  assert.deepEqual(seen[0]?.headers, { "x-skill-vault-client": "claude-desktop" });
+  assert.deepEqual(seen[1]?.headers, { "content-type": "application/json", "x-skill-vault-client": "claude-desktop" });
+});
+
+const textFile = (content: string) => ({
+  status: 200,
+  json: { binary: false, too_large: false, size: Buffer.byteLength(content), sha256: `sha-${content.length}`, content },
+});
+
+test("read_skill_files reads SKILL.md first, skips binaries, normalizes Windows paths", async () => {
+  const http = fakeHttp([
+    {
+      status: 200,
+      json: {
+        files: {
+          name: "demo", path: "", type: "dir",
+          children: [
+            { name: "references", path: "references", type: "dir", children: [{ name: "a.md", path: "references\\a.md", type: "file", size: 3 }] },
+            { name: "logo.png", path: "logo.png", type: "file", size: 10 },
+            { name: "SKILL.md", path: "SKILL.md", type: "file", size: 5 },
+          ],
+        },
+      },
+    },
+    textFile("hello"),
+    { status: 200, json: { binary: true, too_large: false, size: 10, sha256: null, content: null } },
+    textFile("abc"),
+  ]);
+  const out = (await TOOLS.read_skill_files.handler({ name: "demo" }, http, noSleep)) as {
+    files: Array<{ path: string; content: string }>;
+    skipped: Array<{ path: string; reason: string }>;
+  };
+  assert.deepEqual(http.calls.map((c) => c.path), [
+    "/api/skills/demo",
+    "/api/skills/demo/files/SKILL.md",
+    "/api/skills/demo/files/logo.png",
+    "/api/skills/demo/files/references/a.md",
+  ]);
+  assert.deepEqual(out.files.map((f) => [f.path, f.content]), [["SKILL.md", "hello"], ["references/a.md", "abc"]]);
+  assert.deepEqual(out.skipped, [{ path: "logo.png", reason: "binary" }]);
+});
+
+test("read_skill_files stops at the budget but always returns the first file", async () => {
+  const big = 200 * 1024;
+  const http = fakeHttp([
+    {
+      status: 200,
+      json: {
+        files: {
+          name: "demo", path: "", type: "dir",
+          children: [
+            { name: "SKILL.md", path: "SKILL.md", type: "file", size: big },
+            { name: "b.md", path: "b.md", type: "file", size: big },
+            { name: "c.md", path: "c.md", type: "file", size: 10 },
+          ],
+        },
+      },
+    },
+    textFile("x".repeat(big)),
+    textFile("c".repeat(10)),
+  ]);
+  const out = (await TOOLS.read_skill_files.handler({ name: "demo" }, http, noSleep)) as {
+    files: Array<{ path: string }>;
+    skipped: Array<{ path: string; reason: string }>;
+  };
+  assert.deepEqual(out.files.map((f) => f.path), ["SKILL.md", "c.md"]);
+  assert.deepEqual(out.skipped, [{ path: "b.md", reason: "over_budget" }]);
+});
+
+test("read_skill_files with paths reads only those files", async () => {
+  const http = fakeHttp([textFile("api")]);
+  const out = (await TOOLS.read_skill_files.handler({ name: "my skill", paths: ["references/api.md"] }, http, noSleep)) as {
+    files: Array<{ path: string }>;
+  };
+  assert.deepEqual(http.calls, [{ method: "GET", path: "/api/skills/my%20skill/files/references/api.md" }]);
+  assert.deepEqual(out.files.map((f) => f.path), ["references/api.md"]);
+});
+
+test("save_skill posts the files and turns a conflict into a re-read instruction", async () => {
+  const files = [{ path: "SKILL.md", content: "x", expected_sha256: "h" }];
+  const ok = fakeHttp([{ status: 200, json: { name: "demo", mode: "update", written: ["SKILL.md"], unchanged: [] } }]);
+  await TOOLS.save_skill.handler({ name: "demo", mode: "update", files }, ok, noSleep);
+  assert.deepEqual(ok.calls, [{ method: "POST", path: "/api/skills/demo/save", body: { mode: "update", files } }]);
+
+  const conflict = fakeHttp([{ status: 409, json: { error: "files changed", conflicts: [{ path: "SKILL.md", current_sha256: "z" }] } }]);
+  await assert.rejects(
+    TOOLS.save_skill.handler({ name: "demo", mode: "update", files }, conflict, noSleep),
+    (e: unknown) => e instanceof BridgeToolError && /SKILL\.md/.test(e.message) && /read_skill_files/.test(e.message),
+  );
+});
+
+test("save_skill tells agents without the skill to show the changes and get a yes before an update", () => {
+  assert.match(TOOLS.save_skill.description, /mode "update"[^.]*show the user the changes and get a yes/);
+});
+
+test("package_for_desktop packages, and opens the folder only when asked", async () => {
+  const plain = fakeHttp([{ status: 200, json: { zip_path: "Z" } }]);
+  assert.deepEqual(await TOOLS.package_for_desktop.handler({ skill: "demo" }, plain, noSleep), { zip_path: "Z" });
+  assert.deepEqual(plain.calls, [{ method: "POST", path: "/api/desktop", body: { skill: "demo" } }]);
+
+  const reveal = fakeHttp([{ status: 200, json: { zip_path: "Z" } }, { status: 200, json: { ok: true } }]);
+  await TOOLS.package_for_desktop.handler({ skill: "demo", reveal: true }, reveal, noSleep);
+  assert.deepEqual(reveal.calls.map((c) => c.path), ["/api/desktop", "/api/desktop/reveal"]);
+});
+
+test("read_skill_files leaves out files under ignored folders", async () => {
+  const http = fakeHttp([
+    {
+      status: 200,
+      json: {
+        files: {
+          name: "demo", path: "", type: "dir",
+          children: [
+            { name: "SKILL.md", path: "SKILL.md", type: "file", size: 5 },
+            { name: ".git", path: ".git", type: "dir", children: [{ name: "config", path: ".git/config", type: "file", size: 4 }] },
+            { name: "node_modules", path: "node_modules", type: "dir", children: [
+              { name: "x", path: "node_modules/x", type: "dir", children: [{ name: "index.js", path: "node_modules/x/index.js", type: "file", size: 4 }] },
+            ] },
+          ],
+        },
+      },
+    },
+    textFile("hello"),
+  ]);
+  const out = (await TOOLS.read_skill_files.handler({ name: "demo" }, http, noSleep)) as {
+    files: Array<{ path: string }>;
+    skipped: unknown[];
+  };
+  assert.deepEqual(http.calls.map((c) => c.path), ["/api/skills/demo", "/api/skills/demo/files/SKILL.md"]);
+  assert.deepEqual(out.files.map((f) => f.path), ["SKILL.md"]);
+  assert.deepEqual(out.skipped, []);
+});

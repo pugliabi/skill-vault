@@ -4,7 +4,17 @@ User-facing history of the Skill Vault project (app + CLI). The app keeps a
 more detailed log in [app/CHANGELOG.md](../app/CHANGELOG.md). Versions follow
 semver; the project is pre-1.0, so minor versions carry feature batches.
 
-## [Unreleased] - 2026-10-28
+## [Unreleased]
+
+### Fixed
+- **The Claude assistant now keeps to its documented limits.** Its file edits stay in the vault and repos
+  folders, and its shell runs plain `git` for history and clones and nothing else. Before, it could write
+  anywhere and run read-only commands such as `hostname`. It can no longer `git push`, `commit` or
+  `config`, or chain and pipe commands.
+
+## [0.2.0] - 2026-10-30
+
+The app now installs with `setup.cmd` and opens from the Start Menu, a setup guide walks you through first use, and Notion connection errors say why. Two features are in beta testing and have only been tested on Windows so far: **agent access** and **assistant providers**.
 
 ### Added
 - **First-run setup guide** — six steps (vault, tools, skills, Notion,
@@ -14,27 +24,16 @@ semver; the project is pre-1.0, so minor versions carry feature batches.
   adopt and push checklists; Notion and assistant steps; live progress with
   **Retry failed items**; resume after closing; and re-run from **Settings →
   Run setup guide…** or the command bar. ([getting started](./getting-started.md#first-run-the-setup-guide))
-- **Assistant providers.** The assistant can run on OpenAI Codex, GitHub Copilot CLI or Grok Build as
+- **Agent access (beta)** — Claude Desktop, Claude Code and any agent with a shell can work with the
+  vault: save a skill from a chat, load a vault skill, push skills to your other tools, and run Notion
+  syncs (Settings → Agent access).
+- **Assistant providers (beta).** The assistant can run on OpenAI Codex, GitHub Copilot CLI or Grok Build as
   well as Claude Code (Settings → AI assistant → Provider, or the setup guide). Skill Vault installs the
   chosen tool (showing the command first) and opens its own sign-in in a window, or takes an API key.
   Each chat remembers its provider. The shell is git-only on Claude; Codex, Copilot and Grok get no
   shell, because none of them can be limited to git; Grok also gets no direct file edits. AI tagging
   and merge-on-update still use Claude Code.
 
-### Fixed
-- Notion sign-in returns to the page that started it, and a slow Notion
-  sign-in no longer lets the installed app stop itself.
-- **The Claude assistant now keeps to its documented limits.** Its file edits stay in the vault and repos
-  folders, and its shell runs plain `git` for history and clones and nothing else. Before, it could write
-  anywhere and run read-only commands such as `hostname`. It can no longer `git push`, `commit` or
-  `config`, or chain and pipe commands.
-
-### Changed
-- Push and Notion database selection share services with the setup guide.
-
-## [Unreleased] - 2026-10-27
-
-### Added
 - **One-script Windows install** — `.\setup.cmd` checks Node 20+ and git,
   installs, builds, and adds **Start Menu → Skill Vault**; `-Uninstall`
   removes only the shortcuts. ([getting started](./getting-started.md#install-and-launch-the-app))
@@ -73,6 +72,9 @@ semver; the project is pre-1.0, so minor versions carry feature batches.
   "what to ask" usage section in the [guide](./assistant.md).
 
 ### Fixed
+- Notion sign-in returns to the page that started it, and a slow Notion
+  sign-in no longer lets the installed app stop itself.
+
 - **Notion sync for single-file skills** — Notion returns these as inline
   text instead of an archive link; push, pull, linking and the background
   check now handle both. Re-run **Link skills** once to repair skills left
@@ -88,6 +90,9 @@ semver; the project is pre-1.0, so minor versions carry feature batches.
   running off the edge.
 
 ### Changed
+- Push and Notion database selection share services with the setup guide.
+
+
 - **Startup runs from a production build** — about 1.5 s from a cold start
   to your skills (was ~12 s plus ~2.7 s in dev mode), ~0.4 s when the app is
   already running. `npm run build` is now `node scripts/build.mjs` and writes

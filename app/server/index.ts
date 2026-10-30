@@ -32,6 +32,7 @@ import { importRouter } from "./routes/import.ts";
 import { fixRouter } from "./routes/fix.ts";
 import { tagsRouter } from "./routes/tags.ts";
 import { desktopRouter } from "./routes/desktop.ts";
+import { agentAccessRouter } from "./routes/agentAccess.ts";
 import { openclawRouter } from "./routes/openclaw.ts";
 import { anyJobRunning as anyNotionJobRunning, claudeRouter, notionRouter } from "./routes/notion.ts";
 import {
@@ -57,6 +58,8 @@ import { createHistoryRecorder, scanForUnrecordedChangesAsync } from "./services
 import { startNotionChecker } from "./services/notion/checker.ts";
 import { notionSignInPending } from "./services/notion/connection.ts";
 import { findFreePort } from "./services/freePort.ts";
+import { agentIdleMs, createAgentActivity } from "./services/agentActivity.ts";
+import { writeCommandShims } from "./services/agentAccess/commandShim.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, "..");
@@ -73,7 +76,15 @@ export interface CreateAppOptions {
 
 export async function createApp(opts: CreateAppOptions): Promise<Express> {
   const app = express();
+  // POST /api/skills/:name/save carries whole skills (up to 5 MB of files).
+  // Parsed here first: body-parser skips a body that's already been read, so
+  // the 1 MB default below never sees it.
+  app.use("/api/skills/:name/save", express.json({ limit: "6mb" }));
   app.use(express.json({ limit: "1mb" }));
+  // Bridge calls from Claude Desktop, Claude Code and the skill-vault command
+  // hold off the idle stop (see services/agentActivity.ts).
+  const agentActivity = createAgentActivity();
+  app.use("/api", agentActivity.track);
 
   // Compact request log so failures are visible during dev without spam.
   app.use((req, _res, next) => {
@@ -177,6 +188,16 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
   // its own (its status stays "not checked yet", so no pill).
   if (opts.mode === "production") updater.start();
 
+  // ~/.skill-vault/bin/skill-vault: the vault tools for agents with a shell
+  // (services/agentAccess/commandShim.ts). Built app only: it runs dist/.
+  if (opts.mode === "production") {
+    try {
+      writeCommandShims(process.execPath, path.join(APP_ROOT, "dist", "assistant-mcp.js"));
+    } catch (err) {
+      console.error(`[agent-access] couldn't write the skill-vault command: ${(err as Error).message}`);
+    }
+  }
+
   // Cleanup hook — launcher.ts invokes this before server.close() so
   // chokidar tears down cleanly on Ctrl+C and the SSE clients receive
   // a final FIN. The "active" watcher may have been swapped by
@@ -202,7 +223,9 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
   };
   // Work that must not be cut off by an idle stop (launcher --exit-when-idle).
   // A pending Notion sign-in counts: the app window is on notion.com meanwhile.
-  app.locals.isBusy = (): boolean => busyWithoutUpdate() || updater.isApplying() || notionSignInPending();
+  // An agent call in the last 10 minutes counts too (services/agentActivity.ts).
+  app.locals.isBusy = (): boolean =>
+    busyWithoutUpdate() || updater.isApplying() || notionSignInPending() || agentActivity.within(agentIdleMs());
 
   app.use(
     "/api",
@@ -231,6 +254,7 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
   app.use("/api/fix", fixRouter());
   app.use("/api/tags", tagsRouter());
   app.use("/api/desktop", desktopRouter());
+  app.use("/api/agent-access", agentAccessRouter({ appRoot: APP_ROOT }));
   app.use("/api/openclaw", openclawRouter());
   app.use("/api/notion", notionRouter());
   app.use("/api/claude", claudeRouter());

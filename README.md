@@ -10,6 +10,18 @@ Skill Vault manages agent skills — the `SKILL.md` folder convention used by Cl
 
 The main way in is the **Skill Vault App**, a local web dashboard. A Python CLI (`sv`) covers the same vault for terminal workflows and automation — both share the same configuration and on-disk format, so you can use either or both.
 
+## What's new
+
+- **First-run setup guide.** Six steps take you through your vault, tools, skills, Notion and the assistant, and nothing is saved until you press **Finish**. Run it again any time from **Settings → Run setup guide…**.
+- **Clearer Notion connection errors.** When Connect can't reach Notion, the app now tells you why, with the error code and what to check, instead of a bare "fetch failed".
+
+### In beta testing
+
+These two are new and still being tested, so expect rough edges and changes. So far they've only been tested on Windows. If something breaks, please [open an issue](https://github.com/pugliabi/skill-vault/issues).
+
+- **Agent access.** Claude Desktop, Claude Code and any agent with a shell can work with your vault: save a skill from a chat, load a vault skill, push skills to your other tools, and run Notion syncs. Set it up under **Settings → Agent access**. [How it works](docs/features.md#agent-access--claude-desktop-claude-code-and-other-agents)
+- **More AI providers for the assistant.** The assistant can run on OpenAI Codex, GitHub Copilot CLI or Grok Build as well as Claude Code. Pick one under **Settings → AI assistant → Provider** or in the setup guide; Skill Vault can install it and open its sign-in for you. On these three the assistant gets no shell, and on Grok it can't edit files directly. AI tagging and merge-on-update still use Claude Code. [Provider details](docs/assistant.md#providers)
+
 ## Quickstart
 
 Requires Node 20+ and git. On Windows:
