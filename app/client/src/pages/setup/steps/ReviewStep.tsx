@@ -141,7 +141,7 @@ export function ReviewStep({ draft, goTo, apiKey, onFinished }: StepProps) {
           {result.ok ? "Everything is saved." : "Your vault and settings are saved, but a few items didn't go through."}
         </StepHeader>
         {log}
-        <DesktopFinishPanel draft={draft} events={events} />
+        <DesktopFinishPanel draft={draft} events={result.events} />
         {error && <Hint tone="bad">{error}</Hint>}
         {!result.ok && (
           <>

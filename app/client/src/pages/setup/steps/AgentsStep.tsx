@@ -98,7 +98,9 @@ export function AgentsStep({ draft, commit, goTo }: StepProps) {
             ) : desktop ? (
               <Hint tone={desktop.state === "connected" ? "good" : desktop.state === "not_installed" ? "info" : "warn"}>
                 {desktop.state === "unreadable"
-                  ? `Can't read the Claude Desktop config: ${desktop.error ?? "unknown error"}. Fix the file, then come back to this step.`
+                  ? `${DESKTOP_TEXT.unreadable.replace(/\.$/, "")}: ${(desktop.error ?? "unknown error")
+                      .replace(/\s*Fix it, then try again\.\s*$/, "")
+                      .replace(/\.\s*$/, "")}. Fix the file, then come back to this step.`
                   : DESKTOP_TEXT[desktop.state]}
               </Hint>
             ) : null}

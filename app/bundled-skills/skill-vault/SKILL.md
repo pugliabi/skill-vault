@@ -15,13 +15,15 @@ chat.
 The user's skills live in their vault: the folder set in the Skill Vault app's Settings. `get_config`
 shows it, along with the user's tools (targets) and which of them get new skills by default. Claude
 Desktop and claude.ai have no skills folder on this computer, so don't look for one. Find, read and
-save skills only through the vault tools or the shared command, which always use the folder from
+save the user's vault skills only through the vault tools or the shared command, which always use the folder from
 Settings.
 
 When you create a skill or change one in this chat, including with another skill such as
 skill-creator, save it to the vault with `save_skill` (see below), then offer to push it to the
 user's tools. Don't hand it back as a zip or `.skill` file to download, even if another skill's steps
-say to package it. Build a zip only when the user asks to install a vault skill in Claude Desktop or
+say to package it.
+The one exception: when the user asks you to work on skill files in a particular folder or repository, edit them there.
+Build a zip only when the user asks to install a vault skill in Claude Desktop or
 claude.ai.
 
 ## Step 1: reach the vault

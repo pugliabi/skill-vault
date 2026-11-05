@@ -60,6 +60,7 @@ test("the skill says the vault from Settings is where skills live, and never to 
   assert.match(md, /no skills folder on this computer/);
   assert.match(md, /save it to the vault with `save_skill`/);
   assert.match(md, /Don't hand it back as a zip or `\.skill` file/);
+  assert.match(md, /work on skill files in a particular folder or repository, edit them there/);
   assert.ok(md.indexOf("## Where skills live") < md.indexOf("## Step 1: reach the vault"));
 });
 
