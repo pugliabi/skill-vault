@@ -105,7 +105,8 @@ Claude Desktop zip, or run a Notion sync.
   connects Claude Desktop, and the Finish screen then walks you through the restart and the skill install.
 - **Skills made in a chat go to the vault.** Once the skill is installed, a skill that Claude Desktop
   (or any agent with the skill) creates or changes in a chat is saved to your vault with `save_skill`,
-  then offered for push to your tools. It isn't handed back as a zip to upload. A zip is only for putting
+  then offered for push to your tools. If you ask it to work on skill files in a particular folder or
+  repo, it edits them there instead. It isn't handed back as a zip to upload. A zip is only for putting
   a vault skill into Claude Desktop itself.
 - **Claude Code**: **Connect** registers the same server for every project
   (`claude mcp add --scope user`); the card reads its status from `~/.claude.json`. The skill reaches

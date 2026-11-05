@@ -151,7 +151,7 @@ All are safe to delete while the app is closed.
 
 ## Setup guide files (per machine)
 
-- `setup-draft.json` — the setup guide's answers while it's open (vault choice, tools, picks, Notion database, assistant mode). Never holds your API key or Notion sign-in. Deleted when Finish saves your settings, or when you press Start over / Close. Safe to delete.
+- `setup-draft.json` — the setup guide's answers while it's open (vault choice, tools, picks, Notion database, assistant mode, Agents choices). Never holds your API key or Notion sign-in. Deleted when Finish saves your settings, or when you press Start over / Close. Safe to delete.
 
 A server started from the Start Menu always binds `127.0.0.1` (only this computer can reach it), whatever `HOST` says; to expose the app on your LAN, run it from a terminal instead: `npm run dev -- --host 0.0.0.0`.
 
@@ -178,8 +178,8 @@ configuration of its own beyond a signed-in `claude` CLI — see
 | Path | Written by | What |
 |---|---|---|
 | `~/.skill-vault/bin/skill-vault`, `skill-vault.cmd` | the built app, at every start | The shared command: runs the vault bridge in command mode |
-| `%APPDATA%\Claude\claude_desktop_config.json` → `mcpServers["skill-vault"]` | Agent access → Claude Desktop → Connect | Claude Desktop's MCP entry for the vault bridge |
-| `claude_desktop_config.json.skill-vault.bak` | each Connect / Disconnect | The Desktop config as it was before the last change |
+| `%APPDATA%\Claude\claude_desktop_config.json` → `mcpServers["skill-vault"]` | Agent access → Claude Desktop → Connect, or the setup guide's Agents step at Finish | Claude Desktop's MCP entry for the vault bridge |
+| `claude_desktop_config.json.skill-vault.bak` | each Connect / Disconnect (and the guide's connect) | The Desktop config as it was before the last change |
 | `~/.claude.json` → `mcpServers["skill-vault"]` | `claude mcp add --scope user` (Agent access → Claude Code → Connect) | Claude Code's entry; the app only reads this file |
 
 `SKILL_VAULT_AGENT_IDLE_MS` (environment) changes how long a bridge call keeps a background-started

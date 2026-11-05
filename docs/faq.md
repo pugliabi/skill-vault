@@ -72,13 +72,13 @@ Only when you press **Finish** with "Use an API key" chosen, and then only in `~
 Yes. When you clone from GitHub, the guide finds `skills.json` at the repo root or one folder down (like `agent-skills/skills/`) and uses that folder as the vault. If it finds two candidates it asks which one; if it finds none, it offers to use the repo root as a new vault.
 
 **Can Claude Desktop save skills to my vault?**
-Yes. Connect Claude Desktop and install the `skill-vault` skill, either in the setup guide's **Agents**
-step or in Settings → Agent access (zip or copy-paste prompt). Then ask a Desktop chat to
+Yes. Connect Claude Desktop in the setup guide's **Agents** step or in Settings → Agent access, then
+install the `skill-vault` skill from the Finish screen or the Settings card (zip or copy-paste prompt). Then ask a Desktop chat to
 "save this skill to my vault". Before it changes a skill that's already in your vault, the skill tells it to
 show you the changes and ask first, and every update is kept in the skill's version history.
 
 **Where does Claude Desktop keep my skills?**
-In your vault: the folder set in Skill Vault's Settings. Claude Desktop has no skills folder on your computer, so the `skill-vault` skill tells it to find, read and save skills only through the vault tools. When you make or change a skill in a Desktop chat, Claude saves it to the vault instead of giving you a zip, then offers to push it to your tools. The one zip you install by hand is the `skill-vault` skill itself.
+In your vault: the folder set in Skill Vault's Settings. Claude Desktop has no skills folder on your computer, so the `skill-vault` skill tells it to find, read and save skills only through the vault tools. When you make or change a skill in a Desktop chat, Claude saves it to the vault instead of giving you a zip, then offers to push it to your tools. If you ask it to work on skill files in a particular folder, it edits them there. The one zip you install by hand is the `skill-vault` skill itself.
 
 **Why do I have to restart Claude Desktop after connecting?**
 Claude Desktop reads its MCP servers only when it starts. Quit it from the tray icon (closing the
