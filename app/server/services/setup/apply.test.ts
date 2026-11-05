@@ -407,7 +407,7 @@ test("a failed skill-vault add fails its pushes; retry runs the add first", asyn
     });
     const first = await applier.apply({ draft }, () => {});
     assert.deepEqual(first.failed.map((f) => `${f.step}:${f.item}`), ["adopt:skill-vault (from Skill Vault)", "push:skill-vault → t1"]);
-    assert.equal(first.failed[1].message, "skill-vault isn't in the vault yet");
+    assert.equal(first.failed[1].message, "skill-vault wasn't added to the vault, so it wasn't pushed");
 
     addFails = false;
     order.length = 0;
@@ -427,6 +427,63 @@ test("skill-vault already in the vault is a skip line, not a failure", async () 
     assert.equal(state.ok, true);
     const line = state.events.find((e) => e.item === "skill-vault (from Skill Vault)");
     assert.deepEqual(line, { step: "adopt", state: "skip", item: "skill-vault (from Skill Vault)", message: "already in the vault" });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a NAME_TAKEN add failure doesn't push the user's other skill-vault", async () => {
+  const root = tmp();
+  try {
+    const t1 = path.join(root, "t1");
+    fs.mkdirSync(t1);
+    let addFails = true;
+    const pushed: string[] = [];
+    const { applier } = harness({
+      addVaultSkill: () => {
+        if (addFails) throw new Error('Your vault already has a skill named "skill-vault" from somewhere else. Rename it to add this one.');
+        return "added";
+      },
+      pushVaultSkill: (_v, p) => {
+        pushed.push(p.id);
+      },
+    });
+    const draft = draftWith({
+      vault: { mode: "new", path: path.join(root, "vault") },
+      targets: [{ id: "t1", path: t1, enabled: true, is_default: true, known: false }],
+      agents: { add_skill: true, desktop_connect: false },
+    });
+    const first = await applier.apply({ draft }, () => {});
+    assert.deepEqual(pushed, []);
+    assert.deepEqual(first.failed.map((f) => `${f.step}:${f.item}`), ["adopt:skill-vault (from Skill Vault)", "push:skill-vault → t1"]);
+    assert.equal(first.failed[1].message, "skill-vault wasn't added to the vault, so it wasn't pushed");
+
+    addFails = false;
+    const second = await applier.retry(() => {});
+    assert.equal(second.ok, true);
+    assert.deepEqual(pushed, ["t1"]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("add_skill with no default tools adds the skill and pushes nowhere", async () => {
+  const root = tmp();
+  try {
+    const t1 = path.join(root, "t1");
+    fs.mkdirSync(t1);
+    const { applier, calls } = harness();
+    const state = await applier.apply({
+      draft: draftWith({
+        vault: { mode: "new", path: path.join(root, "vault") },
+        targets: [{ id: "t1", path: t1, enabled: true, is_default: false, known: false }],
+        agents: { add_skill: true, desktop_connect: false },
+      }),
+    }, () => {});
+    assert.equal(state.ok, true);
+    assert.ok(state.events.some((e) => e.step === "adopt" && e.state === "done" && e.item === "skill-vault (from Skill Vault)"));
+    assert.deepEqual(calls.vaultSkillPush, []);
+    assert.ok(!state.events.some((e) => e.step === "push"));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

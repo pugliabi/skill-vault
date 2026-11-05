@@ -18,6 +18,7 @@ import { deleteDraft } from "./draft.ts";
 import type { SetupApplyDeps } from "./apply.ts";
 
 const NO_APP_ROOT = "The app folder isn't known, so the skill-vault items can't run.";
+const NO_APP_ROOT_DESKTOP = "The app folder isn't known, so Claude Desktop can't be connected.";
 
 export function defaultApplyDeps(opts: { home?: () => string; appRoot?: string } = {}): SetupApplyDeps {
   const { home, appRoot } = opts;
@@ -66,7 +67,7 @@ export function defaultApplyDeps(opts: { home?: () => string; appRoot?: string }
       }
     },
     connectDesktop: () => {
-      if (!appRoot) throw new Error(NO_APP_ROOT);
+      if (!appRoot) throw new Error(NO_APP_ROOT_DESKTOP);
       try {
         const file = connectDesktop({ env: realPathEnv(), nodePath: process.execPath, bridgePath: path.join(appRoot, "dist", "assistant-mcp.js") });
         console.log(`[setup] connected Claude Desktop (${file})`);

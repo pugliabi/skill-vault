@@ -95,6 +95,7 @@ const STEP_OF: Record<WorkItem["kind"], FailedItem["step"]> = {
   desktop: "desktop",
 };
 const VAULT_SKILL_LABEL = "skill-vault (from Skill Vault)";
+const VAULT_SKILL_NOT_ADDED = "skill-vault wasn't added to the vault, so it wasn't pushed";
 
 function isEmptyOrMissing(p: string): boolean {
   try {
@@ -236,6 +237,7 @@ export function createSetupApplier(deps: SetupApplyDeps): SetupApplier {
   async function runItems(items: WorkItem[], vaultPath: string, emit: (e: SetupEvent) => void): Promise<WorkItem[]> {
     const failed: WorkItem[] = [];
     let current: ApplyStep | null = null;
+    let vaultSkillFailed = false;
     for (const it of items) {
       const step = STEP_OF[it.kind];
       if (step !== current) {
@@ -253,6 +255,7 @@ export function createSetupApplier(deps: SetupApplyDeps): SetupApplier {
           deps.push(vaultPath, it.name, it.provider);
           emit({ step, state: "done", item: it.label });
         } else if (it.kind === "vault_skill_push") {
+          if (vaultSkillFailed) throw new Error(VAULT_SKILL_NOT_ADDED);
           deps.pushVaultSkill(vaultPath, it.provider);
           emit({ step, state: "done", item: it.label });
         } else if (it.kind === "notion") {
@@ -263,6 +266,7 @@ export function createSetupApplier(deps: SetupApplyDeps): SetupApplier {
           emit({ step, state: "done", item: it.label, message: "connected" });
         }
       } catch (err) {
+        if (it.kind === "vault_skill") vaultSkillFailed = true;
         const message = (err as Error).message;
         failed.push(it);
         state.failed.push({ step, item: it.label, message });
