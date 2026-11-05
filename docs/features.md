@@ -101,6 +101,12 @@ Claude Desktop zip, or run a Notion sync.
   and settings as they are. Quit Claude Desktop from the tray and reopen it, then install the skill
   with **Download skill zip** (upload it in Settings → Capabilities → Skills) or **Copy install
   prompt** (paste it into a chat).
+- **The setup guide** can do the same at Finish: its **Agents** step adds the skill to the vault and
+  connects Claude Desktop, and the Finish screen then walks you through the restart and the skill install.
+- **Skills made in a chat go to the vault.** Once the skill is installed, a skill that Claude Desktop
+  (or any agent with the skill) creates or changes in a chat is saved to your vault with `save_skill`,
+  then offered for push to your tools. It isn't handed back as a zip to upload. A zip is only for putting
+  a vault skill into Claude Desktop itself.
 - **Claude Code**: **Connect** registers the same server for every project
   (`claude mcp add --scope user`); the card reads its status from `~/.claude.json`. The skill reaches
   Claude Code through the `claude` target.
@@ -135,7 +141,7 @@ The app's **Devices** page shows the same snapshots with a visual compare. See [
 
 ## Setup guide — first run and re-run
 
-A six-step guide opens on first run (and any time from **Settings → Run setup guide…** or the command bar): **Vault** (new, existing, or cloned from GitHub; **Browse…** opens the Windows folder picker), **Tools** (known tools detected, plus defaults), **Skills** (adopt from your tools, push to your defaults), **Notion** (connect and pick the Skills database), **Assistant** (pick a provider, install it and sign in, or use an API key), and **Finish** (a list of exactly what will happen, then live progress with retry for anything that fails). Nothing is saved until Finish, and you can re-run it from Settings with your current settings filled in. Details: [Getting Started](./getting-started.md#first-run-the-setup-guide).
+A seven-step guide opens on first run (and any time from **Settings → Run setup guide…** or the command bar): **Vault** (new, existing, or cloned from GitHub; **Browse…** opens the Windows folder picker), **Tools** (known tools detected, plus defaults), **Skills** (adopt from your tools, push to your defaults), **Notion** (connect and pick the Skills database), **Assistant** (pick a provider, install it and sign in, or use an API key), **Agents** (add the `skill-vault` skill and connect Claude Desktop), and **Finish** (a list of exactly what will happen, then live progress with retry for anything that fails). Nothing is saved until Finish, and you can re-run it from Settings with your current settings filled in. Details: [Getting Started](./getting-started.md#first-run-the-setup-guide).
 
 ## Providers — manage where skills go
 

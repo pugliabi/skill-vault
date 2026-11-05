@@ -44,9 +44,12 @@ The first time Skill Vault opens, a short guide walks you through:
 3. **Skills** (optional): adopt skills found in your tools into the vault, and push vault skills out to your default tools. Each list has checkboxes. If you come back to this step, your picks are restored exactly (Skip means nothing moves); skills that turn up later start unticked.
 4. **Notion** (optional): connect and pick your Skills database.
 5. **Assistant** (optional): pick the tool the assistant runs on (Claude Code, OpenAI Codex, GitHub Copilot CLI or Grok Build). Skill Vault can install it; then sign in with your account or use an API key.
-6. **Finish**: a list of exactly what will happen, then live progress.
+6. **Agents** (optional): add the `skill-vault` skill to your vault (it's pushed to your default tools too) and connect Claude Desktop to the vault tools. If Claude Desktop isn't installed, the step says so and still offers the skill.
+7. **Finish**: a list of exactly what will happen, then live progress.
 
 Nothing is saved until you press **Finish**. If you close the window halfway, the guide offers to resume. Run it again any time from **Settings → Run setup guide…** or the command bar ("Setup guide"); it opens with your current settings filled in.
+
+**After Finish, in Claude Desktop.** If you connected Claude Desktop, quit it from its tray icon (closing the window isn't enough) and open it again: it reads the vault tools only when it starts. Then press **Copy install prompt** on the Finish screen and paste it into a new Desktop chat, and save the skill Claude gives you. Or press **Download skill zip** and upload it in Claude Desktop → Settings → Capabilities → Skills. From then on, Desktop reads and saves skills in your vault, the folder set in Settings.
 
 When you clone from GitHub, **Next** takes a quick look inside the repo (a temporary copy, deleted straight away) and lists the skills it found. If the repo can't be read part-way (a dropped connection, an expired sign-in), the preview says so instead of showing a partial list.
 

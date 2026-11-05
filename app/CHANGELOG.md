@@ -6,6 +6,21 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
 
 ## [Unreleased]
 
+### Added
+- Setup guide **Agents** step (`steps/AgentsStep.tsx`), between Assistant and Finish. The draft gains
+  `agents: { add_skill, desktop_connect } | null`, and `POST /api/setup/agents { draft }` reports
+  skill-vault against the draft's vault, the Claude Desktop state, the bridge and the default tools.
+  Finish gains three item kinds: `vault_skill` (Adopt), `vault_skill_push` (Push, one per default tool)
+  and `desktop` (new log step). They retry like the others. The result screen's
+  `DesktopFinishPanel` gives the tray-icon restart, the install prompt and the zip.
+- Desktop connect and the bundled-skill state, add and push moved to
+  `services/agentAccess/desktopConnect.ts` and `vaultSkill.ts`. Settings → Agent access calls them,
+  and its behaviour is unchanged.
+- `bundled-skills/skill-vault/SKILL.md`: a "Where skills live" section (the vault from Settings, no
+  Desktop skills folder). A skill made or changed in a chat is saved with `save_skill`, never handed
+  back as a zip or `.skill` file, and the description triggers on creating or editing a skill. The
+  install prompt says why this one skill is a zip.
+
 ### Fixed
 - Claude assistant limits now match the docs. `--permission-mode dontAsk` (a
   `-p` run could start in auto mode), `Edit(path)` rules for the vault and repos

@@ -138,6 +138,11 @@ The guide returns to the Notion step with Notion's reason. Press **Connect Notio
 
 Your vault and settings are saved. Press **Retry failed items**, or finish those skills on the Adopt page. Skills that were already moved stay where they are.
 
+- **Desktop — "… isn't valid JSON"**: Claude Desktop's `claude_desktop_config.json` has a typo. Fix it (or restore `claude_desktop_config.json.skill-vault.bak` from an earlier connect), then press **Retry failed items**.
+- **Desktop — "already has an MCP server named "skill-vault""**: another server uses that name. Rename it in Claude Desktop's config, then retry.
+- **Adopt — skill-vault "from somewhere else"**: your vault already has a different `skill-vault` skill. Rename it if you want this one.
+- **Push — "a skill-vault folder that isn't from your vault is already there"**: that tool has its own `skill-vault` folder, which is never overwritten. Move or rename it, then retry.
+
 ### Finish says "Lost contact with setup"
 
 The app stopped answering while Finish was running. Check Settings to see what was saved before pressing Finish again. A new-vault folder left with only an empty `skills/` folder and an empty `skills.json` counts as empty, so pressing Finish again is safe.
