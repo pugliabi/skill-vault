@@ -205,3 +205,40 @@ test("pick-folder: NUL characters are stripped from title and initial before the
   await fetch(`${url}/pick-folder`, json({ title: "Va\u0000ult", initial: "a\u0000b" }));
   assert.deepEqual(seen, [{ title: "Vault", initial: "ab" }]);
 });
+
+test("agents: draft-aware status; 400 without a vault or for a bad draft", async () => {
+  const { startDraft } = await import("../services/setup/draft.ts");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sv-setup-a-"));
+  const appRoot = path.join(root, "app");
+  fs.mkdirSync(path.join(appRoot, "dist"), { recursive: true });
+  fs.writeFileSync(path.join(appRoot, "dist", "assistant-mcp.js"), "//");
+  const claudeDir = path.join(root, "appdata", "Claude");
+  const pathEnv = () => ({ platform: "win32" as const, appData: path.join(root, "appdata"), home: root, exists: (p: string) => fs.existsSync(p), list: () => [] });
+  const url = await serve(
+    setup.setupRouter({ appRoot, pathEnv, readConfig: () => ({ vault_path: null, providers: [{ id: "claude", path: path.join(root, "c") }], default_targets: ["claude"] }) }),
+  );
+  const draft = startDraft({ vault_path: null, agent_locations: {}, default_targets: [], machine_id: null, repo_url: null });
+  assert.equal((await fetch(`${url}/agents`, json({ draft }))).status, 400);
+  assert.equal((await fetch(`${url}/agents`, json({ draft: { version: 3 } }))).status, 400);
+
+  const withVault = { ...draft, vault: { mode: "new", path: path.join(root, "vault") } };
+  const gone = await (await fetch(`${url}/agents`, json({ draft: withVault }))).json();
+  assert.deepEqual(gone, {
+    bridge_built: true,
+    skill: { state: "not_in_vault" },
+    desktop: { state: "not_installed", config_path: null },
+    default_targets: ["claude"],
+    vault_path: path.join(root, "vault"),
+  });
+
+  fs.mkdirSync(claudeDir, { recursive: true });
+  const file = path.join(claudeDir, "claude_desktop_config.json");
+  assert.equal((await (await fetch(`${url}/agents`, json({ draft: withVault }))).json()).desktop.state, "not_connected");
+  fs.writeFileSync(file, JSON.stringify({ mcpServers: { "skill-vault": { command: process.execPath, args: [path.join(appRoot, "dist", "assistant-mcp.js")] } } }));
+  assert.equal((await (await fetch(`${url}/agents`, json({ draft: withVault }))).json()).desktop.state, "connected");
+  fs.writeFileSync(file, "{ broken");
+  const bad = (await (await fetch(`${url}/agents`, json({ draft: withVault }))).json()).desktop;
+  assert.equal(bad.state, "unreadable");
+  assert.match(bad.error, /isn't valid JSON/);
+  fs.rmSync(root, { recursive: true, force: true });
+});
