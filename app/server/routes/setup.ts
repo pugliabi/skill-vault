@@ -80,7 +80,7 @@ export function setupRouter(deps: SetupRouterDeps = {}): Router {
   const run = deps.run ?? defaultRun;
   const readConfig = deps.readConfig ?? readAppConfig;
   const pathEnv = deps.pathEnv ?? realPathEnv;
-  const applier = deps.applier ?? createSetupApplier(defaultApplyDeps(deps.home));
+  const applier = deps.applier ?? createSetupApplier(defaultApplyDeps({ home: deps.home, appRoot: deps.appRoot }));
   const picker = deps.picker ?? (deps.appRoot ? createFolderPicker({ appRoot: deps.appRoot }) : null);
   router.use(refuseCrossSiteWrites);
 
