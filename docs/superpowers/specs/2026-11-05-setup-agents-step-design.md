@@ -102,14 +102,14 @@ checkout can hit this).
 on. Otherwise the ticks show the saved choice. A tick that isn't offered saves as `false`.
 
 **Buttons.** Back → `assistant`. **Skip** → `agents: null`, go to `review`. **Next** → save
-`{ add_skill, desktop_connect }`, go to `review`. Next is never disabled: a step with nothing to tick
-saves two `false`s. That still counts as visiting, so the panel after Finish can offer the install
+`{ add_skill, desktop_connect }`, go to `review`. Next is disabled only while the status loads: a step
+with nothing to tick saves two `false`s. That still counts as visiting, so the panel after Finish can offer the install
 prompt when Desktop is already connected.
 
 **Finish's list** gains, in Finish order:
 
-- `add_skill`: "Add the skill-vault skill to the vault and push it to your default tools". With no
-  default tools: "Add the skill-vault skill to the vault".
+- `add_skill`: "Add the skill-vault skill to the vault and push it to your default tools". When the
+  draft's own tool list has no default: "Add the skill-vault skill to the vault".
 - `desktop_connect`: "Connect Claude Desktop to the vault tools".
 
 ## Draft
@@ -195,7 +195,7 @@ effective targets, after the user's own push items. Each runs the shared
 |---|---|
 | `skill-vault` isn't in the vault (its add failed) | error: "skill-vault isn't in the vault yet" |
 | nothing named `skill-vault` | push (`pushSkillToProvider`) → done |
-| a link to the vault copy | skip, "already there" |
+| a link to the vault copy | push again (re-links it, as the card does) → done |
 | anything else named `skill-vault` | error: "a skill-vault folder that isn't from your vault is already there (<path>) — rename or remove it first" |
 
 A failed add leaves its pushes failing too. Retry runs the add first, then the pushes. A foreign folder
@@ -216,7 +216,7 @@ The done line reads "Claude Desktop — connected".
 
 Types: `ApplyStep` and `SetupEvent.step` gain `"desktop"`; `FailedItem.step` gains `"desktop"`
 (`vault_skill` failures use `"adopt"`). `SetupApplyDeps` gains
-`addVaultSkill(vaultPath) → "added" | "already"`, `pushVaultSkill(vaultPath, provider) → "pushed" | "already"`
+`addVaultSkill(vaultPath) → "added" | "already"`, `pushVaultSkill(vaultPath, provider) → void`
 and `connectDesktop() → void`, each throwing with the message above. `defaultApplyDeps({ home?, appRoot })`
 wires them to the shared services, and `server/index.ts` passes `APP_ROOT`. The add and its pushes
 record the same activity entries the card records. The Desktop connect logs to the server log like the
@@ -336,7 +336,7 @@ Node test runner, in the style of the existing files (fakes for deps, temp homes
   - a failed connect is the only item that retries;
   - a failed add fails its pushes, and Retry runs the add then the pushes;
   - a foreign folder fails with its message;
-  - "already" results log as skip lines.
+  - an "already" add logs as a skip line.
 - `vaultSkill.test.ts` and `desktopConnect.test.ts` (new) for the moved logic, including that
   `connectDesktop` keeps other servers and writes the backup, and refuses invalid JSON.
 - `setup.test.ts`: `POST /agents` with a fake `pathEnv` (Desktop missing, not connected, connected,
