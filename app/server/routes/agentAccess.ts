@@ -32,10 +32,11 @@ import {
   BUNDLED_SKILL_NAME, bundledSkillDir, bundledSkillsRoot, installPrompt, readBundledSkillMd,
 } from "../services/agentAccess/bundledSkill.ts";
 import {
-  bridgeEntry, desktopConfigPath, entryState, getEntry, readDesktopConfig,
-  realPathEnv, withEntry, withoutEntry, writeDesktopConfig, type PathEnv,
+  desktopConfigPath, entryState, readDesktopConfig,
+  realPathEnv, withoutEntry, writeDesktopConfig, type PathEnv,
 } from "../services/agentAccess/desktopConfig.ts";
-import { ClaudeCodeError, connectClaudeCode, disconnectClaudeCode, readClaudeCodeEntry } from "../services/agentAccess/claudeCode.ts";
+import { BRIDGE_NOT_BUILT, DESKTOP_NOT_INSTALLED, connectDesktop, desktopStatus } from "../services/agentAccess/desktopConnect.ts";
+import { ClaudeCodeError,connectClaudeCode, disconnectClaudeCode, readClaudeCodeEntry } from "../services/agentAccess/claudeCode.ts";
 import { shimDir } from "../services/agentAccess/commandShim.ts";
 import type { AgentAccessStatus } from "../types/vault.ts";
 import { refuseCrossSiteWrites } from "./sameOrigin.ts";
@@ -106,16 +107,6 @@ export function agentAccessRouter(opts: AgentAccessOptions): Router {
     return { state: untouched && differs ? "update_available" : "in_vault", targets: entry.targets };
   }
 
-  function desktopRow(): AgentAccessStatus["claude_desktop"] {
-    const file = desktopConfigPath(pathEnv());
-    if (!file) return { state: "not_installed", config_path: null };
-    try {
-      return { state: entryState(getEntry(readDesktopConfig(file)), (p) => fs.existsSync(p)), config_path: file };
-    } catch (err) {
-      return { state: "unreadable", config_path: file, error: (err as Error).message };
-    }
-  }
-
   async function claudeCodeRow(): Promise<AgentAccessStatus["claude_code"]> {
     const avail = await isAvailable();
     if (!avail.available) return { state: "cli_missing", ...(avail.reason ? { reason: avail.reason } : {}) };
@@ -124,7 +115,7 @@ export function agentAccessRouter(opts: AgentAccessOptions): Router {
 
   const bridgeMissing = (res: Response): boolean => {
     if (fs.existsSync(bridgePath)) return false;
-    res.status(409).json({ error: "Build the app first: the bridge (dist/assistant-mcp.js) isn't built yet." });
+    res.status(409).json({ error: BRIDGE_NOT_BUILT });
     return true;
   };
 
@@ -143,7 +134,7 @@ export function agentAccessRouter(opts: AgentAccessOptions): Router {
   /** The Desktop config path, or a 404 when Claude Desktop isn't installed. */
   function desktopFile(res: Response): string | null {
     const file = desktopConfigPath(pathEnv());
-    if (!file) res.status(404).json({ error: "Claude Desktop isn't installed for this user." });
+    if (!file) res.status(404).json({ error: DESKTOP_NOT_INSTALLED });
     return file;
   }
 
@@ -151,7 +142,7 @@ export function agentAccessRouter(opts: AgentAccessOptions): Router {
     const out: AgentAccessStatus = {
       bridge_built: fs.existsSync(bridgePath),
       skill: skillRow(),
-      claude_desktop: desktopRow(),
+      claude_desktop: desktopStatus(pathEnv()),
       claude_code: await claudeCodeRow(),
       command: { windows: path.join(shimDir(), "skill-vault.cmd"), posix: POSIX_COMMAND },
     };
@@ -260,12 +251,12 @@ export function agentAccessRouter(opts: AgentAccessOptions): Router {
     if (bridgeMissing(res)) return;
     const file = desktopFile(res);
     if (!file) return;
-    const ok = await attempt(res, file, () =>
-      writeDesktopConfig(file, withEntry(readDesktopConfig(file), bridgeEntry(nodePath, bridgePath, "claude-desktop"))),
-    );
+    const ok = await attempt(res, file, () => {
+      connectDesktop({ env: pathEnv(), nodePath, bridgePath });
+    });
     if (!ok) return;
     console.log(`[agent-access] connected Claude Desktop (${file})`);
-    res.json(desktopRow());
+    res.json(desktopStatus(pathEnv()));
   });
 
   router.post("/desktop/disconnect", async (_req, res) => {
@@ -278,7 +269,7 @@ export function agentAccessRouter(opts: AgentAccessOptions): Router {
     });
     if (!ok) return;
     console.log(`[agent-access] disconnected Claude Desktop (${file})`);
-    res.json(desktopRow());
+    res.json(desktopStatus(pathEnv()));
   });
 
   router.post("/claude-code/connect", async (_req, res) => {
