@@ -6,6 +6,7 @@ import { setupApi, type SetupDraft, type SetupEvent, type SetupJobState } from "
 import { ENGINE_SHORT } from "../../../lib/assistant";
 import { Button } from "../../../components/ui/primitives";
 import type { StepProps } from "../types";
+import { DesktopFinishPanel } from "./DesktopFinishPanel";
 import { Hint, StepHeader, StepNav, listBox, rowStyle } from "../ui";
 
 const STEP_NAME: Record<SetupEvent["step"], string> = {
@@ -140,6 +141,7 @@ export function ReviewStep({ draft, goTo, apiKey, onFinished }: StepProps) {
           {result.ok ? "Everything is saved." : "Your vault and settings are saved, but a few items didn't go through."}
         </StepHeader>
         {log}
+        <DesktopFinishPanel draft={draft} events={events} />
         {error && <Hint tone="bad">{error}</Hint>}
         {!result.ok && (
           <>
