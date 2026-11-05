@@ -134,3 +134,15 @@ test("assistant: engine defaults to claude, keeps a known one, rejects an unknow
   assert.equal(normalizeDraft({ ...input, assistant: { engine: "codex", auth: "api_key" } }).assistant?.engine, "codex");
   assert.throws(() => normalizeDraft({ ...input, assistant: { engine: "bard", auth: "login" } }), /assistant\.engine/);
 });
+
+test("agents: start null, round-trip, junk dropped, a non-object refused", () => {
+  const d = startDraft(base);
+  assert.equal(d.agents, null);
+  assert.deepEqual(normalizeDraft({ ...d, agents: { add_skill: true, desktop_connect: "yes", extra: 1 } }).agents, { add_skill: true, desktop_connect: false });
+  const older: Record<string, unknown> = { ...d };
+  delete older.agents;
+  assert.equal(normalizeDraft(older).agents, null);
+  assert.throws(() => normalizeDraft({ ...d, agents: "yes" }), DraftError);
+  assert.throws(() => normalizeDraft({ ...d, agents: [true] }), DraftError);
+  assert.equal(normalizeDraft({ ...d, step: "agents" }).step, "agents");
+});

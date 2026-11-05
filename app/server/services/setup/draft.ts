@@ -10,6 +10,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type {
+  AgentsChoice,
   AssistantChoice,
   NotionChoice,
   NotionRef,
@@ -28,7 +29,7 @@ function absolute(p: string): string {
   return p;
 }
 
-const STEPS: SetupStep[] = ["welcome", "vault", "targets", "skills", "notion", "assistant", "review"];
+const STEPS: SetupStep[] = ["welcome", "vault", "targets", "skills", "notion", "assistant", "agents", "review"];
 const DATA_SOURCE_ID = /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i;
 /** Target names are config keys: any text without path separators or control characters. */
 const TARGET_ID = /^[^\\/\x00-\x1f]{1,64}$/;
@@ -61,6 +62,7 @@ export function startDraft(base: SetupBase, now: Date = new Date()): SetupDraft 
     skills: { adopt: [], push: [] },
     notion: null,
     assistant: null,
+    agents: null,
   };
 }
 
@@ -155,6 +157,13 @@ function normalizeAssistant(v: unknown): AssistantChoice | null {
   return { engine: isEngineId(o.engine) ? o.engine : "claude", auth: o.auth, ...ws };
 }
 
+function normalizeAgents(v: unknown): AgentsChoice | null {
+  if (v == null) return null;
+  if (typeof v !== "object" || Array.isArray(v)) throw new DraftError("agents must be an object");
+  const o = v as Record<string, unknown>;
+  return { add_skill: o.add_skill === true, desktop_connect: o.desktop_connect === true };
+}
+
 export function normalizeDraft(input: unknown): SetupDraft {
   const o = (input ?? {}) as Record<string, unknown>;
   if (o.version !== 1) throw new DraftError("unsupported draft version");
@@ -171,6 +180,7 @@ export function normalizeDraft(input: unknown): SetupDraft {
     skills: normalizeSkills(o.skills),
     notion: normalizeNotion(o.notion),
     assistant: normalizeAssistant(o.assistant),
+    agents: normalizeAgents(o.agents),
   };
 }
 
