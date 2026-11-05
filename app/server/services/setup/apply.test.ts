@@ -12,7 +12,7 @@ import type { SetupDraft } from "./types.ts";
 const emptyBase = { vault_path: null, agent_locations: {}, default_targets: [], machine_id: "PC", repo_url: null };
 
 function harness(over: Partial<SetupApplyDeps> = {}) {
-  const calls = { init: [] as string[], config: [] as SetupConfigPatch[], adopt: [] as string[], push: [] as string[], notion: 0, draftDeleted: 0, watcher: 0 };
+  const calls = { init: [] as string[], config: [] as SetupConfigPatch[], adopt: [] as string[], push: [] as string[], notion: 0, draftDeleted: 0, watcher: 0, vaultSkill: 0, vaultSkillPush: [] as string[], desktop: 0, order: [] as string[] };
   const deps: SetupApplyDeps = {
     run: async () => ({ code: 0, stdout: "", stderr: "" }),
     readConfig: () => ({ vault_path: null, providers: [], default_targets: [] }),
@@ -39,6 +39,19 @@ function harness(over: Partial<SetupApplyDeps> = {}) {
     },
     deleteDraft: () => {
       calls.draftDeleted++;
+    },
+    addVaultSkill: () => {
+      calls.vaultSkill++;
+      calls.order.push("vault_skill");
+      return "added";
+    },
+    pushVaultSkill: (_v, provider) => {
+      calls.vaultSkillPush.push(provider.id);
+      calls.order.push(`vault_skill_push:${provider.id}`);
+    },
+    connectDesktop: () => {
+      calls.desktop++;
+      calls.order.push("desktop");
     },
     ...over,
   };
@@ -285,4 +298,193 @@ test("configPatch: a non-Claude engine writes engine + engines.<id> auth, never 
   assert.deepEqual(codex.assistant, { engine: "codex", engine_auth: { auth: "api_key", api_key: "sk-o" } });
   const claude = configPatch(draftWith({ vault, assistant: { engine: "claude", auth: "login" } }), []);
   assert.deepEqual(claude.assistant, { engine: "claude", auth: "login", workspace_id: "" });
+});
+
+const NOTION = { data_source_id: "11111111-2222-3333-4444-555555555555", data_source_name: "Skills", add_last_edited: false };
+
+test("agents: skill-vault after the adopts, its pushes after the pushes, Desktop last", async () => {
+  const root = tmp();
+  try {
+    const t1 = path.join(root, "t1");
+    const t2 = path.join(root, "t2");
+    fs.mkdirSync(t1);
+    fs.mkdirSync(t2);
+    const { applier, calls } = harness();
+    const events: SetupEvent[] = [];
+    const draft = draftWith({
+      vault: { mode: "new", path: path.join(root, "vault") },
+      targets: [
+        { id: "t1", path: t1, enabled: true, is_default: true, known: false },
+        { id: "t2", path: t2, enabled: true, is_default: false, known: false },
+      ],
+      skills: { adopt: [{ name: "found", from: "t1" }], push: ["mine"] },
+      notion: NOTION,
+      agents: { add_skill: true, desktop_connect: true },
+    });
+    const state = await applier.apply({ draft }, (e) => events.push(e));
+    assert.equal(state.ok, true);
+    assert.deepEqual(calls.vaultSkillPush, ["t1"]);
+    assert.deepEqual(calls.order, ["vault_skill", "vault_skill_push:t1", "desktop"]);
+    assert.deepEqual(events.map((e) => `${e.step}:${e.state}${e.item ? `:${e.item}` : ""}`), [
+      "vault:start", "vault:done", "config:start", "config:done",
+      "adopt:start", "adopt:done:found (from t1)", "adopt:done:skill-vault (from Skill Vault)",
+      "push:start", "push:done:mine → t1", "push:done:skill-vault → t1",
+      "notion:start", "notion:done:Skills",
+      "desktop:start", "desktop:done:Claude Desktop",
+      "done:done",
+    ]);
+    assert.equal(events.find((e) => e.step === "desktop" && e.state === "done")?.message, "connected");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("agents: null (Skip) adds no items; false ticks add none either", async () => {
+  const root = tmp();
+  try {
+    for (const agents of [null, { add_skill: false, desktop_connect: false }]) {
+      const { applier, calls } = harness();
+      const state = await applier.apply({ draft: draftWith({ vault: { mode: "new", path: path.join(root, `v${agents ? 1 : 0}`) }, agents }) }, () => {});
+      assert.equal(state.ok, true);
+      assert.deepEqual(calls.order, []);
+      assert.ok(!state.events.some((e) => e.step === "desktop"));
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a failed Desktop connect is the only item that retries", async () => {
+  const root = tmp();
+  try {
+    let broken = true;
+    const { applier, calls } = harness({
+      connectDesktop: () => {
+        calls.desktop++;
+        if (broken) throw new Error("C:\\x\\claude_desktop_config.json isn't valid JSON (Unexpected token). Fix it, then try again.");
+      },
+    });
+    const draft = draftWith({ vault: { mode: "new", path: path.join(root, "vault") }, agents: { add_skill: true, desktop_connect: true } });
+    const first = await applier.apply({ draft }, () => {});
+    assert.equal(first.ok, false);
+    assert.deepEqual(first.failed.map((f) => `${f.step}:${f.item}`), ["desktop:Claude Desktop"]);
+    assert.match(first.failed[0].message, /isn't valid JSON/);
+
+    broken = false;
+    const second = await applier.retry(() => {});
+    assert.equal(second.ok, true);
+    assert.equal(calls.desktop, 2);
+    assert.equal(calls.vaultSkill, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a failed skill-vault add fails its pushes; retry runs the add first", async () => {
+  const root = tmp();
+  try {
+    const t1 = path.join(root, "t1");
+    fs.mkdirSync(t1);
+    let inVault = false;
+    let addFails = true;
+    const order: string[] = [];
+    const { applier } = harness({
+      addVaultSkill: () => {
+        order.push("add");
+        if (addFails) throw new Error('Your vault already has a skill named "skill-vault" from somewhere else. Rename it to add this one.');
+        inVault = true;
+        return "added";
+      },
+      pushVaultSkill: (_v, p) => {
+        order.push(`push:${p.id}`);
+        if (!inVault) throw new Error("skill-vault isn't in the vault yet");
+      },
+    });
+    const draft = draftWith({
+      vault: { mode: "new", path: path.join(root, "vault") },
+      targets: [{ id: "t1", path: t1, enabled: true, is_default: true, known: false }],
+      agents: { add_skill: true, desktop_connect: false },
+    });
+    const first = await applier.apply({ draft }, () => {});
+    assert.deepEqual(first.failed.map((f) => `${f.step}:${f.item}`), ["adopt:skill-vault (from Skill Vault)", "push:skill-vault → t1"]);
+    assert.equal(first.failed[1].message, "skill-vault wasn't added to the vault, so it wasn't pushed");
+
+    addFails = false;
+    order.length = 0;
+    const second = await applier.retry(() => {});
+    assert.equal(second.ok, true);
+    assert.deepEqual(order, ["add", "push:t1"]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("skill-vault already in the vault is a skip line, not a failure", async () => {
+  const root = tmp();
+  try {
+    const { applier } = harness({ addVaultSkill: () => "already" });
+    const state = await applier.apply({ draft: draftWith({ vault: { mode: "new", path: path.join(root, "vault") }, agents: { add_skill: true, desktop_connect: false } }) }, () => {});
+    assert.equal(state.ok, true);
+    const line = state.events.find((e) => e.item === "skill-vault (from Skill Vault)");
+    assert.deepEqual(line, { step: "adopt", state: "skip", item: "skill-vault (from Skill Vault)", message: "already in the vault" });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a NAME_TAKEN add failure doesn't push the user's other skill-vault", async () => {
+  const root = tmp();
+  try {
+    const t1 = path.join(root, "t1");
+    fs.mkdirSync(t1);
+    let addFails = true;
+    const pushed: string[] = [];
+    const { applier } = harness({
+      addVaultSkill: () => {
+        if (addFails) throw new Error('Your vault already has a skill named "skill-vault" from somewhere else. Rename it to add this one.');
+        return "added";
+      },
+      pushVaultSkill: (_v, p) => {
+        pushed.push(p.id);
+      },
+    });
+    const draft = draftWith({
+      vault: { mode: "new", path: path.join(root, "vault") },
+      targets: [{ id: "t1", path: t1, enabled: true, is_default: true, known: false }],
+      agents: { add_skill: true, desktop_connect: false },
+    });
+    const first = await applier.apply({ draft }, () => {});
+    assert.deepEqual(pushed, []);
+    assert.deepEqual(first.failed.map((f) => `${f.step}:${f.item}`), ["adopt:skill-vault (from Skill Vault)", "push:skill-vault → t1"]);
+    assert.equal(first.failed[1].message, "skill-vault wasn't added to the vault, so it wasn't pushed");
+
+    addFails = false;
+    const second = await applier.retry(() => {});
+    assert.equal(second.ok, true);
+    assert.deepEqual(pushed, ["t1"]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("add_skill with no default tools adds the skill and pushes nowhere", async () => {
+  const root = tmp();
+  try {
+    const t1 = path.join(root, "t1");
+    fs.mkdirSync(t1);
+    const { applier, calls } = harness();
+    const state = await applier.apply({
+      draft: draftWith({
+        vault: { mode: "new", path: path.join(root, "vault") },
+        targets: [{ id: "t1", path: t1, enabled: true, is_default: false, known: false }],
+        agents: { add_skill: true, desktop_connect: false },
+      }),
+    }, () => {});
+    assert.equal(state.ok, true);
+    assert.ok(state.events.some((e) => e.step === "adopt" && e.state === "done" && e.item === "skill-vault (from Skill Vault)"));
+    assert.deepEqual(calls.vaultSkillPush, []);
+    assert.ok(!state.events.some((e) => e.step === "push"));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

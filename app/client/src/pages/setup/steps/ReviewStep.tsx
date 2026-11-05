@@ -6,6 +6,7 @@ import { setupApi, type SetupDraft, type SetupEvent, type SetupJobState } from "
 import { ENGINE_SHORT } from "../../../lib/assistant";
 import { Button } from "../../../components/ui/primitives";
 import type { StepProps } from "../types";
+import { DesktopFinishPanel } from "./DesktopFinishPanel";
 import { Hint, StepHeader, StepNav, listBox, rowStyle } from "../ui";
 
 const STEP_NAME: Record<SetupEvent["step"], string> = {
@@ -14,6 +15,7 @@ const STEP_NAME: Record<SetupEvent["step"], string> = {
   adopt: "Adopt",
   push: "Push",
   notion: "Notion",
+  desktop: "Desktop",
   done: "Done",
 };
 const MARK: Record<SetupEvent["state"], string> = { start: "…", done: "✓", skip: "–", error: "✗" };
@@ -37,7 +39,12 @@ function plannedActions(d: SetupDraft): string[] {
 
   if (d.skills.adopt.length) out.push(`Adopt ${d.skills.adopt.length} skill${d.skills.adopt.length === 1 ? "" : "s"} into the vault`);
   if (d.skills.push.length) out.push(`Push ${d.skills.push.length} skill${d.skills.push.length === 1 ? "" : "s"} to your default tools`);
+  if (d.agents?.add_skill) {
+    const noDefault = d.targets !== null && !d.targets.some((t) => t.enabled && t.is_default);
+    out.push(noDefault ? "Add the skill-vault skill to the vault" : "Add the skill-vault skill to the vault and push it to your default tools");
+  }
   if (d.notion) out.push(`Use the Notion database "${d.notion.data_source_name || d.notion.data_source_id}"`);
+  if (d.agents?.desktop_connect) out.push("Connect Claude Desktop to the vault tools");
   return out;
 }
 
@@ -134,6 +141,7 @@ export function ReviewStep({ draft, goTo, apiKey, onFinished }: StepProps) {
           {result.ok ? "Everything is saved." : "Your vault and settings are saved, but a few items didn't go through."}
         </StepHeader>
         {log}
+        <DesktopFinishPanel draft={draft} events={result.events} />
         {error && <Hint tone="bad">{error}</Hint>}
         {!result.ok && (
           <>
@@ -174,7 +182,7 @@ export function ReviewStep({ draft, goTo, apiKey, onFinished }: StepProps) {
         </Hint>
       )}
       {events.length > 0 && error && log}
-      <StepNav onBack={() => goTo("assistant")} onNext={finish} nextLabel="Finish" nextDisabled={!draft.vault} />
+      <StepNav onBack={() => goTo("agents")} onNext={finish} nextLabel="Finish" nextDisabled={!draft.vault} />
     </div>
   );
 }

@@ -47,3 +47,26 @@ test("the install prompt carries SKILL.md verbatim inside a fence it can't break
   assert.match(prompt, /^Please install this as a Claude skill/);
   assert.ok(prompt.includes("````markdown\n"));
 });
+
+test("the skill loads whenever a skill is being made, and its description still fits", () => {
+  const description = frontmatterValueOf(md, "description") ?? "";
+  assert.match(description, /create, edit or improve a skill/);
+  assert.ok(description.length <= 1024, `description is ${description.length} characters`);
+});
+
+test("the skill says the vault from Settings is where skills live, and never to hand back a zip", () => {
+  assert.ok(md.includes("## Where skills live"));
+  assert.match(md, /the folder set in the Skill Vault app's Settings/);
+  assert.match(md, /no skills folder on this computer/);
+  assert.match(md, /save it to the vault with `save_skill`/);
+  assert.match(md, /Don't hand it back as a zip or `\.skill` file/);
+  assert.match(md, /work on skill files in a particular folder or repository, edit them there/);
+  assert.ok(md.indexOf("## Where skills live") < md.indexOf("## Step 1: reach the vault"));
+});
+
+test("the install prompt explains why this one skill is a zip", () => {
+  const prompt = installPrompt(md);
+  assert.match(prompt, /^Please install this as a Claude skill for me/);
+  assert.match(prompt, /it's the one skill to package/);
+  assert.ok(prompt.indexOf("it's the one skill to package") < prompt.indexOf("````markdown"));
+});

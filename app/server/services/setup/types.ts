@@ -1,7 +1,7 @@
 /** Shared shapes for the setup guide (draft file, API bodies). */
 import type { EngineId } from "../assistant/engines/types.ts";
 
-export type SetupStep = "welcome" | "vault" | "targets" | "skills" | "notion" | "assistant" | "review";
+export type SetupStep = "welcome" | "vault" | "targets" | "skills" | "notion" | "assistant" | "agents" | "review";
 
 export interface NotionRef {
   id: string;
@@ -37,6 +37,11 @@ export interface AssistantChoice {
   workspace_id?: string;
 }
 
+export interface AgentsChoice {
+  add_skill: boolean;
+  desktop_connect: boolean;
+}
+
 /**
  * The guide's answers until Finish (~/.skill-vault/setup-draft.json).
  * null on targets / notion / assistant = "leave as it is" (Skip). Never holds
@@ -56,6 +61,8 @@ export interface SetupDraft {
   skills: { adopt: { name: string; from: string }[]; push: string[] };
   notion: NotionChoice | null;
   assistant: AssistantChoice | null;
+  /** The Agents step. null = Skip (or not visited): Finish touches neither. */
+  agents: AgentsChoice | null;
 }
 
 /** The config fields the guide reads (appConfig.readSetupBase). */

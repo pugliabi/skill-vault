@@ -47,7 +47,7 @@ All JSON under `/api`. The notable groups:
 | History | `GET /api/history/...` (versions, restore, deleted skills) |
 | Assistant | `GET /api/assistant/status` · `GET/PUT /api/assistant/auth` (sign-in mode; never returns the saved key) · `POST /api/assistant/stream` (NDJSON chat turn) · sessions CRUD + stop · `GET /api/assistant/suggestions`, `POST …/suggestions/{dismiss,restore,sweep}` · `POST /api/assistant/install-skills` · provider routes below |
 | App | `GET /api/health` (pid, port, version, mode) · `GET /api/app/update` · `POST /api/app/update/check` · `POST /api/app/update` (NDJSON progress; cross-site POSTs refused) |
-| Setup guide | `/api/setup/*`: capabilities, draft, pick-folder, inspect, targets, clone-preview, plan, apply (see [Setup guide](#setup-guide)); `POST /api/notion/connect` also takes `return_to` |
+| Setup guide | `/api/setup/*`: capabilities, draft, pick-folder, inspect, targets, clone-preview, plan, agents, apply (see [Setup guide](#setup-guide)); `POST /api/notion/connect` also takes `return_to` |
 | Events | `GET /api/events` (SSE) |
 
 Assistant provider routes (`/api/assistant`):
@@ -161,6 +161,7 @@ the API client in `client/src/lib/setup.ts`.
 | `GET /targets` | `targets.ts` | the six known tools as found / installed / not found, plus configured providers |
 | `POST /clone-preview` `{ url }` | `clonePreview.ts` | `{ candidates }`: where a vault lives in the repo and its skill names; 400 with a plain message on failure |
 | `POST /plan` `{ draft }` | `plan.ts` | adopt and push candidates, with "differs" entries that can't be picked |
+| `POST /agents` `{ draft }` | `agents.ts` | the Agents step's status for the draft's vault and tools: skill-vault (not in the vault, in it, or being adopted), Claude Desktop's state, bridge built, default tools |
 | `POST /apply` `{ draft, api_key? }` | `apply.ts` | the Finish job, streamed as NDJSON `{ step, state, item?, message? }`; 409 while one runs |
 | `POST /apply/retry` | `apply.ts` | re-runs only the items that failed, same stream |
 | `GET /apply/status` | `apply.ts` | the last job: `running`, `ok`, `events`, `failed`; lets a dropped stream recover |
@@ -197,15 +198,16 @@ targets, Notion or assistant means "leave as it is".
    written but the watcher restart fails, Finish carries on and reports
    "Settings saved. Restart Skill Vault to watch the new folders." The draft is
    deleted once the config is saved.
-3. **Adopt**, 4. **Push**, 5. **Notion database**: item by item, through the
-   same services the Adopt page, push drawer and Notion page use.
+3. **Adopt** (then `skill-vault (from Skill Vault)` when the Agents step asked for it), 4. **Push** (then `skill-vault → <tool>` for each default tool), 5. **Notion database**, 6. **Claude Desktop** (adds `mcpServers["skill-vault"]` through the same service as Settings → Agent access): item by item, through the same services the Adopt page, push drawer, Notion page and Agent access card use.
 
 Steps 1 and 2 stop the job on failure, with the config untouched (a failed
-config write after a clone names the cloned folder). Steps 3 to 5 record a failed
+config write after a clone names the cloned folder). Steps 3 to 6 record a failed
 item and carry on; `POST /apply/retry` re-runs only those, and moves that already
 happened stay. The API key goes straight into the config write, and only when
 "Use an API key" is the chosen sign-in; it never appears in events, logs or
 `apply/status`.
+
+When the skill-vault add fails, its pushes fail too without running ("skill-vault wasn't added to the vault, so it wasn't pushed"); Retry runs the add first.
 
 On the client, a refused request (such as a 409) shows its error in place. If
 the stream drops, the screen keeps polling `apply/status` until the job really

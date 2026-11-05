@@ -12,15 +12,19 @@
  *   GET    /targets        { targets } — the known tools and whether each is on this PC
  *   POST   /clone-preview  { url } → { candidates } — look inside a vault repo, keeping no copy
  *   POST   /plan           { draft } → SkillsPlan — which skills to adopt, push, or leave differing
+ *   POST   /agents         { draft } → AgentsStatus — what the Agents step can offer (skill-vault, Claude Desktop)
  *   POST   /apply          { draft, api_key? } — run the Finish job, streaming NDJSON events (409 while running)
  *   POST   /apply/retry    re-run only the items that failed, streaming NDJSON events
  *   GET    /apply/status   the Finish job's state (running, ok, events, failed items)
  *   POST   /pick-folder    { title?, initial? } → { path } | { cancelled } — the Windows folder dialog
  */
 import os from "node:os";
+import path from "node:path";
 import { Router, type Response } from "express";
 import { readAppConfig, readSetupBase } from "../services/appConfig.ts";
 import { defaultRun, type Run } from "../services/appUpdate.ts";
+import { agentsStatus } from "../services/setup/agents.ts";
+import { realPathEnv, type PathEnv } from "../services/agentAccess/desktopConfig.ts";
 import { configFingerprint, deleteDraft, normalizeDraft, readDraft, startDraft, writeDraft } from "../services/setup/draft.ts";
 import { CloneError, isCloneUrl, previewClone } from "../services/setup/clonePreview.ts";
 import { createSetupApplier, type SetupApplier, type SetupEvent } from "../services/setup/apply.ts";
@@ -52,6 +56,8 @@ export interface SetupRouterDeps {
   picker?: FolderPicker;
   /** The app folder (holds scripts/pick-folder.ps1); without it the dialog is unavailable. */
   appRoot?: string;
+  /** Where Claude Desktop's config is looked for (tests pass a temp folder). */
+  pathEnv?: () => PathEnv;
 }
 
 /** Run a job and stream its events as NDJSON (same format as POST /api/app/update). */
@@ -73,7 +79,8 @@ export function setupRouter(deps: SetupRouterDeps = {}): Router {
   const readBase = deps.readBase ?? readSetupBase;
   const run = deps.run ?? defaultRun;
   const readConfig = deps.readConfig ?? readAppConfig;
-  const applier = deps.applier ?? createSetupApplier(defaultApplyDeps(deps.home));
+  const pathEnv = deps.pathEnv ?? realPathEnv;
+  const applier = deps.applier ?? createSetupApplier(defaultApplyDeps({ home: deps.home, appRoot: deps.appRoot }));
   const picker = deps.picker ?? (deps.appRoot ? createFolderPicker({ appRoot: deps.appRoot }) : null);
   router.use(refuseCrossSiteWrites);
 
@@ -152,6 +159,27 @@ export function setupRouter(deps: SetupRouterDeps = {}): Router {
       planSkills({
         vault: { mode: draft.vault.mode, path: draft.vault.path, clone_skill_names: draft.vault.clone?.skill_names },
         targets: effectiveTargets(draft, readConfig()),
+      }),
+    );
+  });
+
+  router.post("/agents", (req, res) => {
+    let draft;
+    try {
+      draft = normalizeDraft((req.body as { draft?: unknown } | undefined)?.draft);
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+      return;
+    }
+    if (!draft.vault) {
+      res.status(400).json({ error: "Choose a vault first." });
+      return;
+    }
+    res.json(
+      agentsStatus(draft, {
+        config: readConfig(),
+        env: pathEnv(),
+        bridgePath: deps.appRoot ? path.join(deps.appRoot, "dist", "assistant-mcp.js") : null,
       }),
     );
   });

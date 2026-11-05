@@ -5,7 +5,7 @@
 import { ApiError, readNdjson } from "./api";
 import type { EngineId } from "./assistant";
 
-export type SetupStep = "welcome" | "vault" | "targets" | "skills" | "notion" | "assistant" | "review";
+export type SetupStep = "welcome" | "vault" | "targets" | "skills" | "notion" | "assistant" | "agents" | "review";
 
 export interface NotionRef {
   id: string;
@@ -27,6 +27,16 @@ export interface SetupTarget {
   known: boolean;
 }
 
+export interface AgentsChoice { add_skill: boolean; desktop_connect: boolean }
+export type DesktopState = "not_installed" | "not_connected" | "connected" | "broken" | "name_taken" | "unreadable";
+export interface AgentsStatus {
+  bridge_built: boolean;
+  skill: { state: "not_in_vault" | "in_vault" | "adopting"; adopting_from?: string };
+  desktop: { state: DesktopState; config_path: string | null; error?: string };
+  default_targets: string[];
+  vault_path: string;
+}
+
 export interface SetupDraft {
   version: 1;
   started_at: string;
@@ -40,6 +50,8 @@ export interface SetupDraft {
   skills: { adopt: { name: string; from: string }[]; push: string[] };
   notion: { data_source_id: string; data_source_name: string; add_last_edited: boolean } | null;
   assistant: { engine: EngineId; auth: "login" | "api_key"; workspace_id?: string } | null;
+  /** The Agents step. null = Skip (or not visited). */
+  agents: AgentsChoice | null;
 }
 
 export type FolderKind =
@@ -85,7 +97,7 @@ export interface SkillsPlan {
 }
 
 export interface SetupEvent {
-  step: "vault" | "config" | "adopt" | "push" | "notion" | "done";
+  step: "vault" | "config" | "adopt" | "push" | "notion" | "desktop" | "done";
   state: "start" | "done" | "skip" | "error";
   item?: string;
   message?: string;
@@ -96,7 +108,7 @@ export interface SetupJobState {
   ok: boolean | null;
   vault_path: string | null;
   events: SetupEvent[];
-  failed: { step: "adopt" | "push" | "notion"; item: string; message: string }[];
+  failed: { step: "adopt" | "push" | "notion" | "desktop"; item: string; message: string }[];
 }
 
 async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
@@ -135,6 +147,7 @@ export const setupApi = {
   targets: () => call<{ targets: DetectedTarget[] }>("GET", "/api/setup/targets"),
   clonePreview: (url: string) => call<{ candidates: VaultCandidate[] }>("POST", "/api/setup/clone-preview", { url }),
   plan: (draft: SetupDraft) => call<SkillsPlan>("POST", "/api/setup/plan", { draft }),
+  agents: (draft: SetupDraft) => call<AgentsStatus>("POST", "/api/setup/agents", { draft }),
   apply: (draft: SetupDraft, apiKey: string, onEvent: (e: SetupEvent) => void) =>
     stream("/api/setup/apply", { draft, ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}) }, onEvent),
   retry: (onEvent: (e: SetupEvent) => void) => stream("/api/setup/apply/retry", {}, onEvent),

@@ -2,8 +2,9 @@
  * The setup guide's Finish job. Fixed order:
  *   1 vault folder (create / check / git clone) + initVault
  *   2 config (one write) + watcher rebuild — then the draft is deleted
- *   3 adopt, 4 push, 5 Notion database — item by item
- * Steps 1–2 stop the job on failure (config untouched). Steps 3–5 record a
+ *   3 adopt (+ skill-vault from the app), 4 push (+ skill-vault to the default tools),
+ *   5 Notion database, 6 Claude Desktop — item by item
+ * Steps 1–2 stop the job on failure (config untouched). Steps 3–6 record a
  * failed item and carry on; retry() re-runs only those. One job at a time.
  * The API key goes straight into the config patch and never into an event.
  */
@@ -16,7 +17,7 @@ import { friendlyGitError } from "./clonePreview.ts";
 import { effectiveTargets, type EffectiveTarget } from "./plan.ts";
 import type { NotionChoice, SetupDraft, SetupVault } from "./types.ts";
 
-export type ApplyStep = "vault" | "config" | "adopt" | "push" | "notion";
+export type ApplyStep = "vault" | "config" | "adopt" | "push" | "notion" | "desktop";
 
 export interface SetupEvent {
   step: ApplyStep | "done";
@@ -26,7 +27,7 @@ export interface SetupEvent {
 }
 
 export interface FailedItem {
-  step: "adopt" | "push" | "notion";
+  step: "adopt" | "push" | "notion" | "desktop";
   item: string;
   message: string;
 }
@@ -57,6 +58,12 @@ export interface SetupApplyDeps {
   adopt: (vaultPath: string, item: { name: string; path: string; providerId: string }) => "imported" | "skipped";
   push: (vaultPath: string, skill: string, provider: Provider) => void;
   saveNotion: (vaultPath: string, choice: NotionChoice, redirectUrl?: string) => Promise<{ warning?: string }>;
+  /** Add the bundled skill-vault skill unless the vault has one (throws why it can't). */
+  addVaultSkill: (vaultPath: string) => "added" | "already";
+  /** Push the vault's skill-vault to one tool (throws for a folder that isn't ours). */
+  pushVaultSkill: (vaultPath: string, provider: Provider) => void;
+  /** Add the skill-vault MCP server to Claude Desktop's config (throws why it can't). */
+  connectDesktop: () => void;
   deleteDraft: () => void;
   cloneTimeoutMs?: number;
 }
@@ -72,8 +79,23 @@ export class SetupBusyError extends Error {}
 
 type WorkItem =
   | { kind: "adopt"; label: string; name: string; path: string; providerId: string }
+  | { kind: "vault_skill"; label: string }
   | { kind: "push"; label: string; name: string; provider: Provider }
-  | { kind: "notion"; label: string; choice: NotionChoice };
+  | { kind: "vault_skill_push"; label: string; provider: Provider }
+  | { kind: "notion"; label: string; choice: NotionChoice }
+  | { kind: "desktop"; label: string };
+
+/** The log step each kind shows under (skill-vault's items sit with Adopt and Push). */
+const STEP_OF: Record<WorkItem["kind"], FailedItem["step"]> = {
+  adopt: "adopt",
+  vault_skill: "adopt",
+  push: "push",
+  vault_skill_push: "push",
+  notion: "notion",
+  desktop: "desktop",
+};
+const VAULT_SKILL_LABEL = "skill-vault (from Skill Vault)";
+const VAULT_SKILL_NOT_ADDED = "skill-vault wasn't added to the vault, so it wasn't pushed";
 
 function isEmptyOrMissing(p: string): boolean {
   try {
@@ -174,15 +196,23 @@ function workItems(draft: SetupDraft, targets: EffectiveTarget[]): { items: Work
     }
     items.push({ kind: "adopt", label: `${a.name} (from ${t.id})`, name: a.name, path: path.join(t.path, a.name), providerId: t.id });
   }
+  const agents = draft.agents;
+  if (agents?.add_skill) items.push({ kind: "vault_skill", label: VAULT_SKILL_LABEL });
   for (const name of draft.skills.push) {
     for (const t of targets.filter((x) => x.is_default)) {
       if (fs.existsSync(path.join(t.path, name))) continue;
       items.push({ kind: "push", label: `${name} → ${t.id}`, name, provider: { id: t.id, path: t.path } });
     }
   }
+  if (agents?.add_skill) {
+    for (const t of targets.filter((x) => x.is_default)) {
+      items.push({ kind: "vault_skill_push", label: `skill-vault → ${t.id}`, provider: { id: t.id, path: t.path } });
+    }
+  }
   if (draft.notion) {
     items.push({ kind: "notion", label: draft.notion.data_source_name || draft.notion.data_source_id, choice: draft.notion });
   }
+  if (agents?.desktop_connect) items.push({ kind: "desktop", label: "Claude Desktop" });
   return { items, unretryable };
 }
 
@@ -207,27 +237,40 @@ export function createSetupApplier(deps: SetupApplyDeps): SetupApplier {
   async function runItems(items: WorkItem[], vaultPath: string, emit: (e: SetupEvent) => void): Promise<WorkItem[]> {
     const failed: WorkItem[] = [];
     let current: ApplyStep | null = null;
+    let vaultSkillFailed = false;
     for (const it of items) {
-      if (it.kind !== current) {
-        current = it.kind;
-        emit({ step: it.kind, state: "start" });
+      const step = STEP_OF[it.kind];
+      if (step !== current) {
+        current = step;
+        emit({ step, state: "start" });
       }
       try {
         if (it.kind === "adopt") {
           const r = deps.adopt(vaultPath, { name: it.name, path: it.path, providerId: it.providerId });
-          emit(r === "imported" ? { step: "adopt", state: "done", item: it.label } : { step: "adopt", state: "skip", item: it.label, message: "already in the vault" });
+          emit(r === "imported" ? { step, state: "done", item: it.label } : { step, state: "skip", item: it.label, message: "already in the vault" });
+        } else if (it.kind === "vault_skill") {
+          const r = deps.addVaultSkill(vaultPath);
+          emit(r === "added" ? { step, state: "done", item: it.label } : { step, state: "skip", item: it.label, message: "already in the vault" });
         } else if (it.kind === "push") {
           deps.push(vaultPath, it.name, it.provider);
-          emit({ step: "push", state: "done", item: it.label });
-        } else {
+          emit({ step, state: "done", item: it.label });
+        } else if (it.kind === "vault_skill_push") {
+          if (vaultSkillFailed) throw new Error(VAULT_SKILL_NOT_ADDED);
+          deps.pushVaultSkill(vaultPath, it.provider);
+          emit({ step, state: "done", item: it.label });
+        } else if (it.kind === "notion") {
           const r = await deps.saveNotion(vaultPath, it.choice, redirectUrl);
-          emit({ step: "notion", state: "done", item: it.label, ...(r.warning ? { message: r.warning } : {}) });
+          emit({ step, state: "done", item: it.label, ...(r.warning ? { message: r.warning } : {}) });
+        } else {
+          deps.connectDesktop();
+          emit({ step, state: "done", item: it.label, message: "connected" });
         }
       } catch (err) {
+        if (it.kind === "vault_skill") vaultSkillFailed = true;
         const message = (err as Error).message;
         failed.push(it);
-        state.failed.push({ step: it.kind, item: it.label, message });
-        emit({ step: it.kind, state: "error", item: it.label, message });
+        state.failed.push({ step, item: it.label, message });
+        emit({ step, state: "error", item: it.label, message });
       }
     }
     return failed;

@@ -1,6 +1,6 @@
 ---
 name: skill-vault
-description: Work with the user's Skill Vault, the local skill library managed by the Skill Vault app. Use when the user asks to save or push a skill to their vault, load or use a skill from their vault, list or search what's in the vault, push a vault skill to another tool (Claude Code, OpenClaw, Cursor, Codex, Copilot, Windsurf), install a vault skill in Claude Desktop or claude.ai, sync skills with Notion, or check whether vault skills are in sync or have updates.
+description: Work with the user's Skill Vault, the local skill library managed by the Skill Vault app. Use when the user asks to save or push a skill to their vault, load or use a skill from their vault, list or search what's in the vault, push a vault skill to another tool (Claude Code, OpenClaw, Cursor, Codex, Copilot, Windsurf), install a vault skill in Claude Desktop or claude.ai, sync skills with Notion, or check whether vault skills are in sync or have updates. Also use it whenever you create, edit or improve a skill in a chat, so the skill is saved to the vault instead of handed back as a zip or .skill file.
 ---
 
 # Skill Vault
@@ -9,6 +9,22 @@ The user keeps their agent skills in a **Skill Vault**: a folder of skills manag
 app on their computer. The app links vault skills into each tool's skills folder (its *targets*),
 packages them for Claude Desktop, and syncs them with Notion. This skill lets you do that work from a
 chat.
+
+## Where skills live
+
+The user's skills live in their vault: the folder set in the Skill Vault app's Settings. `get_config`
+shows it, along with the user's tools (targets) and which of them get new skills by default. Claude
+Desktop and claude.ai have no skills folder on this computer, so don't look for one. Find, read and
+save the user's vault skills only through the vault tools or the shared command, which always use the folder from
+Settings.
+
+When you create a skill or change one in this chat, including with another skill such as
+skill-creator, save it to the vault with `save_skill` (see below), then offer to push it to the
+user's tools. Don't hand it back as a zip or `.skill` file to download, even if another skill's steps
+say to package it.
+The one exception: when the user asks you to work on skill files in a particular folder or repository, edit them there.
+Build a zip only when the user asks to install a vault skill in Claude Desktop or
+claude.ai.
 
 ## Step 1: reach the vault
 
@@ -65,6 +81,8 @@ The first call can take up to a minute when the Skill Vault app has to start in 
 
 ## Save a skill from this chat to the vault
 
+This is what to do with any skill made or changed in a chat.
+
 **A new skill:**
 
 1. Pick a name: lowercase letters, digits and hyphens, 2 to 64 characters. SKILL.md's frontmatter
@@ -93,6 +111,8 @@ The first call can take up to a minute when the Skill Vault app has to start in 
 3. To bring a tool's edited copy back into the vault: `pull_from_provider { skill, provider_id }`.
 
 ## Install a vault skill in Claude Desktop or claude.ai
+
+Only when the user asks to use a vault skill in Claude Desktop or claude.ai itself.
 
 Claude Desktop and claude.ai keep skills in the user's Claude account, and nothing can install them
 there for the user.

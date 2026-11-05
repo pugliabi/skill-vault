@@ -174,7 +174,7 @@ export async function createApp(opts: CreateAppOptions): Promise<Express> {
   );
 
   // In-app updates (git checkout installs): background check + one-click apply.
-  const setupApplier = createSetupApplier(defaultApplyDeps());
+  const setupApplier = createSetupApplier(defaultApplyDeps({ appRoot: APP_ROOT }));
   const engineJobs = createEngineJobs();
   const busyWithoutUpdate = (): boolean =>
     anyNotionJobRunning() || anyTurnRunning() || foregroundCheckActive() || setupApplier.isRunning() || engineJobs.busy();

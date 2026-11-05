@@ -21,20 +21,21 @@ import { Router, type Response } from "express";
 import open from "open";
 import { readAppConfig, readClaudeDesktopStage } from "../services/appConfig.ts";
 import { recordActivity } from "../services/activity.ts";
-import { importSkills } from "../services/adoption.ts";
-import { isLink, resolveLink } from "../services/linking.ts";
 import { claudeAvailable as realClaudeAvailable, type ClaudeRunner } from "../services/claude/cli.ts";
 import { defaultStageDir, packageFolderForClaudeDesktop, recordDesktopPackage } from "../services/desktopPackaging.ts";
-import { pushSkillToProvider } from "../services/pushSkill.ts";
 import { hashSkillDirNormalized } from "../services/skillHash.ts";
-import { readManifest, skillDir } from "../services/vault.ts";
+import { skillDir } from "../services/vault.ts";
 import {
-  BUNDLED_SKILL_NAME, bundledSkillDir, bundledSkillsRoot, installPrompt, readBundledSkillMd,
+  BUNDLED_SKILL_NAME, bundledSkillDir, installPrompt, readBundledSkillMd,
 } from "../services/agentAccess/bundledSkill.ts";
 import {
-  bridgeEntry, desktopConfigPath, entryState, getEntry, readDesktopConfig,
-  realPathEnv, withEntry, withoutEntry, writeDesktopConfig, type PathEnv,
+  BUNDLED_MISSING, NAME_TAKEN, bundledSkillState, importBundledSkill, pushBundledSkill,
+} from "../services/agentAccess/vaultSkill.ts";
+import {
+  desktopConfigPath, entryState, readDesktopConfig,
+  realPathEnv, withoutEntry, writeDesktopConfig, type PathEnv,
 } from "../services/agentAccess/desktopConfig.ts";
+import { BRIDGE_NOT_BUILT, DESKTOP_NOT_INSTALLED, connectDesktop, desktopStatus } from "../services/agentAccess/desktopConnect.ts";
 import { ClaudeCodeError, connectClaudeCode, disconnectClaudeCode, readClaudeCodeEntry } from "../services/agentAccess/claudeCode.ts";
 import { shimDir } from "../services/agentAccess/commandShim.ts";
 import type { AgentAccessStatus } from "../types/vault.ts";
@@ -49,23 +50,6 @@ export interface AgentAccessOptions {
   claudeAvailable?: () => Promise<{ available: boolean; reason?: string }>;
   claudeCodeEntry?: () => unknown;
   openFolder?: (dir: string) => Promise<unknown>;
-}
-
-const samePath = (a: string | undefined, b: string): boolean =>
-  !!a && path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
-
-const realOr = (p: string): string => {
-  try {
-    return fs.realpathSync(p);
-  } catch {
-    return p;
-  }
-};
-
-/** True when `p` is a symlink or junction to `vaultCopy` (an earlier push of ours). */
-function linksTo(p: string, vaultCopy: string): boolean {
-  const target = isLink(p) ? resolveLink(p) : null;
-  return !!target && (samePath(target, vaultCopy) || samePath(realOr(target), realOr(vaultCopy)));
 }
 
 /** Display text for sh users; the shim lives under ~/.skill-vault/bin. */
@@ -85,35 +69,7 @@ export function agentAccessRouter(opts: AgentAccessOptions): Router {
   function skillRow(): AgentAccessStatus["skill"] {
     const cfg = readAppConfig();
     if (!cfg.vault_path) return { state: "no_vault", targets: [] };
-    const entry = readManifest(cfg.vault_path).skills[BUNDLED_SKILL_NAME];
-    const vaultCopy = skillDir(cfg.vault_path, BUNDLED_SKILL_NAME);
-    if (!entry && !fs.existsSync(vaultCopy)) return { state: "not_in_vault", targets: [] };
-    const origin = entry?.origin;
-    // Any app checkout's bundled-skills folder, not only this one: a moved or
-    // re-cloned app must still know its own copy. win32 basename splits on
-    // both separators, so a vault shared with another OS reads the same.
-    const ours =
-      origin?.type === "dir" &&
-      origin.subpath === BUNDLED_SKILL_NAME &&
-      !!origin.path &&
-      path.win32.basename(origin.path).toLowerCase() === path.basename(bundledSkillsRoot(opts.appRoot)).toLowerCase();
-    if (!entry || !origin || !ours) return { state: "name_taken", targets: entry?.targets ?? [] };
-    const vaultHash = hashSkillDirNormalized(vaultCopy);
-    // One-click refresh only while the vault copy is untouched since import;
-    // a locally edited copy goes through the normal Updates flow instead.
-    const untouched = vaultHash === origin.content_hash;
-    const differs = vaultHash !== hashSkillDirNormalized(bundledSkillDir(opts.appRoot));
-    return { state: untouched && differs ? "update_available" : "in_vault", targets: entry.targets };
-  }
-
-  function desktopRow(): AgentAccessStatus["claude_desktop"] {
-    const file = desktopConfigPath(pathEnv());
-    if (!file) return { state: "not_installed", config_path: null };
-    try {
-      return { state: entryState(getEntry(readDesktopConfig(file)), (p) => fs.existsSync(p)), config_path: file };
-    } catch (err) {
-      return { state: "unreadable", config_path: file, error: (err as Error).message };
-    }
+    return bundledSkillState(opts.appRoot, cfg.vault_path);
   }
 
   async function claudeCodeRow(): Promise<AgentAccessStatus["claude_code"]> {
@@ -124,7 +80,7 @@ export function agentAccessRouter(opts: AgentAccessOptions): Router {
 
   const bridgeMissing = (res: Response): boolean => {
     if (fs.existsSync(bridgePath)) return false;
-    res.status(409).json({ error: "Build the app first: the bridge (dist/assistant-mcp.js) isn't built yet." });
+    res.status(409).json({ error: BRIDGE_NOT_BUILT });
     return true;
   };
 
@@ -143,7 +99,7 @@ export function agentAccessRouter(opts: AgentAccessOptions): Router {
   /** The Desktop config path, or a 404 when Claude Desktop isn't installed. */
   function desktopFile(res: Response): string | null {
     const file = desktopConfigPath(pathEnv());
-    if (!file) res.status(404).json({ error: "Claude Desktop isn't installed for this user." });
+    if (!file) res.status(404).json({ error: DESKTOP_NOT_INSTALLED });
     return file;
   }
 
@@ -151,7 +107,7 @@ export function agentAccessRouter(opts: AgentAccessOptions): Router {
     const out: AgentAccessStatus = {
       bridge_built: fs.existsSync(bridgePath),
       skill: skillRow(),
-      claude_desktop: desktopRow(),
+      claude_desktop: desktopStatus(pathEnv()),
       claude_code: await claudeCodeRow(),
       command: { windows: path.join(shimDir(), "skill-vault.cmd"), posix: POSIX_COMMAND },
     };
@@ -167,24 +123,15 @@ export function agentAccessRouter(opts: AgentAccessOptions): Router {
     const vaultPath = cfg.vault_path;
     const row = skillRow();
     if (row.state === "name_taken") {
-      res.status(409).json({ error: `Your vault already has a skill named "${BUNDLED_SKILL_NAME}" from somewhere else. Rename it to add this one.` });
+      res.status(409).json({ error: NAME_TAKEN });
       return;
     }
-    const sourceRoot = bundledSkillsRoot(opts.appRoot);
-    const result = importSkills(
-      vaultPath,
-      sourceRoot,
-      [],
-      undefined,
-      undefined,
-      [{ name: BUNDLED_SKILL_NAME, path: bundledSkillDir(opts.appRoot) }],
-      { overwrite: row.state === "update_available", originContext: { type: "dir", root: sourceRoot } },
-    );
+    const result = importBundledSkill(opts.appRoot, vaultPath, { overwrite: row.state === "update_available" });
     // importSkills skips (rather than fails) a missing source, an existing
     // copy without overwrite and an identical copy; only report what happened.
     if (!result.imported.includes(BUNDLED_SKILL_NAME) && !result.updated.includes(BUNDLED_SKILL_NAME)) {
       if (!fs.existsSync(bundledSkillDir(opts.appRoot))) {
-        res.status(409).json({ error: `The app's bundled ${BUNDLED_SKILL_NAME} skill folder is missing. Reinstall or rebuild the app.` });
+        res.status(409).json({ error: BUNDLED_MISSING });
       } else if (row.state === "in_vault" && hashSkillDirNormalized(skillDir(vaultPath, BUNDLED_SKILL_NAME)) === hashSkillDirNormalized(bundledSkillDir(opts.appRoot))) {
         res.json({ ...result, pushed: [], failed: [], skill: skillRow() });
       } else if (row.state === "in_vault") {
@@ -205,24 +152,14 @@ export function agentAccessRouter(opts: AgentAccessOptions): Router {
     const pushed: string[] = [];
     const failed: Array<{ provider_id: string; error: string }> = [];
     if (row.state === "not_in_vault") {
-      const vaultCopy = skillDir(vaultPath, BUNDLED_SKILL_NAME);
       for (const id of cfg.default_targets ?? []) {
         const provider = cfg.providers.find((p) => p.id === id);
         if (!provider) {
           failed.push({ provider_id: id, error: "not configured" });
           continue;
         }
-        // A push replaces whatever is at the target. Only a link to the vault
-        // copy is known to be ours; anything else may be the user's own skill.
-        const dest = path.join(provider.path, BUNDLED_SKILL_NAME);
-        if ((fs.existsSync(dest) || isLink(dest)) && !linksTo(dest, vaultCopy)) {
-          const error = `a ${BUNDLED_SKILL_NAME} folder that isn't from your vault is already there (${dest}) — rename or remove it first`;
-          failed.push({ provider_id: id, error });
-          recordActivity({ kind: "push", skill: BUNDLED_SKILL_NAME, provider_id: id, ok: false, message: error });
-          continue;
-        }
         try {
-          pushSkillToProvider(vaultPath, BUNDLED_SKILL_NAME, provider);
+          pushBundledSkill(vaultPath, provider);
           pushed.push(id);
           recordActivity({ kind: "push", skill: BUNDLED_SKILL_NAME, provider_id: id, ok: true, message: "pushed" });
         } catch (err) {
@@ -260,12 +197,12 @@ export function agentAccessRouter(opts: AgentAccessOptions): Router {
     if (bridgeMissing(res)) return;
     const file = desktopFile(res);
     if (!file) return;
-    const ok = await attempt(res, file, () =>
-      writeDesktopConfig(file, withEntry(readDesktopConfig(file), bridgeEntry(nodePath, bridgePath, "claude-desktop"))),
-    );
+    const ok = await attempt(res, file, () => {
+      connectDesktop({ env: pathEnv(), nodePath, bridgePath });
+    });
     if (!ok) return;
     console.log(`[agent-access] connected Claude Desktop (${file})`);
-    res.json(desktopRow());
+    res.json(desktopStatus(pathEnv()));
   });
 
   router.post("/desktop/disconnect", async (_req, res) => {
@@ -278,7 +215,7 @@ export function agentAccessRouter(opts: AgentAccessOptions): Router {
     });
     if (!ok) return;
     console.log(`[agent-access] disconnected Claude Desktop (${file})`);
-    res.json(desktopRow());
+    res.json(desktopStatus(pathEnv()));
   });
 
   router.post("/claude-code/connect", async (_req, res) => {

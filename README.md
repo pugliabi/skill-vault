@@ -12,7 +12,7 @@ The main way in is the **Skill Vault App**, a local web dashboard. A Python CLI 
 
 ## What's new
 
-- **First-run setup guide.** Six steps take you through your vault, tools, skills, Notion and the assistant, and nothing is saved until you press **Finish**. Run it again any time from **Settings → Run setup guide…**.
+- **First-run setup guide.** Seven steps take you through your vault, tools, skills, Notion, the assistant and Claude Desktop, and nothing is saved until you press **Finish**. Run it again any time from **Settings → Run setup guide…**.
 - **Clearer Notion connection errors.** When Connect can't reach Notion, the app now tells you why, with the error code and what to check, instead of a bare "fetch failed".
 
 ### In beta testing

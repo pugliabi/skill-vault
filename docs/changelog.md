@@ -6,6 +6,16 @@ semver; the project is pre-1.0, so minor versions carry feature batches.
 
 ## [Unreleased]
 
+### Added
+- **The setup guide can connect Claude Desktop.** A new optional **Agents** step adds the `skill-vault`
+  skill to your vault (and pushes it to your default tools) and connects Claude Desktop to the vault
+  tools, both at Finish with progress and retry. The Finish screen then says to quit Desktop from the
+  tray icon and reopen it, and gives you **Copy install prompt** and **Download skill zip** for the
+  skill.
+- **Skills made in a Claude Desktop chat are saved to your vault.** The `skill-vault` skill now says the
+  vault folder from Settings is where every skill lives. A skill created or changed in a chat goes into
+  the vault, then out to your tools, instead of coming back as a zip to upload.
+
 ### Fixed
 - **The Claude assistant now keeps to its documented limits.** Its file edits stay in the vault and repos
   folders, and its shell runs plain `git` for history and clones and nothing else. Before, it could write

@@ -44,7 +44,7 @@ export function AssistantStep({ draft, commit, goTo, apiKey, setApiKey }: StepPr
     current &&
     commit(
       { assistant: { engine: current.id, auth: mode, ...(current.id === "claude" && ws.trim() ? { workspace_id: ws.trim() } : {}) } },
-      "review",
+      "agents",
     );
   const refresh = async () => {
     try {
@@ -148,7 +148,7 @@ export function AssistantStep({ draft, commit, goTo, apiKey, setApiKey }: StepPr
 
       <StepNav
         onBack={() => goTo("notion")}
-        onSkip={() => commit({ assistant: null }, "review")}
+        onSkip={() => commit({ assistant: null }, "agents")}
         onNext={next}
         nextDisabled={!current || claudeAuth.isLoading || (mode === "api_key" && !keyAvailable)}
       />
