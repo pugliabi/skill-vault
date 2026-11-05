@@ -19,6 +19,7 @@ import { TargetsStep } from "./steps/TargetsStep";
 import { SkillsStep } from "./steps/SkillsStep";
 import { NotionStep } from "./steps/NotionStep";
 import { AssistantStep } from "./steps/AssistantStep";
+import { AgentsStep } from "./steps/AgentsStep";
 import { ReviewStep } from "./steps/ReviewStep";
 
 const RAIL: { id: SetupStep; label: string }[] = [
@@ -27,6 +28,7 @@ const RAIL: { id: SetupStep; label: string }[] = [
   { id: "skills", label: "Skills" },
   { id: "notion", label: "Notion" },
   { id: "assistant", label: "Assistant" },
+  { id: "agents", label: "Agents" },
   { id: "review", label: "Finish" },
 ];
 
@@ -71,7 +73,7 @@ function Welcome({
   return (
     <div>
       <StepHeader title={firstRun ? "Welcome to Skill Vault" : "Setup guide"}>
-        A few short steps: where your skills live, the tools you use, Notion and the assistant. Nothing is saved until you press Finish.
+        A few short steps: where your skills live, the tools you use, Notion, the assistant and Claude Desktop. Nothing is saved until you press Finish.
       </StepHeader>
       {saved && stale && <Hint tone="warn">Your settings changed since you last used the guide, so it starts over.</Hint>}
       <div style={{ display: "flex", gap: 8, marginTop: 24 }}>
@@ -179,6 +181,7 @@ export default function SetupGuide() {
             {step === "skills" && <SkillsStep {...props} />}
             {step === "notion" && <NotionStep {...props} />}
             {step === "assistant" && <AssistantStep {...props} />}
+            {step === "agents" && <AgentsStep {...props} />}
             {step === "review" && <ReviewStep {...props} />}
           </>
         )}
