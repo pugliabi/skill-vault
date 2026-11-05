@@ -1877,7 +1877,7 @@ Under `### Setup finished with "items need attention"`, after the existing parag
 
 - [ ] **Step 6: Check for personal data and commit**
 
-Run (from the repo root): `git diff | rg -n -i "pugli|thomas"` → no matches. Example paths in the new text use `C:\Users\you\…` only.
+Run (from the repo root): `git diff | rg -n -i "<your-user-name>|<your-name>"` → no matches. Example paths in the new text use `C:\Users\you\…` only.
 
 ```bash
 git add docs/getting-started.md docs/features.md docs/faq.md docs/troubleshooting.md docs/changelog.md app/CHANGELOG.md
