@@ -28,6 +28,12 @@ DEFAULT_AGENT_LOCATIONS: dict[str, str] = {
     "windsurf": str(Path.home() / ".windsurf" / "skills"),
 }
 
+# Well-known agent definition (subagent) directories, per harness
+DEFAULT_AGENT_DEFINITION_LOCATIONS: dict[str, str] = {
+    "claude": str(Path.home() / ".claude" / "agents"),
+    "copilot": str(Path.home() / ".copilot" / "agents"),
+}
+
 
 # ── Config I/O ───────────────────────────────────────────────
 
