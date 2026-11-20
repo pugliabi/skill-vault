@@ -156,7 +156,7 @@ A docked chat pane on every page (sidebar button or Ctrl/⌘ + J), powered by a 
 
 ## Install, launch & updates — runs like a desktop app
 
-On Windows, `setup.cmd` installs everything and adds **Start Menu → Skill Vault**. The shortcut opens the app in its own Edge window with no console, starts in about a second (reusing the app if it's already running), and stops it about a minute after you close the last window. When GitHub has a newer version, an **Update available** button appears in the sidebar; **Update & restart** pulls, rebuilds, waits for running jobs and restarts in place, and puts everything back if a step fails. Details: [Getting Started](./getting-started.md#install-and-launch-the-app).
+On Windows, `setup.cmd` installs everything and adds **Start Menu → Skill Vault**. The shortcut opens the app in its own Edge window with no console, starts in about a second (reusing the app if it's already running), and stops it about a minute after you close the last window. When GitHub has a newer version, an **Update available** button appears in the sidebar (or check yourself with **Settings → App → Check for updates**); **Update & restart** pulls, rebuilds, waits for running jobs and restarts in place, and puts everything back if a step fails. Details: [Getting Started](./getting-started.md#install-and-launch-the-app).
 
 ## Proactive suggestions — the app tells you what needs attention
 

@@ -4,9 +4,14 @@ User-facing history of the Skill Vault project (app + CLI). The app keeps a
 more detailed log in [app/CHANGELOG.md](../app/CHANGELOG.md). Versions follow
 semver; the project is pre-1.0, so minor versions carry feature batches.
 
-## [Unreleased]
+## [0.3.0] - 2026-11-20
+
+Picking your Notion Skills database works again: Notion removed a tool the app used to find it, so new installs couldn't choose one. Settings → App now has **Check for updates**. The setup guide gains an **Agents** step that adds the `skill-vault` skill and connects Claude Desktop, and the Claude assistant now keeps to its documented limits.
 
 ### Added
+- **Check for updates in Settings.** Settings → App shows your version and when the app last checked
+  GitHub. **Check for updates** checks now instead of waiting for the check every 6 hours, and
+  **Update & restart…** installs a newer version from there.
 - **The setup guide can connect Claude Desktop.** A new optional **Agents** step adds the `skill-vault`
   skill to your vault (and pushes it to your default tools) and connects Claude Desktop to the vault
   tools, both at Finish with progress and retry. The Finish screen then says to quit Desktop from the

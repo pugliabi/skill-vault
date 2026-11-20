@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "./ui/primitives";
 import { renderMarkdown } from "../lib/markdown";
+import { timeAgo } from "../lib/status";
 import {
   appUpdateApi,
   getHealth,
@@ -118,6 +119,78 @@ export function UpdatePill() {
         <AppUpdateDialog status={shown} checking={checking} onClose={() => setSnapshot(null)} />
       )}
     </>
+  );
+}
+
+/** One line for Settings → App: how this copy stands against GitHub's main. */
+function updateSummary(s: AppUpdateStatus): { text: string; tone: "ok" | "info" | "warn" } {
+  if (s.behind > 0) {
+    const what =
+      s.new_version && s.latest_version
+        ? `Skill Vault ${s.latest_version} is available`
+        : `${s.behind} new ${s.behind === 1 ? "change is" : "changes are"} on GitHub`;
+    return s.can_apply
+      ? { text: `${what}.`, tone: "info" }
+      : { text: `${what}. It can't be installed right now: ${s.reason ?? "unknown reason"}.`, tone: "warn" };
+  }
+  if (!s.checked_at) {
+    return s.last_error
+      ? { text: `Couldn't check for updates: ${s.last_error}`, tone: "warn" }
+      : { text: "Not checked yet.", tone: "info" };
+  }
+  if (s.last_error) return { text: `The last check didn't finish: ${s.last_error}`, tone: "warn" };
+  if (!s.supported) return { text: `In-app updates are off: ${s.reason ?? "unknown reason"}.`, tone: "warn" };
+  return { text: "You're up to date.", tone: "ok" };
+}
+
+const TONE_COLOR = { ok: "var(--ok)", info: "var(--ink-2)", warn: "var(--warn)" } as const;
+
+/**
+ * Settings → App: the installed version, "Check for updates" (asks GitHub
+ * now instead of waiting for the 6-hour background check) and, when main is
+ * ahead, the same Update & restart dialog the sidebar pill opens.
+ */
+export function AppUpdateSettings() {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ["app-update"], queryFn: appUpdateApi.status, staleTime: 60_000 });
+  const [snapshot, setSnapshot] = useState<AppUpdateStatus | null>(null);
+  const check = useMutation({
+    mutationFn: appUpdateApi.check,
+    onSuccess: (fresh) => qc.setQueryData(["app-update"], fresh),
+  });
+  const summary = data ? updateSummary(data) : null;
+  // As in UpdatePill: follow the live status while it's still behind, else keep the snapshot mounted.
+  const shown = data && data.behind > 0 ? data : snapshot;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <span style={{ color: "var(--ink)" }}>
+          Skill Vault{" "}
+          {data?.version && <code style={{ fontFamily: "var(--mono)", fontSize: 12 }}>v{data.version}</code>}
+        </span>
+        {data?.checked_at && (
+          <span style={{ fontSize: 12, color: "var(--ink-3)" }}>checked {timeAgo(data.checked_at)}</span>
+        )}
+        <span style={{ flex: 1 }} />
+        <Button size="sm" onClick={() => check.mutate()} disabled={check.isPending || !!data?.applying}>
+          {check.isPending ? "Checking…" : "Check for updates"}
+        </Button>
+        {data && data.behind > 0 && (
+          <Button kind="primary" size="sm" onClick={() => setSnapshot(data)} disabled={check.isPending}>
+            Update &amp; restart…
+          </Button>
+        )}
+      </div>
+      {check.isError ? (
+        <p style={{ margin: 0, fontSize: 12.5, color: "var(--bad)" }}>
+          Couldn&apos;t check for updates: {(check.error as Error).message}
+        </p>
+      ) : (
+        summary && <p style={{ margin: 0, fontSize: 12.5, color: TONE_COLOR[summary.tone] }}>{summary.text}</p>
+      )}
+      {snapshot && shown && <AppUpdateDialog status={shown} checking={false} onClose={() => setSnapshot(null)} />}
+    </div>
   );
 }
 

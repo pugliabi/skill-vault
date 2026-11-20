@@ -4,9 +4,14 @@ All notable changes to the Skill Vault App are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com); versions use semver
 (the app package is `0.x` — minor bumps carry user-facing feature batches).
 
-## [Unreleased]
+## [0.3.0] - 2026-11-20
+
+Picking your Notion Skills database works again: Notion removed a tool the app used to find it, so new installs couldn't choose one. Settings → App now has **Check for updates**. The setup guide gains an **Agents** step that adds the `skill-vault` skill and connects Claude Desktop, and the Claude assistant now keeps to its documented limits.
 
 ### Added
+- Settings → App: **Check for updates** (`AppUpdateSettings` in `components/AppUpdate.tsx`). It shows
+  the installed version and when GitHub was last checked, calls `POST /api/app/update/check`, and
+  opens the sidebar pill's Update & restart dialog when main is ahead.
 - Setup guide **Agents** step (`steps/AgentsStep.tsx`), between Assistant and Finish. The draft gains
   `agents: { add_skill, desktop_connect } | null`, and `POST /api/setup/agents { draft }` reports
   skill-vault against the draft's vault, the Claude Desktop state, the bridge and the default tools.

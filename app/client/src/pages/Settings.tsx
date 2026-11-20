@@ -9,6 +9,7 @@ import { Button, ProviderChip, Rule } from "../components/ui/primitives";
 import ImportVaultDialog from "../components/ImportVaultDialog";
 import { AgentAccessCard } from "../components/AgentAccessCard";
 import { NotionSection } from "../components/NotionSection";
+import { AppUpdateSettings } from "../components/AppUpdate";
 import { assistantApi } from "../lib/assistant";
 import { ProviderSettings } from "../components/assistant/ProviderSettings";
 import type { AppConfig, Provider } from "../lib/types";
@@ -121,6 +122,8 @@ export default function Settings() {
             color: "var(--ink-2)",
           }}
         >
+          <AppUpdateSettings />
+          <div style={{ borderTop: "0.5px solid var(--border)" }} />
           <p style={{ margin: 0 }}>
             Runtime (port, host, auto-open) is set by:{" "}
             CLI flags → environment → <code style={{ fontFamily: "var(--mono)" }}>app/.env</code>{" "}
