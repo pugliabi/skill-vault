@@ -1,6 +1,7 @@
 ---
 name: finding-skill-origins
-description: Use this skill when locating where a vault skill's upstream source lives now — a broken or unknown origin, upstream_missing or source_missing status, a dead or 404 clone URL, or a repo that moved, was renamed, or restructured. Covers git forensics (log --follow, -S, --diff-filter), GitHub and web search on distinctive content, candidate verification, and recording the repaired origin. Triggers: "where did this skill come from", "the source is gone", "repo moved", "fix the origin", "upstream missing", "source missing", "dead URL", "find the new home", "provenance".
+description: >-
+  Use this skill when locating where a vault skill's upstream source lives now — a broken or unknown origin, upstream_missing or source_missing status, a dead or 404 clone URL, or a repo that moved, was renamed, or restructured. Covers git forensics (log --follow, -S, --diff-filter), GitHub and web search on distinctive content, candidate verification, and recording the repaired origin. Triggers: "where did this skill come from", "the source is gone", "repo moved", "fix the origin", "upstream missing", "source missing", "dead URL", "find the new home", "provenance".
 ---
 
 # Finding where a skill lives now

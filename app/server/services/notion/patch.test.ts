@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mergeSkillMd, overlayNotionSkillMd, stripNotionPageId } from "./patch.ts";
+import { mergeSkillMd, overlayNotionSkillMd, quoteInvalidFrontmatter, stripNotionPageId } from "./patch.ts";
 
 const body = (lines: string[]) => lines.join("\n") + "\n";
 const FM = "---\nname: demo\ndescription: old\n---\n";
@@ -103,4 +103,51 @@ test("a Notion punctuation-only description change is applied when the vault did
   const r = mergeSkillMd(base, notion, vault);
   assert.ok(r.ok, !r.ok ? r.reason : "");
   assert.equal(r.text, "---\nname: demo\ndescription: Use this; then that.\nlicense: MIT\n---\nbody\n");
+});
+
+// ── quoteInvalidFrontmatter (the copy uploaded to Notion) ───────
+
+test("quoteInvalidFrontmatter quotes a plain value strict YAML rejects (': ' inside), keeping its text", () => {
+  const md = '---\nname: demo\ndescription: Use it when stuck. Triggers: "help me", "what now"\n---\nbody: stays\n';
+  assert.equal(
+    quoteInvalidFrontmatter(md),
+    '---\nname: demo\ndescription: "Use it when stuck. Triggers: \\"help me\\", \\"what now\\""\n---\nbody: stays\n',
+  );
+});
+
+test("quoteInvalidFrontmatter quotes a trailing colon, a reserved first character, and a wrapped plain value", () => {
+  assert.equal(quoteInvalidFrontmatter("---\na: Use when:\nb: @here\nc: `x`\n---\n"), '---\na: "Use when:"\nb: "@here"\nc: "`x`"\n---\n');
+  assert.equal(
+    quoteInvalidFrontmatter("---\ndescription: first line\n  then: second line\nname: x\n---\n"),
+    '---\ndescription: "first line then: second line"\nname: x\n---\n',
+  );
+});
+
+test("quoteInvalidFrontmatter leaves valid YAML alone: quoted, block, flow, nested, booleans, numbers, comments", () => {
+  const md = [
+    "---",
+    "name: demo",
+    'description: "Already: quoted"',
+    "summary: 'single: quoted'",
+    "notes: >-",
+    "  Block: scalar",
+    "allowed-tools: [Read, Grep]",
+    "metadata:",
+    "  owner: me",
+    "  url: https://example.com",
+    "user-invocable: true",
+    "version: 1.2",
+    "url: https://example.com/a",
+    "tag: plain # a comment",
+    "---",
+    "Body: with a colon",
+    "",
+  ].join("\n");
+  assert.equal(quoteInvalidFrontmatter(md), md);
+  assert.equal(quoteInvalidFrontmatter("no frontmatter: here\n"), "no frontmatter: here\n");
+});
+
+test("quoteInvalidFrontmatter keeps CRLF line endings and a BOM", () => {
+  const md = "﻿---\r\nname: demo\r\ndescription: a: b\r\n---\r\nbody\r\n";
+  assert.equal(quoteInvalidFrontmatter(md), '﻿---\r\nname: demo\r\ndescription: "a: b"\r\n---\r\nbody\r\n');
 });

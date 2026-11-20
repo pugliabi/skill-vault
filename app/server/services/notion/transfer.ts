@@ -8,6 +8,7 @@ import path from "node:path";
 import zlib from "node:zlib";
 import * as tar from "tar";
 import type { NotionApi } from "./api.ts";
+import { quoteInvalidFrontmatter } from "./patch.ts";
 import { isFile } from "../fsUtil.ts";
 
 const SKIP_NAMES = new Set(["node_modules", "__pycache__", ".git", ".DS_Store", "Thumbs.db"]);
@@ -26,7 +27,9 @@ export function crc32Base64(bytes: Buffer): string {
 
 /**
  * Tar+gzip `dir`'s contents under a single top-level `name/` folder, skipping
- * VCS/build noise. Throws if SKILL.md is not present at the top level of `dir`.
+ * VCS/build noise, with SKILL.md's frontmatter made strict-YAML safe
+ * (quoteInvalidFrontmatter; `dir` itself is never changed). Throws if
+ * SKILL.md is not present at the top level of `dir`.
  */
 export async function packSkill(dir: string, name: string): Promise<{ bytes: Buffer; crc32Base64: string }> {
   if (!isFile(path.join(dir, "SKILL.md"))) {
@@ -36,6 +39,11 @@ export async function packSkill(dir: string, name: string): Promise<{ bytes: Buf
   const root = path.join(staging, name);
   try {
     copyTree(dir, root);
+    // Notion refuses SKILL.md whose frontmatter strict YAML can't read; the copy sent quotes those values.
+    const skillMd = path.join(root, "SKILL.md");
+    const text = fs.readFileSync(skillMd, "utf8");
+    const safe = quoteInvalidFrontmatter(text);
+    if (safe !== text) fs.writeFileSync(skillMd, safe);
     const file = path.join(staging, "archive.tar.gz");
     await tar.c({ gzip: true, cwd: staging, file, portable: true }, [name]);
     const bytes = fs.readFileSync(file);

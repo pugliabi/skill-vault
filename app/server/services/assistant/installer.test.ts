@@ -69,3 +69,18 @@ test("unknown requested skills are reported, not errored", () => {
   assert.deepEqual(result.installed_skills, []);
   assert.deepEqual(result.skipped_skills, [{ name: "nope", reason: "not in the plugin bundle" }]);
 });
+
+test("every skill the app ships has frontmatter strict YAML accepts (Notion refuses the rest)", async () => {
+  const { quoteInvalidFrontmatter } = await import("../notion/patch.ts");
+  const app = path.resolve(import.meta.dirname, "../../..");
+  const roots = [path.join(app, "assistant-plugin", "skills"), path.join(app, "bundled-skills")];
+  const files = roots.flatMap((r) =>
+    fs.readdirSync(r).map((d) => path.join(r, d, "SKILL.md")).filter((f) => fs.existsSync(f)),
+  );
+  assert.ok(files.length >= 10, `found ${files.length} shipped skills`);
+  const bad = files.filter((f) => {
+    const md = fs.readFileSync(f, "utf8");
+    return quoteInvalidFrontmatter(md) !== md;
+  });
+  assert.deepEqual(bad.map((f) => path.relative(app, f)), []);
+});

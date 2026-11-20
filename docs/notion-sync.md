@@ -248,6 +248,9 @@ as an informational note but never blocks anything on its own.
 - **Table cells containing a pipe (`|`) inside inline code can be
   truncated** by Notion when it converts a table back to Markdown. Double-
   check tables with code-in-cells after a pull.
+- **Notion reads `SKILL.md` frontmatter as strict YAML.** A value without quotes that contains a
+  colon and a space (`description: Use it. Triggers: "go"`) is refused, though Claude Code accepts
+  it. The app quotes such values in the copy it uploads; the vault file is not changed.
 - **Single-file skills download as text, not an archive.** For a skill that
   is just a `SKILL.md`, Notion returns the file inline instead of an archive
   link; the app handles both. Older versions failed on these with "returned

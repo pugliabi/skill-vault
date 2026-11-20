@@ -1,6 +1,7 @@
 ---
 name: authoring-skills
-description: Use this skill when creating a new skill or improving an existing SKILL.md in the vault — writing frontmatter, crafting a trigger-rich description, structuring the body with progressive disclosure, splitting depth into references files, registering the new folder in the manifest, and reviewing against a quality checklist. Triggers: "create a skill", "write a SKILL.md", "make me a skill for X", "improve this skill's description", "why isn't my skill triggering", "skill best practices", "review my skill", "add a skill to the vault".
+description: >-
+  Use this skill when creating a new skill or improving an existing SKILL.md in the vault — writing frontmatter, crafting a trigger-rich description, structuring the body with progressive disclosure, splitting depth into references files, registering the new folder in the manifest, and reviewing against a quality checklist. Triggers: "create a skill", "write a SKILL.md", "make me a skill for X", "improve this skill's description", "why isn't my skill triggering", "skill best practices", "review my skill", "add a skill to the vault".
 ---
 
 # Authoring skills in the vault

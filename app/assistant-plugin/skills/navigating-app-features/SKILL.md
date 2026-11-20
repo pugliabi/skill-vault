@@ -1,6 +1,7 @@
 ---
 name: navigating-app-features
-description: Use this skill when answering how to do something in the Skill Vault app or pointing the user to the right place — the catalog of pages (Dashboard, Skills, Sync, Adopt, Devices, Graph, Notion, Settings), their features and buttons, deep-link paths, sv CLI equivalents, keyboard shortcuts, and which actions only the UI can perform. Triggers: "how do I", "where can I", "what can the app do", "which page", "is there a button for", "can I do this from the CLI", "take me to", "what does this page do".
+description: >-
+  Use this skill when answering how to do something in the Skill Vault app or pointing the user to the right place — the catalog of pages (Dashboard, Skills, Sync, Adopt, Devices, Graph, Notion, Settings), their features and buttons, deep-link paths, sv CLI equivalents, keyboard shortcuts, and which actions only the UI can perform. Triggers: "how do I", "where can I", "what can the app do", "which page", "is there a button for", "can I do this from the CLI", "take me to", "what does this page do".
 ---
 
 # Navigating the app's features

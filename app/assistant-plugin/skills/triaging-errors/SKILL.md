@@ -1,6 +1,7 @@
 ---
 name: triaging-errors
-description: Use this skill when diagnosing failed vault operations — classifying recent errors from adopt, push, pull, update, or Notion jobs, clustering repeated failures into root causes, and prescribing the exact tool call that fixes each one. Triggers: "what failed", "why did this fail", "fix my errors", "recent errors", "diagnose", "triage", a red failure toast, a failure chip in the session context, or a "Recent failed operations" list in the system context.
+description: >-
+  Use this skill when diagnosing failed vault operations — classifying recent errors from adopt, push, pull, update, or Notion jobs, clustering repeated failures into root causes, and prescribing the exact tool call that fixes each one. Triggers: "what failed", "why did this fail", "fix my errors", "recent errors", "diagnose", "triage", a red failure toast, a failure chip in the session context, or a "Recent failed operations" list in the system context.
 ---
 
 # Triaging failed operations

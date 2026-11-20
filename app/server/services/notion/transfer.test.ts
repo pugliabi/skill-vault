@@ -46,6 +46,25 @@ test("packSkill produces a tar.gz rooted at name/ that round-trips through extra
   }
 });
 
+test("packSkill quotes frontmatter values Notion's YAML check rejects, in the archive only", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sv-pack-src-"));
+  const vaultMd = '---\nname: demo\ndescription: Do things. Triggers: "go"\n---\nbody\n';
+  fs.writeFileSync(path.join(dir, "SKILL.md"), vaultMd);
+  const { bytes } = await packSkill(dir, "demo");
+  const fakeFetch = (async () => new Response(new Uint8Array(bytes))) as unknown as typeof fetch;
+  const out = await downloadAndExtract("https://x.test/demo.tar.gz", fakeFetch);
+  try {
+    assert.equal(
+      fs.readFileSync(path.join(out.skillRoot, "SKILL.md"), "utf8"),
+      '---\nname: demo\ndescription: "Do things. Triggers: \\"go\\""\n---\nbody\n',
+    );
+    assert.equal(fs.readFileSync(path.join(dir, "SKILL.md"), "utf8"), vaultMd, "the vault copy is untouched");
+  } finally {
+    out.cleanup();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("crc32Base64 matches the known CRC32 of Buffer.from('hello')", () => {
   assert.equal(crc32Base64(Buffer.from("hello")), "NhCmhg==");
 });

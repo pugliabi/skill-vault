@@ -4,6 +4,23 @@ All notable changes to the Skill Vault App are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com); versions use semver
 (the app package is `0.x` — minor bumps carry user-facing feature batches).
 
+## [0.3.1] - 2026-11-20
+
+Pushing to Notion no longer fails with "SKILL.md has invalid YAML frontmatter" for skills whose description has a colon in it, such as `Triggers: "…"`. That includes the assistant skills the app installs.
+
+### Fixed
+- Notion upload (`packSkill`) refused with 400 `validation_error` "SKILL.md has invalid YAML frontmatter"
+  when a frontmatter value was a plain scalar strict YAML can't read (`: ` inside, a trailing `:`, or a
+  reserved first character). Claude Code reads those lines leniently. The uploaded copy now goes
+  through `quoteInvalidFrontmatter` (`notion/patch.ts`), which writes such values as double-quoted
+  strings of the same text; valid values (quoted, block, flow, nested, booleans, numbers) and the vault
+  file are untouched.
+- Eight bundled assistant skills (`assistant-plugin/skills/*`) had such descriptions
+  (`... Triggers: "..."`); they are now `>-` block scalars. Installed copies show an update from
+  their `dir` origin. A test checks every shipped `SKILL.md`.
+- `GET /api/notion/plan/diff` for a row that left the plan (a skill just pushed or pulled) now says so
+  instead of "row not found".
+
 ## [0.3.0] - 2026-11-20
 
 Picking your Notion Skills database works again: Notion removed a tool the app used to find it, so new installs couldn't choose one. Settings → App now has **Check for updates**. The setup guide gains an **Agents** step that adds the `skill-vault` skill and connects Claude Desktop, and the Claude assistant now keeps to its documented limits.

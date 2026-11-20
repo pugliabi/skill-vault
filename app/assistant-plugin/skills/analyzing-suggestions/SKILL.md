@@ -1,6 +1,7 @@
 ---
 name: analyzing-suggestions
-description: Use this skill when interpreting the app's proactive suggestion cards — from the get_suggestions tool, an AI-briefing message with embedded cards, or a suggestion chip in the session context — understanding card kinds, severity tiers, counts, fingerprints and dismissals, and turning the cards into a prioritized briefing or an action plan. Triggers: "give me a briefing", "what needs attention", "prioritize", "what matters most", "For you", "suggestions", "what should I do first", "make a plan for my vault".
+description: >-
+  Use this skill when interpreting the app's proactive suggestion cards — from the get_suggestions tool, an AI-briefing message with embedded cards, or a suggestion chip in the session context — understanding card kinds, severity tiers, counts, fingerprints and dismissals, and turning the cards into a prioritized briefing or an action plan. Triggers: "give me a briefing", "what needs attention", "prioritize", "what matters most", "For you", "suggestions", "what should I do first", "make a plan for my vault".
 ---
 
 # Reading and acting on suggestion cards

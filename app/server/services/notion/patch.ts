@@ -134,6 +134,50 @@ function removeEntry(fm: string[], key: string): string[] {
 
 // ── Public API ──────────────────────────────────────────────────
 
+/**
+ * A plain (unquoted) value strict YAML can't read: ": " or a trailing ":"
+ * inside it, or a reserved first character. Claude Code reads such a line
+ * as the text after "key:"; Notion's import refuses the whole file
+ * ("SKILL.md has invalid YAML frontmatter").
+ */
+const INVALID_PLAIN_FIRST = /:\s|:$|^[@`%,\]}]|^[-?:](\s|$)/;
+/** The same for a continuation line of a wrapped plain value. */
+const INVALID_PLAIN_CONT = /:\s|:$/;
+
+/**
+ * SKILL.md with each top-level plain value that strict YAML can't read
+ * written as a double-quoted string of the same text (a wrapped value is
+ * joined with spaces, as YAML folds it). Values YAML reads already —
+ * quoted, block, flow, nested, true/false, numbers, comments — are left
+ * alone, and so is everything after the frontmatter. Returns the text
+ * unchanged when nothing needs quoting.
+ */
+export function quoteInvalidFrontmatter(skillMd: string): string {
+  const d = parseDoc(skillMd);
+  if (!d.fm) return skillMd;
+  const fm = d.fm;
+  const out: string[] = [];
+  let changed = false;
+  for (let i = 0; i < fm.length; ) {
+    const m = KEY_RE.exec(fm[i]);
+    const raw = m?.[2].trim() ?? "";
+    if (m && raw && !/^["'|>[{&*!#]/.test(raw)) {
+      let end = i + 1;
+      while (end < fm.length && fm[end].trim() !== "" && /^\s/.test(fm[end])) end++;
+      const cont = fm.slice(i + 1, end).map((l) => l.trim());
+      if (INVALID_PLAIN_FIRST.test(raw) || cont.some((l) => INVALID_PLAIN_CONT.test(l))) {
+        out.push(`${m[1]}: ${JSON.stringify([raw, ...cont].join(" "))}`);
+        changed = true;
+        i = end;
+        continue;
+      }
+    }
+    out.push(fm[i]);
+    i++;
+  }
+  return changed ? renderDoc({ ...d, fm: out }) : skillMd;
+}
+
 /** Remove the `notion_page_id` frontmatter key; returns the text unchanged when absent. */
 export function stripNotionPageId(skillMd: string): string {
   const d = parseDoc(skillMd);

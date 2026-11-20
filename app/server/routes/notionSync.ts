@@ -184,7 +184,8 @@ export function mountSyncRoutes(router: Router, ctx: SyncRouteCtx): void {
       throw err;
     }
     if (!row) {
-      res.status(404).json({ error: "row not found — reload the plan" });
+      // Rows are keyed by state, so a skill just pushed or pulled leaves the plan.
+      res.status(404).json({ error: "This skill isn't in the plan any more (it may have just been pushed or pulled) — reload the plan" });
       return;
     }
     const vaultFiles = row.skill ? readSkillFiles(skillDir(vp, row.skill)) : new Map<string, Buffer>();

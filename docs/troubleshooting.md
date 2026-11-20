@@ -204,6 +204,14 @@ Or set the ANTHROPIC_API_KEY environment variable.
 
 **Solution**: update the app (**Update & restart**, or pull `main`). The current version finds the database with Notion's regular search and keeps only databases with the Skills columns (**Skill name**, **Description**, **Files**).
 
+### Problem: Pushing to Notion fails with "SKILL.md has invalid YAML frontmatter"
+
+**Symptoms**: a push says it created a Notion page "but the upload failed", with `validation_error` and "SKILL.md has invalid YAML frontmatter". The page is left empty.
+
+**Cause**: Notion reads the frontmatter (the block between the `---` lines at the top of `SKILL.md`) as strict YAML. A value written without quotes can't contain a colon followed by a space, so `description: Use it. Triggers: "go"` is refused, even though Claude Code reads it fine. Versions before 0.3.1 sent the file as it was, and eight of the app's own assistant skills were written this way.
+
+**Solution**: update the app, then push again. The empty page is reused while it keeps the skill's name. The copy sent to Notion now quotes such values, and your vault file stays as it is. To fix the file itself, put the value in double quotes or write it as a block (`description: >-` with the text indented on the next line).
+
 ### Problem: Pushing to Notion fails with "returned no archive"
 
 **Symptoms**: pushing (or pulling) a skill that is only a `SKILL.md` fails with `download-skill returned no archive for <page id>`; such skills may also sit in "changed in vault" forever.

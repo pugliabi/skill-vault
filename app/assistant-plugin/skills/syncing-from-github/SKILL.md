@@ -1,6 +1,7 @@
 ---
 name: syncing-from-github
-description: Use this skill when syncing vault skills with their GitHub or local-repo sources — adopting a repo's skills with durable origins, running a bulk or single update check, applying safe updates, repairing broken sources, and handling conflicts or local edits. Triggers: "update my skills", "check for updates", "update everything", "sync from GitHub", "adopt this repo", "apply the updates", "bulk update pass", "re-check", and any follow-up to a check_updates result.
+description: >-
+  Use this skill when syncing vault skills with their GitHub or local-repo sources — adopting a repo's skills with durable origins, running a bulk or single update check, applying safe updates, repairing broken sources, and handling conflicts or local edits. Triggers: "update my skills", "check for updates", "update everything", "sync from GitHub", "adopt this repo", "apply the updates", "bulk update pass", "re-check", and any follow-up to a check_updates result.
 ---
 
 # Syncing skills with their sources

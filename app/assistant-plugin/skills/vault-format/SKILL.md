@@ -1,6 +1,7 @@
 ---
 name: vault-format
-description: Use this skill when reading or interpreting the Skill Vault's on-disk contract — skills.json manifest entries, the structured origin block (git/dir/provider), content hashes and three-way update semantics, update statuses such as update_available, conflict, local_changed, upstream_missing, source_missing or no_origin, SKILL.md frontmatter conventions, or the staging and history layout. Triggers: "what does conflict mean", "manifest entry", "origin block", "skills.json", "why local_changed", "hash mismatch", "gone upstream", "what's inside the vault folder".
+description: >-
+  Use this skill when reading or interpreting the Skill Vault's on-disk contract — skills.json manifest entries, the structured origin block (git/dir/provider), content hashes and three-way update semantics, update statuses such as update_available, conflict, local_changed, upstream_missing, source_missing or no_origin, SKILL.md frontmatter conventions, or the staging and history layout. Triggers: "what does conflict mean", "manifest entry", "origin block", "skills.json", "why local_changed", "hash mismatch", "gone upstream", "what's inside the vault folder".
 ---
 
 # The vault's on-disk contract

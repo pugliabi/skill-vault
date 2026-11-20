@@ -1,6 +1,7 @@
 ---
 name: connecting-notion
-description: Use this skill when working with Notion sync for the vault — checking the connection, interpreting per-skill link states (linked, legacy, unlinked, vault-only) and drift statuses, previewing or executing push and pull plans, diagnosing conflicts, busy jobs, guard errors, 401s, or vanished pages, and knowing what must be handed back to the user. Triggers: "push to Notion", "pull from Notion", "Notion status", "Notion conflict", "page out of date", "sync with Notion", "reconnect Notion", "legacy page", "unlink", "changed in Notion".
+description: >-
+  Use this skill when working with Notion sync for the vault — checking the connection, interpreting per-skill link states (linked, legacy, unlinked, vault-only) and drift statuses, previewing or executing push and pull plans, diagnosing conflicts, busy jobs, guard errors, 401s, or vanished pages, and knowing what must be handed back to the user. Triggers: "push to Notion", "pull from Notion", "Notion status", "Notion conflict", "page out of date", "sync with Notion", "reconnect Notion", "legacy page", "unlink", "changed in Notion".
 ---
 
 # Notion sync for the vault
