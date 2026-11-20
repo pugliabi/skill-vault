@@ -1,29 +1,52 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  parseParentDataSource, parseSchemaProperties, rowFromSql, pageIdFromUrl, NotionApi,
+  isSkillsSchema, parseDataSourceIds, parseDataSourceName, parseSchemaProperties, rowFromSql, pageIdFromUrl, NotionApi,
 } from "./api.ts";
 
-const PAGE_TEXT = `<page url="https://app.notion.com/p/aaaaaaaabbbbccccddddeeeeeeeeeeee">
-<ancestor-path>
-<parent-data-source url="collection://11111111-2222-3333-4444-555555555555" name="Skills"/>
-</ancestor-path>
-</page>`;
+const SKILLS_DS = "11111111-2222-3333-4444-555555555555";
+const TEAM_DS = "66666666-7777-8888-9999-000000000000";
+const OTHER_DS = "aaaaaaaa-0000-0000-0000-bbbbbbbbbbbb";
+const SKILLS_DB = "cccccccc-0000-0000-0000-dddddddddddd";
 
-const DS_TEXT = `<data-source url="{{collection://11111111-2222-3333-4444-555555555555}}">
+/** A data source as notion-fetch returns it (state JSON inside <data-source-state>). */
+const dsText = (id: string, name: string, schema: Record<string, { type: string }>) =>
+  `<data-source url="{{collection://${id}}}">
+The title of this Data Source is: ${name}
 <data-source-state>
-{"name":"Skills","schema":{"Skill name":{"name":"Skill name","type":"title"},"Last edited":{"name":"Last edited","type":"last_edited_time"},"Files":{"name":"Files","type":"file"}}}
+${JSON.stringify({ name, schema, url: `collection://${id}` })}
 </data-source-state>
 </data-source>`;
 
-test("parses parent data source and schema", () => {
-  assert.deepEqual(parseParentDataSource(PAGE_TEXT), {
-    url: "collection://11111111-2222-3333-4444-555555555555",
-    id: "11111111-2222-3333-4444-555555555555",
-    name: "Skills",
-  });
+const SKILLS_SCHEMA = {
+  "Skill name": { type: "title" },
+  Description: { type: "text" },
+  Files: { type: "file" },
+  "Last edited": { type: "last_edited_time" },
+};
+const DS_TEXT = dsText(SKILLS_DS, "Skills", SKILLS_SCHEMA);
+
+/** A database as notion-fetch returns it: its data sources in <data-source url="{{collection://…}}"> tags. */
+const DB_TEXT = `<database url="{{https://app.notion.com/p/ccccccccdddddddd0000000000000000}}">
+The title of this Database is: Skills
+<data-sources>
+${DS_TEXT}
+</data-sources>
+</database>`;
+
+test("parses schema, data source name, and a database's data source ids", () => {
   assert.equal(parseSchemaProperties(DS_TEXT)["Last edited"].type, "last_edited_time");
-  assert.equal(parseParentDataSource("<page/>"), null);
+  assert.equal(parseDataSourceName(DS_TEXT), "Skills");
+  assert.equal(parseDataSourceName("<page/>"), null);
+  assert.deepEqual(parseDataSourceIds(DB_TEXT), [SKILLS_DS]);
+  assert.deepEqual(parseDataSourceIds(`<parent-data-source url="collection://${SKILLS_DS}" name="Skills"/>`), []);
+});
+
+test("a Skills schema has Skill name (title), Description (text) and Files (file)", () => {
+  assert.equal(isSkillsSchema(SKILLS_SCHEMA), true);
+  assert.equal(isSkillsSchema({ Name: { type: "title" }, Files: { type: "file" } }), false);
+  assert.equal(isSkillsSchema({ ...SKILLS_SCHEMA, Files: { type: "url" } }), false);
+  assert.equal(isSkillsSchema({}), false);
 });
 
 test("page ids and SQL rows", () => {
@@ -140,15 +163,59 @@ test("listRows skips rows without a usable url", async () => {
   }
 });
 
-test("detects distinct Skills data sources from search results", async () => {
-  const api = new NotionApi(async (name) => {
-    if (name === "notion-search-skills") return { results: [{ name: "a", url: "u1" }, { name: "b", url: "u2" }] };
-    if (name === "notion-fetch") return { text: PAGE_TEXT };
-    throw new Error(name);
+test("detects Skills data sources from notion-search: databases and skill pages' parents, skills-shaped only", async () => {
+  const searches: Array<Record<string, unknown>> = [];
+  const fetched: string[] = [];
+  const api = new NotionApi(async (name, args) => {
+    if (name === "notion-search") {
+      searches.push(args);
+      return {
+        results: [
+          { id: SKILLS_DB, title: "Skills", url: "https://app.notion.com/p/x?pvs=204", type: "database" },
+          { id: "p1", title: "skill-creator", type: "page", parent_data_source_url: `collection://${SKILLS_DS}` },
+          { id: "p2", title: "Skills for Claude!", type: "page", parent_data_source_url: `collection://${OTHER_DS}` },
+          { id: "p3", title: "Team skill", type: "page", parent_data_source_url: `collection://${TEAM_DS}` },
+          { id: "p4", title: "Loose page about skills", type: "page" },
+        ],
+      };
+    }
+    if (name === "notion-fetch") {
+      const id = String(args.id);
+      fetched.push(id);
+      if (id === SKILLS_DB) return { text: DB_TEXT };
+      if (id === `collection://${SKILLS_DS}`) return { text: DS_TEXT };
+      if (id === `collection://${TEAM_DS}`) return { text: dsText(TEAM_DS, "Team skills", SKILLS_SCHEMA) };
+      if (id === `collection://${OTHER_DS}`) {
+        return { text: dsText(OTHER_DS, "Claude and DEV", { Name: { type: "title" }, URL: { type: "url" } }) };
+      }
+    }
+    throw new Error(`unexpected tool call ${name} ${JSON.stringify(args)}`);
   });
   assert.deepEqual(await api.detectSkillsDataSources(), [
-    { id: "11111111-2222-3333-4444-555555555555", name: "Skills" },
+    { id: SKILLS_DS, name: "Skills" },
+    { id: TEAM_DS, name: "Team skills" },
   ]);
+  assert.equal(searches.length, 1);
+  assert.ok(String(searches[0].query).trim(), "search needs a non-empty query");
+  // Each candidate data source is checked once, despite appearing twice (database + page parent).
+  assert.equal(fetched.filter((f) => f === `collection://${SKILLS_DS}`).length, 1);
+});
+
+test("detectSkillsDataSources finds an empty Skills database (no skill pages yet)", async () => {
+  const api = new NotionApi(async (name, args) => {
+    if (name === "notion-search") return { results: [{ id: SKILLS_DB, title: "Skills", type: "database" }] };
+    if (name === "notion-fetch" && args.id === SKILLS_DB) return { text: DB_TEXT };
+    if (name === "notion-fetch" && args.id === `collection://${SKILLS_DS}`) return { text: DS_TEXT };
+    throw new Error(`unexpected tool call ${name}`);
+  });
+  assert.deepEqual(await api.detectSkillsDataSources(), [{ id: SKILLS_DS, name: "Skills" }]);
+});
+
+test("detectSkillsDataSources returns none when search finds nothing, and throws on a malformed result", async () => {
+  const empty = new NotionApi(async () => ({ results: [] }));
+  assert.deepEqual(await empty.detectSkillsDataSources(), []);
+  const malformed = new NotionApi(async () => ({ text: "something else" }));
+  await assert.rejects(malformed.detectSkillsDataSources(), /notion-search returned no results array/);
 });
 
 test("downloadSkill and addLastEditedProperty call the right tools", async () => {

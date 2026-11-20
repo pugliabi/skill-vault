@@ -8,7 +8,7 @@ import { clearNotionAuth, readNotionAuth, writeNotionAuth } from "./store.ts";
 export const NOTION_MCP_URL = "https://mcp.notion.com/mcp";
 export const REQUIRED_TOOLS = [
   "notion-fetch",
-  "notion-search-skills",
+  "notion-search",
   "notion-query-data-sources",
   "notion-download-skill",
   "notion-update-data-source",

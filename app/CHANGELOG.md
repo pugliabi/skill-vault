@@ -22,6 +22,12 @@ follows [Keep a Changelog](https://keepachangelog.com); versions use semver
   install prompt says why this one skill is a zip.
 
 ### Fixed
+- `GET /api/notion/data-sources` failed with MCP error -32602 "Tool notion-search-skills not found":
+  Notion withdrew that tool. `NotionApi.detectSkillsDataSources` now calls `notion-search`
+  ("Skills"), takes the data sources of database results (up to 5) and the `parent_data_source_url`
+  of page results, then fetches up to 10 candidates and keeps those whose schema has `Skill name`
+  (title), `Description` (text) and `Files` (file). `REQUIRED_TOOLS` lists `notion-search` instead.
+  `searchSkills` and `parseParentDataSource` are gone.
 - Claude assistant limits now match the docs. `--permission-mode dontAsk` (a
   `-p` run could start in auto mode), `Edit(path)` rules for the vault and repos
   folder instead of bare `Edit`/`Write`, `--disallowedTools PowerShell,Monitor`,

@@ -196,6 +196,14 @@ Or set the ANTHROPIC_API_KEY environment variable.
 
 **Solution**: for certificate errors, allow `mcp.notion.com` through the HTTPS inspection, or start the server with Node's `--use-system-ca` flag (Node 22.15+) so it trusts the Windows certificate store. For lookups and timeouts, check the connection or proxy settings, then try **Connect Notion** again.
 
+### Problem: "Couldn't look up your Notion Skills databases: … Tool notion-search-skills not found"
+
+**Symptoms**: Notion connects fine, but Settings → Notion (or the setup guide's Notion step) can't list a Skills database and shows this error. Disconnecting and connecting again doesn't help.
+
+**Cause**: Notion withdrew the `notion-search-skills` tool from its MCP server, and older versions of the app used it to find the Skills database. It affects every workspace, but only installs that still have to pick a database: an install that already chose one keeps syncing.
+
+**Solution**: update the app (**Update & restart**, or pull `main`). The current version finds the database with Notion's regular search and keeps only databases with the Skills columns (**Skill name**, **Description**, **Files**).
+
 ### Problem: Pushing to Notion fails with "returned no archive"
 
 **Symptoms**: pushing (or pulling) a skill that is only a `SKILL.md` fails with `download-skill returned no archive for <page id>`; such skills may also sit in "changed in vault" forever.

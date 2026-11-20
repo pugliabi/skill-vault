@@ -17,6 +17,10 @@ semver; the project is pre-1.0, so minor versions carry feature batches.
   the vault, then out to your tools, instead of coming back as a zip to upload.
 
 ### Fixed
+- **Picking a Notion Skills database works again.** Notion removed the `notion-search-skills` tool the
+  app used to find it, so Settings → Notion and the setup guide failed with "Tool notion-search-skills
+  not found" on any install that hadn't chosen a database yet. The app now uses Notion's regular
+  search and lists only databases with the Skills columns (Skill name, Description, Files).
 - **The Claude assistant now keeps to its documented limits.** Its file edits stay in the vault and repos
   folders, and its shell runs plain `git` for history and clones and nothing else. Before, it could write
   anywhere and run read-only commands such as `hostname`. It can no longer `git push`, `commit` or

@@ -25,20 +25,46 @@ export function pageIdFromUrl(url: string): string {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
-export function parseParentDataSource(text: string): { url: string; id: string; name: string } | null {
-  const m = /<parent-data-source url="(collection:\/\/([0-9a-f-]+))" name="([^"]*)"\s*\/>/i.exec(text);
-  return m ? { url: m[1], id: m[2], name: m[3] } : null;
+/** The JSON inside notion-fetch's first <data-source-state> tag, or null. */
+function dataSourceState(text: string): { name?: unknown; schema?: unknown } | null {
+  const m = /<data-source-state>\s*([\s\S]*?)\s*<\/data-source-state>/.exec(text);
+  if (!m) return null;
+  try {
+    return JSON.parse(m[1]);
+  } catch {
+    return null;
+  }
 }
 
 export function parseSchemaProperties(text: string): Record<string, { type: string }> {
-  const m = /<data-source-state>\s*([\s\S]*?)\s*<\/data-source-state>/.exec(text);
-  if (!m) return {};
-  try {
-    const state = JSON.parse(m[1]);
-    return (state?.schema ?? {}) as Record<string, { type: string }>;
-  } catch {
-    return {};
-  }
+  return (dataSourceState(text)?.schema ?? {}) as Record<string, { type: string }>;
+}
+
+export function parseDataSourceName(text: string): string | null {
+  const name = dataSourceState(text)?.name;
+  return typeof name === "string" && name ? name : null;
+}
+
+/** The data source ids a fetched database lists, from its <data-source url="{{collection://…}}"> tags. */
+export function parseDataSourceIds(text: string): string[] {
+  const ids = [...text.matchAll(/<data-source url="\{*collection:\/\/([0-9a-f-]{36})\}*"/gi)].map((m) => m[1].toLowerCase());
+  return [...new Set(ids)];
+}
+
+/**
+ * The columns a Notion Skills database has and this app reads: the ones
+ * notion-upload-skill fills (title, Description, Files). A database without
+ * them can't hold skills.
+ */
+const SKILLS_COLUMNS: Record<string, string> = { "Skill name": "title", Description: "text", Files: "file" };
+
+export function isSkillsSchema(schema: Record<string, { type: string }>): boolean {
+  return Object.entries(SKILLS_COLUMNS).every(([name, type]) => schema[name]?.type === type);
+}
+
+function dataSourceIdFromUrl(url: unknown): string | null {
+  const m = typeof url === "string" ? /^collection:\/\/([0-9a-f-]{36})$/i.exec(url) : null;
+  return m ? m[1].toLowerCase() : null;
 }
 
 function jsonArray(v: unknown): unknown[] {
@@ -68,16 +94,16 @@ const PAGE_SIZE = 100;
 /** Hard stop for listRows: 100 pages × 100 rows. */
 const MAX_PAGES = 100;
 
+/** detectSkillsDataSources: what it searches for, and how many databases / data sources it opens. */
+const SKILLS_SEARCH_QUERY = "Skills";
+const MAX_DATABASE_FETCHES = 5;
+const MAX_CANDIDATES = 10;
+
 /** notion-fetch marks a page with no content with this tag (verified against a real blank page). */
 export const BLANK_PAGE_MARKER = "<blank-page>";
 
 export class NotionApi {
   constructor(private readonly call: ToolCaller) {}
-
-  async searchSkills(): Promise<Array<{ name: string; url: string }>> {
-    const r = await this.call("notion-search-skills", {});
-    return (r?.results ?? []).map((x: any) => ({ name: String(x.name), url: String(x.url) }));
-  }
 
   async fetch(idOrUrl: string): Promise<{ text: string; page_last_edited_at?: string; title?: string }> {
     const r = await this.call("notion-fetch", { id: idOrUrl });
@@ -94,13 +120,31 @@ export class NotionApi {
     return (await this.fetch(pageId)).text.includes(BLANK_PAGE_MARKER);
   }
 
+  /**
+   * The workspace's Skills data sources, best search match first. Notion's
+   * MCP server has no "list skills databases" tool (notion-search-skills was
+   * withdrawn), so this searches for "Skills", takes the databases it finds
+   * and the parent data sources of the pages it finds, and keeps only those
+   * with a Skills schema.
+   */
   async detectSkillsDataSources(): Promise<Array<{ id: string; name: string }>> {
-    const found = new Map<string, string>();
-    for (const s of (await this.searchSkills()).slice(0, 10)) {
-      const parent = parseParentDataSource((await this.fetch(s.url)).text);
-      if (parent) found.set(parent.id, parent.name);
+    const r = await this.call("notion-search", { query: SKILLS_SEARCH_QUERY, page_size: 25, max_highlight_length: 0 });
+    if (!Array.isArray(r?.results)) throw new Error("notion-search returned no results array");
+    const candidates = new Set<string>();
+    let databases = 0;
+    for (const x of r.results as Array<Record<string, unknown>>) {
+      if (x?.type === "database" && typeof x.id === "string" && databases++ < MAX_DATABASE_FETCHES) {
+        for (const id of parseDataSourceIds((await this.fetch(x.id)).text)) candidates.add(id);
+      }
+      const parent = dataSourceIdFromUrl(x?.parent_data_source_url);
+      if (parent) candidates.add(parent);
     }
-    return [...found].map(([id, name]) => ({ id, name }));
+    const found: Array<{ id: string; name: string }> = [];
+    for (const id of [...candidates].slice(0, MAX_CANDIDATES)) {
+      const text = (await this.fetch(`collection://${id}`)).text;
+      if (isSkillsSchema(parseSchemaProperties(text))) found.push({ id, name: parseDataSourceName(text) ?? "Skills" });
+    }
+    return found;
   }
 
   async hasProperty(dataSourceId: string, name: string, type: string): Promise<boolean> {
